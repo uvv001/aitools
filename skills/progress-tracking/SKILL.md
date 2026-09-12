@@ -25,7 +25,8 @@ work, logging failures, sensitive output, or requested archival, read
 
 Use the user's chosen workspace ahead of the shell's startup directory.
 Otherwise use the active project root, or the current directory outside a project.
-Store progress and auxiliary working artifacts under `.ai` at that root.
+Store progress and auxiliary working artifacts under `.ai` at that root, each
+named to end in `_progress.md`.
 In Git repositories, confirm the record is ignored and untracked; follow
 [Git storage](edge-cases.md#git-storage) when exclusion or migration is needed.
 
