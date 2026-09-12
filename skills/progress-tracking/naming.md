@@ -2,16 +2,16 @@
 
 ## Infer a useful name
 
-Default to `yyyy-mm-dd[-ticket-or-pr]-short-work-description.md` under `.ai`.
-Use the creation date, a few hyphen-separated topic words, and a Jira ID or PR
-number only when it clearly belongs to the current work.
+Default to `yyyy-mm-dd[-ticket-or-pr]-short-work-description_progress.md` under
+`.ai`. Use the creation date, a few hyphen-separated topic words, and a Jira ID
+or PR number only when it clearly belongs to the current work.
 
 Use the current request and its explicit references first, then relevant branch
 or task metadata. Ignore identifiers from unrelated earlier work. Examples:
 
-- `2026-09-11-progress-tracking-skill.md`
-- `2026-09-11-PROJ-123-login-investigation.md`
-- `2026-09-11-pr-42-review.md`
+- `2026-09-11-progress-tracking-skill_progress.md`
+- `2026-09-11-PROJ-123-login-investigation_progress.md`
+- `2026-09-11-pr-42-review_progress.md`
 
 When one name is clearly supported, choose it automatically and notify the user
 of the final path. An explicit user filename takes precedence over inference.
@@ -23,8 +23,8 @@ host's structured question tool. Offer two or three concrete filename suggestion
 and an **Other** option accepting the user's final name as free text.
 
 Keep tracking available during this choice: create a uniquely named provisional
-`yyyy-mm-dd-session-<unique-token>.md` record using the normal summary and activity
-log layout, and identify it as provisional before asking.
+`yyyy-mm-dd-session-<unique-token>_progress.md` record using the normal summary
+and activity log layout, and identify it as provisional before asking.
 After selection, rename only that owned record, preserving its contents and
 checking the destination again. Notify the user of the resulting path.
 
@@ -35,8 +35,9 @@ overrides automatic initialization.
 ## Claim a distinct path
 
 Treat an existing record owned by another or an unknown session as a collision,
-including when the topic, date, branch, or ticket matches. Append a session token
-or another distinguishing suffix and retry; never take over the existing file.
+including when the topic, date, branch, or ticket matches. Insert a session token
+or another distinguishing element before `_progress` and retry; never take over
+the existing file.
 
 Use create-if-absent semantics when available so concurrent creators cannot both
 claim the same name. If the available writer cannot create exclusively, include
@@ -45,8 +46,8 @@ shared check-then-write name.
 
 Validate a user-supplied name as a filename inside `.ai`: reject directory
 traversal, path separators, reserved names, and invalid characters. Keep it short
-and use `.md`. Explain any necessary correction instead of silently substituting
-a different user-selected name.
+and correct it to end in `_progress.md`. Explain any necessary correction instead
+of silently substituting a different user-selected name.
 
 ## Keep the binding stable
 
