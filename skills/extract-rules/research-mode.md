@@ -1,50 +1,53 @@
-# Research mode — extracting rules across past sessions
+# Research mode — mining past sessions for rules
 
-Reach for this when the extraction target is session *history* rather than the
-live session. The shape: inventory → scan → fleet → aggregate. Keep the
-propose-then-persist gate from SKILL.md for anything the research later feeds.
+The target here is session history rather than the live session. The
+propose-then-persist gate still holds: research feeds step 2, it does not
+bypass it.
 
-## Inventory
+## Locate the transcripts
 
-Session history lives under `~/.copilot/session-state/<session-id>/`:
+Find where the host keeps session transcripts before planning the scan. Expect
+one directory or file per session holding newline-delimited event records, with
+the user's prompt text inside each user-message event, alongside whatever
+summaries and artifacts the host preserves. A summary index, where one exists,
+gives the storyline for a fraction of the tokens — read it first.
 
-- `events.jsonl` — one JSON event per line; user prompts are lines starting
-  `{"type":"user.message"` with the raw text at `data.content`. Lines run to
-  megabytes; grep narrowly, never read whole files.
-- `checkpoints/index.md` — compact storyline; read it first.
-- `files/` — session artifacts.
+Individual event lines run to megabytes, because tool output and injected
+context ride inside them. Grep with narrow patterns and head_limit; one full
+transcript read can swallow the context window.
 
-The local session store adds metadata (`sessions` table: cwd, summary, dates)
-and a partial FTS5 `search_index`; treat it as a lead generator, not full
-coverage. `/chronicle` (a built-in CLI command) is the user's interactive entry
-to the same data.
+Any search index the host exposes is a lead generator rather than coverage:
+treat its hits as pointers back into the transcripts.
 
 ## Scan
 
-Sessions are numerous and huge (hundreds of files, hundreds of MB). First pass
-is mechanical, not agentic: script a regex over user.message lines with
-extraction vocabulary (extract, distill, preserve, lessons, rules, guides,
-skill, subagent, AGENTS.md, copilot-instructions, "for review"), and record each
-hit with session id, timestamp, and the full verbatim prompt to a working file.
-Expect heavy noise from skill-context wrappers, system reminders, and code
-refactors; the verbatim prompts make classification cheap.
+Sessions are numerous and large, so the first pass is mechanical rather than
+agentic. Script a regex over user-message text carrying the vocabulary of the
+ask — extract, distill, preserve, lessons, rules, guides, skill, subagent,
+instruction-file names, "for review" — and record every hit with its session id,
+timestamp, and full verbatim prompt into a working file.
+
+Wrapper injections, system reminders, and code-level "extract this method" asks
+dominate the raw hits; the verbatim prompt text makes sorting them cheap.
 
 ## Fleet
 
-Delegate reading to background general-purpose subagents with **disjoint
-session scopes** and a strict report contract: verbatim prompts with
-timestamps, the assistant's proposal, the user's review decision, the resulting
-document and its format, and links (session id, event line, artifact path).
-Each agent writes its own `research-part-<scope>.md` into a working folder and
-returns only a compact summary. Explore agents are read-only: they cannot write
-part files, so their findings must be persisted by the caller.
+Delegate the reading to background subagents holding disjoint session scopes and
+a strict report contract: verbatim prompts with timestamps, the proposal that
+followed, the user's review decision, the document produced and its format, and a
+link back for every claim (session id, event position, artifact path). Each agent
+writes its own part file into the working folder and returns a compact summary.
 
-Keep for the coordinating agent: the scan, the aggregation, and the merge.
+Read-only agents cannot write part files, so persist their findings yourself when
+you dispatch one.
+
+Keep the scan, the aggregation, and the merge for the coordinating agent.
 
 ## Aggregate
 
-Merge part reports into one durable results document under ignored `.ai`
-storage (`yyyy-mm-dd-<topic>-research.md`): the verbatim prompt catalog grouped
-by pattern, the observed document formats, the review/persist workflows, and
-explicit source links. Working artifacts stay out of git; only the skill or
-rules the research feeds are committed.
+Merge the part files into one results document under the project's ignored
+working-notes directory, named `yyyy-mm-dd-<topic>-research.md` so parallel
+investigations never collide. It carries the verbatim prompt catalog grouped by
+pattern, the document formats observed, the review-and-persist workflows, and a
+source link for every finding. Working artifacts stay out of version control;
+the rules or skill the research feeds are what gets committed.
