@@ -1,9 +1,10 @@
 # Decomposition document format
 
-One markdown file at the project root, named for the feature
-(`<feature>-decomposition-plan.md`), beside the captures it cites. The
-section order below is deliberate: each section answers the questions the
-previous one raises.
+One markdown file at the project root, named for the feature and dated from
+the clock at creation (`yyyy-mm-dd-<feature>-decomposition-plan.md`), beside
+the captures it cites. The date keeps successive plans for one feature side
+by side in write order. The section order below is deliberate: each section
+answers the questions the previous one raises.
 
 ## Conventions
 
