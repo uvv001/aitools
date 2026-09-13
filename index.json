@@ -1,0 +1,103 @@
+{
+  "schemaVersion": "1",
+  "name": "aitools",
+  "description": "A library of skill, prompt, and agent definitions.",
+  "skills": [
+    {
+      "name": "cheatsheet",
+      "description": "Standardized guidelines and procedures for compiling, updating, and formatting technical cheatsheets and Obsidian reference notes. Use when the user requests a command cheatsheet, asks to document terminal tools, or wants to merge session findings into reference notes.",
+      "path": "skills/cheatsheet/SKILL.md",
+      "files": [
+        {
+          "path": "skills/cheatsheet/SKILL.md",
+          "sha256": "6df35c4f1d9fc83344e6125d5bb5d12be88734cd1f104f4c49094e7a1906fbfb"
+        }
+      ]
+    },
+    {
+      "name": "extract-rules",
+      "description": "Extract durable lessons from session work into rules. Use when asked to preserve lessons or update AGENTS.md from recent work, or to mine past sessions for rule candidates.",
+      "path": "skills/extract-rules/SKILL.md",
+      "files": [
+        {
+          "path": "skills/extract-rules/SKILL.md",
+          "sha256": "fa24b77e7cfee8aee06421e7af125be55af569e3619a62e15b216e73ac054694"
+        },
+        {
+          "path": "skills/extract-rules/research-mode.md",
+          "sha256": "066d731b608989b73f9bc8d12d4faca50c37ce88a0537464184a521f25196841"
+        }
+      ]
+    },
+    {
+      "name": "network-dhcp-dns-audit",
+      "description": "Audits local network DHCPv4 offers, ICMPv6 Router Advertisements, and dual-stack DNS resolution paths. Use when diagnosing rogue DHCP servers, DNS leaks, ad-blocking bypasses, or verifying authoritative DHCP/DNS migrations.",
+      "path": "skills/network-dhcp-dns-audit/SKILL.md",
+      "files": [
+        {
+          "path": "skills/network-dhcp-dns-audit/SKILL.md",
+          "sha256": "249716ea663cc2bee3c77d9af967871fbb01ac63984a78482d99ef5affc855bc"
+        }
+      ]
+    },
+    {
+      "name": "progress-tracking",
+      "description": "Progress tracking at the start of every primary session, before handling its first request, and on resumption. Initialize a record even for brief work.",
+      "path": "skills/progress-tracking/SKILL.md",
+      "files": [
+        {
+          "path": "skills/progress-tracking/SKILL.md",
+          "sha256": "4f7278a5e46f1660b57d7484f44730d7b41928d79af7449723237865e99685dd"
+        },
+        {
+          "path": "skills/progress-tracking/activation.md",
+          "sha256": "127a43b4fb6032c467141ce5fea3a682a5c104cbe0fd8c851dcfe6a06595d117"
+        },
+        {
+          "path": "skills/progress-tracking/edge-cases.md",
+          "sha256": "c9b32d28ec1e5ee24783b08d264ba161ac2c9c5f0c291b267e96677df7b1b9f7"
+        },
+        {
+          "path": "skills/progress-tracking/naming.md",
+          "sha256": "4f976eb5a5692bacb17aca917de28f4f54bff28466d91493f783f4f417a20969"
+        },
+        {
+          "path": "skills/progress-tracking/session-start.ps1",
+          "sha256": "554354c62e243d7fd8ba51af2e43cec3765004c98f310f016dc8c00ff51ca952"
+        }
+      ]
+    },
+    {
+      "name": "web-ui-visual-decomposition",
+      "description": "Decomposes a mockup or live UI into an approved component plan. Trigger when planning a screen or feature from a visual reference, or when an implementation specification needs its decomposition first.",
+      "path": "skills/web-ui-visual-decomposition/SKILL.md",
+      "files": [
+        {
+          "path": "skills/web-ui-visual-decomposition/SKILL.md",
+          "sha256": "b1fb44fabcd3ac1a413a2f3cac4791e9be2882c325d43d2326a85a0d9acfbf34"
+        },
+        {
+          "path": "skills/web-ui-visual-decomposition/decomposition-format.md",
+          "sha256": "cc32a5c73a83cdbbb69a1144cd3459cc4ff9671bebc971dcbbf1097ba83988f5"
+        },
+        {
+          "path": "skills/web-ui-visual-decomposition/inspector-brief.md",
+          "sha256": "9b90e909877fea22ffe008a1ff39157792581eb7622e80146ab65196e1811590"
+        }
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "name": "web-ui-inspector",
+      "description": "Measures one web-UI feature through Chrome DevTools and reports visual evidence. Trigger to research a feature's states on a live page, or to verify an implemented feature against a reference (URL or image). One feature per dispatch.",
+      "path": "agents/web-ui-inspector.md",
+      "files": [
+        {
+          "path": "agents/web-ui-inspector.md",
+          "sha256": "ae1cbab9ba660bf12ffafe251c6a2ddddd10cb436e880a6e38afb11f832ebf33"
+        }
+      ]
+    }
+  ]
+}

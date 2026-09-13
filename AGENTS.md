@@ -10,6 +10,13 @@ directory under `skills/`.
   files breaks whenever that sibling is absent — duplicate the few lines you
   need instead of linking.
 
+## Catalog index
+
+`index.json` (root, `skills/`, and `agents/`) is the generated discovery
+manifest — never edit it by hand. After adding, removing, or editing
+anything under `skills/` or `agents/`, run `node tools/build-index.mjs` and
+commit the updated manifests.
+
 ## Commits
 
 Subject line, 75 characters or fewer: `<category>: <entity> — <summary>`.

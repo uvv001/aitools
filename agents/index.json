@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1",
+  "agents": [
+    {
+      "name": "web-ui-inspector",
+      "description": "Measures one web-UI feature through Chrome DevTools and reports visual evidence. Trigger to research a feature's states on a live page, or to verify an implemented feature against a reference (URL or image). One feature per dispatch.",
+      "path": "web-ui-inspector.md",
+      "files": [
+        {
+          "path": "web-ui-inspector.md",
+          "sha256": "ae1cbab9ba660bf12ffafe251c6a2ddddd10cb436e880a6e38afb11f832ebf33"
+        }
+      ]
+    }
+  ]
+}
