@@ -12,13 +12,12 @@ previous one raises.
   content changes, the mark comes off until re-approved.
 - One term per concept across the whole document. When two terms collide,
   unify them and record the choice as a decision.
-- Describe elements with examples and available variants; value pinning
-  belongs to the specification stage.
 
 ## 1. Header
 
 Sources (live URL, capture files), scope in and out, a one-line purpose, the
-approval line.
+approval line. Items dropped mid-work stay listed as out of scope so the
+document keeps the boundary.
 
 ## 2. Research summary — verified against the reference
 

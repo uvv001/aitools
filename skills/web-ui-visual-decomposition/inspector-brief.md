@@ -3,7 +3,7 @@
 Dispatch template for observing one element. Use the `web-ui-inspector`
 agent when installed; otherwise hand a generic subagent this brief verbatim
 with the slots filled. This duplicates the agent contract on purpose — the
-skill must work with the agent absent; keep the two aligned.
+skill works with the agent absent.
 
 ## Dispatch slots
 
