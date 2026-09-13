@@ -47,9 +47,20 @@ Keep a short summary of the goal, current state, and next action. Add findings o
 decisions only when useful. Link proposals and deliverables instead of reproducing
 their contents.
 
+A `## Contributors` section immediately before the log lists one line per
+contributor, `<model> (<harness>, <role>): <contribution phrase>` — orchestrator
+first, each subagent added on its first report. Update a line only when that
+contributor's work materially expands.
+
+- kimi-k3 (copilot, orchestrator): record keeping, skill edits
+- gpt-5.6-luna (copilot, explore agent): auth flow trace
+
 The final section is always `## Activity log`, with exactly two columns:
-`Date/time` and `Description`. Each description is a short, single-line note;
-escape literal pipes so the table keeps two columns.
+`Date/time` and `Description`. Each description is a short, single-line note
+opening with `[model]`, the harness-reported identity of the model responsible
+for the logged work (`unknown` when unavailable); a subagent's reported work
+carries the subagent's model. Escape literal pipes so the table keeps two
+columns.
 
 Read the clock for new entries. New logs use full ISO 8601 timestamps with a UTC
 offset; existing logs retain their declared time convention. Record the actual
@@ -60,7 +71,8 @@ awaiting-task summary and then wait for direction. Naming uncertainty must not
 silently skip initialization; the naming guide defines the provisional path.
 
 **Ready when:** The file is saved and readable, its current summary is accurate,
-the user knows its location, and tracking is visible before the main work begins.
+the contributor list is open with the orchestrator, the user knows its location,
+and tracking is visible before the main work begins.
 
 ## 3. Keep the record live
 

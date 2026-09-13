@@ -18,7 +18,9 @@ record unless the user requests moving it.
 
 Keep one coordinating writer for a shared record. Give subagents the relevant
 workspace and ask them to return milestones, outcomes, and artifact locations.
-Record dispatch and report receipt separately, naming the actor in the description.
+Record dispatch and report receipt separately; the receipt entry's prefix names
+the reporting agent's model, and a first-time contributor joins the contributor
+list.
 Timestamp receipt as receipt; include a sourced completion time only when known.
 
 If the requested file is an unrelated document or has another active writer,
