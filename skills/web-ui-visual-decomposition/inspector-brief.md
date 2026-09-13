@@ -27,8 +27,8 @@ skill works with the agent absent.
    requirements, follow the reference and log the trade-off as a deviation
    carrying the contrast numbers.
 
-Done when every state carries measured values and a capture, or sits on the
-BLOCKED list with its cause.
+**Done when:** every state carries measured values and a capture, or sits on
+the BLOCKED list with its cause.
 
 ## Report
 
