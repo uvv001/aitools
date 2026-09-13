@@ -6,20 +6,19 @@ description: Progress tracking at the start of every primary session, before han
 # Progress tracking
 
 Initialize tracking before task work in every primary session, including brief
-requests. Prefer an extra working record to an unrecorded session. Continue across
-later turns until the user stops tracking or changes its scope.
+requests. Continue across later turns until the user stops tracking or changes
+its scope.
 
 Working notes belong in ignored `.ai` storage; requested code and reusable
-definitions remain in their normal versioned locations. Tracking follows the
-task's permissions and does not authorize unrelated changes.
+definitions remain in their normal versioned locations. Tracking stays within the
+task's permissions.
 
 **Setup:** When installing automatic startup or diagnosing a missing startup
-invocation, read [activation.md](activation.md). A discoverable description alone
-is not a lifecycle trigger.
+invocation, read [activation.md](activation.md).
 
-**Recovery:** For interrupted work, unclear record ownership, late history, parallel
-work, logging failures, sensitive output, or requested archival, read
-[edge-cases.md](edge-cases.md) before handling that case.
+**Recovery:** For interrupted work, unclear record ownership, parallel work, late
+invocation or uncertain timestamps, logging failures, sensitive or bulky output,
+or requested archival, read [edge-cases.md](edge-cases.md) before handling that case.
 
 ## 1. Select private storage and a record
 
@@ -67,8 +66,7 @@ offset; existing logs retain their declared time convention. Record the actual
 logging start, resumption, or task transition.
 
 Notify the user of the chosen path. If no task has been supplied, initialize an
-awaiting-task summary and then wait for direction. Naming uncertainty must not
-silently skip initialization; the naming guide defines the provisional path.
+awaiting-task summary and then wait for direction.
 
 **Ready when:** The file is saved and readable, its current summary is accurate,
 the contributor list is open with the orchestrator, the user knows its location,
@@ -79,15 +77,17 @@ and tracking is visible before the main work begins.
 Before a substantial attempt, record what is starting. When a meaningful result,
 decision, failure, retry, or wait becomes known, append what happened and the next
 action if needed. Include useful artifact links and distinguish observed results
-from reports or unverified claims.
+from reports or unverified claims. Log a subagent's reported work under its own
+model, adding that contributor on its first report.
 
-Group routine lookups into a work burst; record changes to the approach, task
+Batch routine lookups into a single entry; record changes to the approach, task
 state, or artifacts. Refresh the summary and relevant notes as understanding
 changes. Preserve the activity history; explain corrections in follow-up entries
 unless the user requests a rewrite.
 
 **At each work boundary:** Every substantial attempt since the previous checkpoint
-has an outcome or an explicit waiting/blocking note, and the summary reflects it.
+has an outcome or an explicit waiting/blocking note, every contributor that
+produced work is listed, and the summary reflects it.
 
 ## 4. Checkpoint and continue
 

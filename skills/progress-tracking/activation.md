@@ -6,8 +6,7 @@ that runs [session-start.ps1](session-start.ps1).
 
 The hook returns `additionalContext` directing the agent to invoke the skill
 before handling the first request, with the runtime session ID and startup/resume
-source. It does not launch another CLI, grant tool permissions, or write project files.
-The agent initializes the record when it begins processing a request.
+source. The agent initializes the record when it begins processing a request.
 
 Command hooks cover new and resumed sessions, including non-interactive operation.
 A prompt-type startup hook is not used because it skips resume and `-p` sessions.
