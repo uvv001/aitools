@@ -1,6 +1,6 @@
 ---
-name: web-ui-implementation-spec
-description: Compiles an approved plan into an implementation specification, per-component contracts with pinned values. Trigger when a plan or decomposition is approved and implementation has not started.
+name: web-ui-build-spec
+description: Compiles an approved plan into an implementation specification, per-component contracts with pinned values. Trigger when a plan or decomposition is approved and the specification that will govern the build does not exist yet.
 ---
 
 # Web UI implementation specification
@@ -20,7 +20,7 @@ Collect before writing; ask where any is missing.
 - **Reference** — the live URL, static captures, or both, that the plan
   observed. Pinning measures against it.
 - **Project conventions file** — the rules implementation must satisfy:
-  structure, testing, demo/showcase workflow, localization, review checklist.
+  structure, testing, showcase workflow, localization, review checklist.
 
 ## Protocol
 
@@ -87,6 +87,8 @@ Collect before writing; ask where any is missing.
 - **Shared components stay consumer-agnostic.** Feature knowledge — routes,
   data sources — lives on the feature's side of the contract; the section
   lists the consumption scenarios the component must serve unchanged.
-- **Authoring only.** This document is the deliverable; implementation runs
-  from it later, elsewhere. Browser access is for pinning values against the
-  reference, dispatched through the `web-ui-inspector` agent.
+- **Authoring only.** This document is the deliverable; the build runs from it
+  later, by other hands, as its own stage. A defect that stage reports comes
+  back here to be re-decided rather than improvised around. Browser access is
+  for pinning values against the reference, dispatched through the
+  `web-ui-inspector` agent.

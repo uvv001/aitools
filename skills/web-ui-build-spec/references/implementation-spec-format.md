@@ -45,13 +45,17 @@ the demand that makes it checkable:
 - **Unit-test** it: every state the section lists has a test, and the
   assertions cover the accessibility contract — roles, ARIA names and states
   — rather than implementation details.
-- **Demo** it: a page showing every state with self-contained mock data.
+- **Demo** it on the project's showcase surface: every state shown, with
+  self-contained mock data. Where the project has no showcase application,
+  §2 names the surface that stands in — a route in the consuming app, a
+  story, a harness — because every state needs somewhere a human can look at
+  it.
 - **Localize** library-owned strings per project convention; consumer content
   stays input-driven.
-- **Validate standalone**: build, test, run the demo, and compare every state
-  against the section's reference locations at the verification viewport. A
-  state whose reference cannot be found means the component is not done —
-  surface it rather than shipping an unverifiable visual.
+- **Validate standalone**: build, test, run the showcase surface, and compare
+  every state against the section's reference locations at the verification
+  viewport. A state whose reference cannot be found means the component is
+  not done — surface it rather than shipping an unverifiable visual.
 - **Adopt in consumers**: replace the structures the section lists and
   re-verify the affected screens before the step closes.
 - **Review** it against the project conventions file.
@@ -62,7 +66,8 @@ Then the hard rules governing every step:
   is reported.
 - Each concept keeps the one name this document gave it, and each named
   value set stays a closed union, extended only upon necessity.
-- Name the verification viewport; every visual comparison uses it.
+- Name the showcase surface and the verification viewport; every visual
+  comparison uses both.
 - Unrelated existing code stays untouched — and adopting a step's own change
   in every consumer is part of that step.
 
@@ -80,7 +85,8 @@ to validate each state against. Then:
   value verified against the reference, with measured values recorded where
   the reference defines them.
 - **Tests** — one per listed state, plus the accessibility contract.
-- **Demo page** — every state shown.
+- **Showcase** — where this component's states are shown, with every state
+  present.
 - **Consumer adoption** — exactly which existing structures this component
   replaces in this step.
 

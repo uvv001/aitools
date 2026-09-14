@@ -25,7 +25,7 @@ holding two components writes neither contract completely.
 
 1. Write the section into the part file in the shape the format prescribes:
    reference locations, API, rendering and accessibility, tokens, tests,
-   demo page, consumer adoption.
+   showcase, consumer adoption.
 2. Every state the section names carries the reference location that proves
    it and the value measured there. A state with neither goes on the
    UNVERIFIED list instead of into the section.
