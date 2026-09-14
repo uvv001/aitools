@@ -1,6 +1,6 @@
 ---
 name: web-ui-visual-decomposition
-description: Decomposes a mockup or live UI into an approved component plan. Trigger when planning a screen or feature from a visual reference, or when an implementation specification needs its decomposition first.
+description: Decomposes a mockup or live UI into an approved component plan. Trigger when planning a screen or feature from a visual reference, or when a specification needs its decomposition first.
 ---
 
 # Web UI visual decomposition
@@ -33,20 +33,26 @@ Collect before observing; ask where any is missing.
    dispatch is what keeps a state matrix complete. Drive the live reference to
    each state before measuring, and visit multiple occurrences of an element
    to widen the observed state range. Observation reveals elements the frame
-   missed: add them to the inventory and dispatch for them.
+   missed: add them to the inventory and dispatch for them. Inspectors are
+   read-only, so persisting each report to the working folder as it lands is
+   your job.
    **Ready when:** every element carries measured values and a per-state
    matrix, or a BLOCKED entry naming its cause.
-3. **Map.** For each element, search the codebase for composition fits and
-   record a verdict: reuse as-is, extend, rename, or extract-new. Where a new
-   shared component replaces an existing custom structure, name the adoption
-   targets. Propose better names, splits, or behavior changes when the
-   reference demands them.
+3. **Map.** Dispatch a second **fleet**, one mapper per element: search the
+   codebase for composition fits and record a verdict — reuse as-is, extend,
+   rename, or extract-new. Where a new shared component replaces an existing
+   custom structure, name the adoption targets. Propose better names, splits,
+   or behavior changes when the reference demands them. Each mapper writes
+   its element's evaluation to a numbered part file and returns the verdict
+   alone; you assemble the parts.
    **Ready when:** every element has a verdict backed by file-level evidence.
 4. **Decide.** Resolve open questions from the evidence; park the rest as
    explicit questions for the user.
    **Ready when:** every question is decided or parked — none left implicit.
 5. **Write** the document per
-   [decomposition-format.md](decomposition-format.md).
+   [decomposition-format.md](decomposition-format.md): assemble the mappers'
+   part files as the item-by-item evaluation, and write the surrounding
+   sections around them.
    **Ready when:** every section exists and every claim traces to an
    observation or a code path.
 6. **Gate.** Present the document, revise, and re-present until the user
@@ -56,6 +62,11 @@ Collect before observing; ask where any is missing.
 
 ## Guardrails
 
+- **Hold the index, not the findings.** Inspector reports and mapper
+  evaluations live in files; your context holds which element produced which
+  part and what its verdict was. Assemble by concatenating parts, and read
+  one back only when the write needs it. An orchestrator that accumulates
+  every report runs out of room before the plan is finished.
 - **Report variants; pin later.** Describe elements with examples and their
   available variants; value pinning belongs to the specification stage.
   Research-stage precision reads as commitment and invites rework.
