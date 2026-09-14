@@ -16,7 +16,7 @@ holding two components writes neither contract completely.
   closed value sets already in use.
 - **DEPENDENCIES** — the drafted API of every component this one consumes.
 - **FORMAT** — path to the component-section shape in
-  [implementation-spec-format.md](implementation-spec-format.md).
+  [specification-format.md](specification-format.md).
 - **CONVENTIONS FILE** — path only; the worker reads it.
 - **PART FILE** — the destination, numbered for its place in the order
   (`NN-<component>.md`), so assembly is concatenation.

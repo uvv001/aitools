@@ -1,6 +1,6 @@
 ---
 name: web-ui-visual-decomposition
-description: Decomposes a mockup or live UI into an approved component plan. Trigger when planning a screen or feature from a visual reference, or when an implementation specification needs its decomposition first.
+description: Decomposes a mockup or live UI into an approved component plan. Trigger when planning a screen or feature from a visual reference, or when a specification needs its decomposition first.
 ---
 
 # Web UI visual decomposition

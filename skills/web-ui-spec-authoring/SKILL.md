@@ -1,14 +1,14 @@
 ---
-name: web-ui-build-spec
-description: Compiles an approved plan into an implementation specification, per-component contracts with pinned values. Trigger when a plan or decomposition is approved and the specification that will govern the build does not exist yet.
+name: web-ui-spec-authoring
+description: Compiles an approved plan into a specification, per-component contracts with pinned values. Trigger when a plan or decomposition is approved and the specification that will govern the build does not exist yet.
 ---
 
-# Web UI implementation specification
+# Web UI specification authoring
 
-Turn an approved plan into an implementation specification: a document whose
-per-component sections each carry everything needed to build that component
-without re-reading the research. Where the plan reported variants, the
-specification pins values.
+Turn an approved plan into a specification: a document whose per-component
+sections each carry everything needed to build that component without
+re-reading the research. Where the plan reported variants, the specification
+pins values.
 
 ## Inputs
 
@@ -38,7 +38,7 @@ Collect before writing; ask where any is missing.
    **Ready when:** every state of every component maps to a reference
    location and a pinned value, or carries an explicit no-reference flag.
 3. **Frame.** Write §1 and §2 yourself, per
-   [references/implementation-spec-format.md](references/implementation-spec-format.md).
+   [references/specification-format.md](references/specification-format.md).
    These fix what the fleet cannot negotiate: scope, fixed decisions, the
    implementation order, and the vocabulary ledger — one term per concept,
    with the value sets already in use.

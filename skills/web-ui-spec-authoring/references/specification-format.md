@@ -1,10 +1,9 @@
-# Implementation specification format
+# Specification format
 
 One markdown file in `docs/` at the project root, named for the feature and
-dated from the clock at creation
-(`yyyy-mm-dd-<feature>-implementation-specification.md`), beside the approved
-plan it implements. The section order is deliberate: the opening sections fix
-the contract's frame before any component is specified.
+dated from the clock at creation (`yyyy-mm-dd-<feature>-specification.md`),
+beside the approved plan it implements. The section order is deliberate: the
+opening sections fix the contract's frame before any component is specified.
 
 Every section below describes content to write. The specification is
 addressed to the implementing agent; this file is addressed to you, writing
