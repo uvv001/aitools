@@ -1,7 +1,11 @@
 # Report format
 
-The report is a markdown document, named by the user or defaulted to
-`<change>_review.md` in the reviewed repository. Texts are clean and strict:
+The report is a markdown document stored in the `docs` folder at the root of
+the reviewed repository and tracked in git, so branch updates and rewrites
+cannot lose it. Name it `yyyy-mm-dd_hhmm_<name>_review.md` from the current
+clock, where `<name>` derives from the review context — PR number, PR
+author, feature name — e.g. `2026-09-16_1105_pr157-tenant-registry_review.md`.
+An explicit user-supplied name takes precedence. Texts are clean and strict:
 a finding says what is wrong, where, and what to do — nothing more.
 
 ## Dashboard
