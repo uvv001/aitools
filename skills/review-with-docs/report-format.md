@@ -5,12 +5,14 @@ the reviewed repository and tracked in git, so branch updates and rewrites
 cannot lose it. Name it `yyyy-mm-dd_hhmm_<name>_review.md` from the current
 clock, where `<name>` derives from the review context — PR number, PR
 author, feature name — e.g. `2026-09-16_1105_pr157-tenant-registry_review.md`.
-An explicit user-supplied name takes precedence. Texts are clean and strict:
-a finding says what is wrong, where, and what to do — nothing more.
+An explicit user-supplied name takes precedence. Commit it after the initial
+write and after each triage batch. Texts are clean and strict: a finding says
+what is wrong, where, and what to do — nothing more.
 
 ## Dashboard
 
-Top of the document. Two separate counts:
+Top of the document. Two separate counts, each derived by reading the
+findings sections rather than from memory of the review:
 
 - **Fix progress** — what the PR author has addressed across revisions.
 - **Triage state** — the user's verdicts over all findings.
@@ -55,6 +57,7 @@ Round 1 IDs are `F1`, `F2`, …; re-review round *n* uses `R<n>-1`, `R<n>-2`,
 | Marker | State |
 |---|---|
 | ⏳ | Awaiting triage |
+| ❓ | Unverified — evidence attempted and unsettled; the user's call |
 | ✅ | Approved (published to PR) |
 | ❌ | Discarded — moved to the resolved section with the disposition rationale |
 | 📌 | Deferred — valid, consciously left as-is |
@@ -62,6 +65,12 @@ Round 1 IDs are `F1`, `F2`, …; re-review round *n* uses `R<n>-1`, `R<n>-2`,
 
 Severity icons: 🔴 high, 🟡 medium, ⚪ low. Severity changes keep the ID and
 are logged under Updates.
+
+### User-originated findings
+
+Comments the user published to the PR directly take IDs in the current round
+alongside the agent's own, carrying the same evidence and state. The user
+supplies them as text or screenshots; transcribe the substance.
 
 ## Rounds
 
