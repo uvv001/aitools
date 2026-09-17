@@ -11,10 +11,11 @@ states, and round history all live there; the conversation only steers it.
 ## Protocol
 
 1. **Scope.** Take the target from the user or confirm it explicitly — last
-   commit, a named commit or range, a PR diff, or the working tree. Pin the
-   reviewed revision by full SHA: the report cites it and later rounds diff
-   against it.
-   **Ready when:** the reviewed revision and its base are pinned.
+   commit, a named commit or range, a PR diff, or the working tree. Pin what
+   was reviewed: the full SHA, or for an uncommitted working tree, the base
+   SHA plus a note that the tree was dirty. The report cites the pinned
+   state and later rounds diff against it.
+   **Ready when:** the reviewed state and its base are pinned.
 2. **Instructions.** Enumerate every `AGENTS.md` or scoped instruction file
    covering the changed paths — repositories carry several, per directory —
    and pair each with the paths inside its scope. The user's explicit review
@@ -25,8 +26,7 @@ states, and round history all live there; the conversation only steers it.
    rules below.
    **Ready when:** every rule applied to every covered path, and every
    finding evidenced or marked ❓ unverified.
-4. **Write** the report per [report-format.md](report-format.md), then commit
-   it.
+4. **Write** the report per [report-format.md](report-format.md).
    **Ready when:** every finding carries ID, severity, evidence, and a
    suggested fix, and the report is committed.
 5. **Triage.** Present the findings for verdict and answer the questions that
@@ -35,16 +35,20 @@ states, and round history all live there; the conversation only steers it.
    to the resolved section, deferred and routed-out ones take their markers.
    **Ready when:** every finding the user ruled on carries its verdict marker
    and a dated Updates entry.
-6. **Re-review.** On a PR update, open a new round: re-check every prior
-   finding against the new revision, and add the findings the update
-   introduced.
-   **Ready when:** every prior-round finding carries a re-check entry against
-   the new revision, and every new finding carries a round ID.
+6. **Re-review.** On a PR update, open a new round: re-check every finding
+   still open on the PR — approved, deferred, unverified, or awaiting triage
+   — against the new revision, and add the findings the update introduced.
+   Discarded and routed-out findings stay closed.
+   **Ready when:** every open finding carries a re-check entry against the
+   new revision, and every new finding carries a round ID.
+
+Steps 5 and 6 are a loop: each round's findings are triaged, each PR update
+opens the next round, and the review runs until the user closes it.
 
 ## Validation
 
 - Iterate every changed line: does it serve the change's purpose, and does it
-  meet the rules covering its path?
+  meet the rules covering its path and the ecosystem's best practices?
 - Challenge the implementation. A review that summarizes the diff finds
   nothing.
 - Dispatch a fleet for anything beyond a trivial diff: one agent per rule,
@@ -57,8 +61,10 @@ states, and round history all live there; the conversation only steers it.
 ## Evidence
 
 Every finding carries a verbatim snippet from the reviewed revision, with
-file path and lines; multiple occurrences are each illustrated. Paraphrased
-code hides the very drift the review exists to catch.
+file path and lines; multiple occurrences are each illustrated. Where the
+finding is an absence — a missing test, guard, or accessible name — the
+snippet shows the site that should carry it. Paraphrased code hides the very
+drift the review exists to catch.
 
 Verify before claiming: run the test, trace the call path, measure the value.
 An assumption reaches the report along one of two paths — verified or
@@ -70,7 +76,8 @@ finding; the same concern dropped silently is a defect of the review.
 
 ## Guardrails
 
-- **Hold the index, not the findings.** Fleet reports persist to files; your
+- **Hold the index, not the findings.** Fleet reports persist to files in an
+  ignored working folder (`.ai/`), leaving `docs/` for the report alone; your
   context holds which agent produced which verdicts. Assemble the report
   from the files, reading one back only when the write needs it.
 - **The document is the deliverable.** Conversation proposes; the document
