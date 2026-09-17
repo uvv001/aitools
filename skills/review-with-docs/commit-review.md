@@ -19,8 +19,7 @@ implementation rather than summarizing it.
   each scoped to the paths that rule covers. A narrow, single-rule brief is
   what keeps an agent's verdict checkable.
 - Verify before claiming: run the test, trace the call path, measure the
-  value. Where verification is impossible, mark the finding UNVERIFIED and
-  say what would settle it.
+  value. Unsettled assumptions follow the Evidence rules below.
 - Challenge severity: a style preference reported as HIGH reads as noise.
   🔴 breaks or violates a rule, 🟡 risks harm under realistic conditions,
   ⚪ is polish or a suggestion.
@@ -28,6 +27,12 @@ implementation rather than summarizing it.
 ## Evidence
 
 Every finding carries a verbatim snippet from the reviewed revision, with
-file path and lines. Multiple occurrences are each illustrated. A finding
-without evidence is an opinion; either gather the evidence or drop the
-finding.
+file path and lines. Multiple occurrences are each illustrated.
+
+Gathering evidence for an assumption is mandatory, along two distinct paths:
+prove the assumption correct, or prove it wrong. The paths differ in
+execution, and both settle the finding. Failure on both does not invalidate
+the assumption — mark the finding UNVERIFIED, state what was tried and what
+would settle it, and hand the call to the user. This holds hardest where a
+wrong assumption carries serious consequences: an unproven concern raised is
+a finding; the same concern dropped silently is a defect of the review.
