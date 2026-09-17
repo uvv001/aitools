@@ -1,6 +1,6 @@
 ---
 name: review-with-docs
-description: Reviews code changes and drives the findings-triage loop through a report document that carries the process. Trigger when asked to review a commit, PR, or diff, to re-review an updated PR, to triage review findings, or to verify a backport between branches.
+description: Reviews code changes and drives the findings-triage loop through a report document that carries the process. Trigger when asked to review a commit, PR, or diff, to re-review an updated PR, or to triage review findings.
 ---
 
 # Review with docs
@@ -12,26 +12,20 @@ states, and round history all live there; the conversation only steers it.
 
 The review target is defined by the user or explicitly confirmed before any
 findings are produced. When the request leaves the target ambiguous — which
-commit, which base, which branch pair — confirm it first; a wrong scope
-wastes a full review pass.
-
-Two review types, each with its own reference:
-
-- **Commit / PR / diff review** — [commit-review.md](commit-review.md)
-- **Backport-fidelity comparison** — [backport-review.md](backport-review.md)
+commit, which base — confirm it first; a wrong scope wastes a full review
+pass. The review itself follows [commit-review.md](commit-review.md).
 
 ## Protocol
 
-1. **Scope.** Take the target from the user or confirm it explicitly, and
-   pick the review type.
-   **Ready when:** target commit(s), base, and type are explicit.
+1. **Scope.** Take the target from the user or confirm it explicitly.
+   **Ready when:** target commit(s) and base are explicit.
 2. **Instructions.** Enumerate every `AGENTS.md` or scoped instruction file
    covering the changed paths — repositories carry several, per directory —
    and apply each to the paths inside its scope.
    **Ready when:** every changed path is paired with every instruction file
    whose scope covers it.
-3. **Validate.** Follow the review type's reference. For large diffs,
-   dispatch a fleet — one agent per rule — each returning verdicts backed by
+3. **Validate.** Follow [commit-review.md](commit-review.md). For large
+   diffs, dispatch a fleet — one agent per rule — each returning verdicts backed by
    verbatim snippet evidence from the reviewed revision. Verify before
    claiming: an assumption reported as fact is a report defect worse than a
    missed finding.
