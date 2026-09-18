@@ -1,97 +1,110 @@
 # Report format
 
-The report is a markdown document stored in the `docs` folder at the root of
-the reviewed repository and tracked in git, so branch updates and rewrites
-cannot lose it. Name it `yyyy-mm-dd_hhmm_<name>_review.md` from the current
-clock, where `<name>` derives from the review context — PR number, PR
-author, feature name — e.g. `2026-09-16_1105_pr157-tenant-registry_review.md`.
-An explicit user-supplied name takes precedence. The name is fixed once
-chosen: every later round appends to this same file. Commit it after the
-initial write and after each triage batch. Texts are clean and strict: a
-finding says what is wrong, where, and what to do — nothing more.
+The report is a markdown document in the reviewed repository — `docs/` at the
+root unless the user names another location; create the folder when it is
+missing. Name it `yyyy-mm-dd_<name>_review.md` from the clock, where `<name>`
+derives from the review context — PR number, PR author, feature name — e.g.
+`2026-09-16_pr157-tenant-registry_review.md`. An explicit user-supplied name
+takes precedence. The name is fixed once chosen: every later round appends to
+this same file.
+
+Commit it to the current branch after the initial write, after each triage
+batch, after each round, and at the close — the report and any artifact kept
+outside the ignored working folder, nothing else. Record each commit in the
+header: a reviewed branch is often rebased or force-pushed, and the SHAs are
+what let you restore the document.
+
+Texts are clean and strict: a finding says what is wrong, where, and what to
+do — nothing more. Timestamps read `yyyy-mm-dd hh:mm` from the clock, e.g.
+`2026-08-18 16:04`.
+
+## Header
+
+Top of the document, ahead of the dashboard:
+
+- **Reviewed** — per round, the pinned revision and the base it is read
+  against, with a dirty-tree note where one applies.
+- **Rules** — each instruction file paired with the paths its scope covers,
+  plus the user's explicit review questions.
+- **Commits** — one line per commit the review made: SHA, timestamp, what it
+  carried.
+- **Closed** — added at the close: the final revision and the date.
 
 ## Dashboard
 
-Top of the document, ahead of the summary table. Two separate counts, each
-derived by reading the findings sections rather than from memory of the
-review:
-
-- **Fix progress** — findings marked 🔧, against those approved and still
-  awaiting one.
-- **Triage state** — the user's verdicts over all findings.
-
-Never merge the two: author's work and reviewer's decisions move on
-different clocks, and a combined number misreads both.
-
-## Summary table
-
-Two columns: `ID` and `Description`. Every finding has a row, resolved and
-discarded ones included, so the table indexes the whole review and the
-dashboard counts have a source. The Description packs the rest:
+Below the header. Generated, never hand-counted, by the script next to this
+file — [`Update-Dashboard.ps1`](Update-Dashboard.ps1):
 
 ```
-Severity: 🔴 High
-File: path/to/file.ts:42-58
-State: ✅ Approved (published)
-One-line statement of the problem.
+pwsh -File <skill-dir>/Update-Dashboard.ps1 -Path <report.md>
 ```
+
+It reads the finding headers, tallies state and severity, enumerates the
+rounds that moved a finding, and rewrites everything between `## Dashboard`
+and the next `##` heading. Run it after every write to the findings; edit the
+section by hand and the next run overwrites it.
 
 ## Findings
 
-One finding per header, state first so a markdown outline reads as a triage
-board:
+Flat: one header per finding, all of them in a single section, in ID order,
+first round to last. No summary table and no resolved section — the markdown
+outline of the headers is the index, and a finding's history stays with the
+finding.
+
+The header carries state, severity, ID, and title, and is the single source
+of truth for state and severity:
 
 ```
 ### ✅ 🔴 F4 — Icon-only settings button has no accessible name
 ```
 
-Under each finding, foldable subheaders:
+Under it, two subsections, each a `####` heading so a renderer folds them
+with the finding:
 
-- **Description** — short explanation, verbatim snippet, suggested fix.
-  When conversation changes the finding, this top description always holds
-  the latest version.
-- **Status** — current triage state and severity.
-- **Updates** — one dated entry per question, verdict, or revision check,
-  timestamped from the current clock; each entry says what changed or was
-  confirmed.
+- **Description** — short explanation, verbatim snippet, suggested fix. When
+  conversation changes the finding, this description always holds the latest
+  version.
+- **Updates** — one entry per question, verdict, revision check, or round,
+  oldest first: `- yyyy-mm-dd hh:mm — <what changed or was confirmed>`. A
+  change of state is written `⏳ → 🔧` inside the entry, with the reason; an
+  entry belonging to a round opens with `Round <n>:`. Those two shapes are
+  what the dashboard script reads.
 
 ### IDs and states
 
-Round 1 IDs are `F1`, `F2`, …; re-review round *n* uses `R<n>-1`, `R<n>-2`,
-…. An ID never moves or is reused.
+Round 1 IDs are `F1`, `F2`, …; round *n* uses `R<n>-1`, `R<n>-2`, …. An ID is
+never reused and never renamed.
 
 | Marker | State |
 |---|---|
-| ⏳ | Awaiting triage |
+| ⏳ | Awaiting triage — raised, no verdict yet |
 | ❓ | Unverified — evidence attempted and unsettled; the user's call |
-| ✅ | Approved — the user published it to the PR |
-| 🔧 | Fixed — the author addressed it; names the revision, and the finding moves to the resolved section |
-| ❌ | Discarded — moved to the resolved section with the disposition rationale |
+| ✅ | Approved — the user agreed it is a finding |
+| 🔧 | Fixed — the changeset now addresses it; the entry names the revision |
+| ❌ | Discarded — not a finding, rationale in Updates |
 | 📌 | Deferred — valid, consciously left as-is |
-| 🔀 | Improvement — valid but routed outside this PR |
+| 🔀 | Improvement — valid, routed outside this changeset |
+
+Any state can follow any other: a fix regresses, a deferred finding gets
+addressed, a discarded concern returns with better evidence. There is no
+transition table to satisfy — the rule is that every change of state, by the
+user or by a round's re-check, is written into Updates with its reason, so an
+odd move is visible in the finding's own history.
 
 Severity changes keep the ID and are logged under Updates.
 
 ### Findings raised outside the validation pass
 
-Two kinds arrive after the pass: comments the user published to the PR
-directly, and findings a question during triage surfaces. Both take IDs in
-the current round alongside the agent's own, carrying the same evidence and
-state — a later arrival joins the open round rather than opening a new one.
-Where the user supplies them as text or screenshots, transcribe the
-substance.
+Two kinds arrive after the pass: the ones the user brings in directly, and
+the ones a question during triage surfaces. Both take IDs in the current
+round alongside the agent's own, carrying the same evidence and state — a
+later arrival joins the current round rather than opening a new one. Where
+the user supplies them as text or screenshots, transcribe the substance.
 
-## Rounds
+### Rounds
 
-Round 1 findings live in the main Findings section. Each re-review appends a
-round section (`## Round 2 — review of <sha>`) carrying that round's new
-findings and a roll-up naming which earlier findings persist and which the
-author fixed. The re-check outcome for an earlier finding goes in that
-finding's own Updates, keeping its history in one place. Prior rounds stay
-intact: the document is the history of the whole review/feedback/fix loop,
-not its latest snapshot.
-
-## Resolved and discarded
-
-Discarded and fixed findings move here, header, evidence, and disposition
-included. Deleting a finding erases a decision; moving it preserves one.
+A round leaves its trace in the findings themselves: every finding carries a
+`Round <n>:` Updates entry for that round, whether the round moved it or not.
+That record is required. The dashboard's rounds enumeration is derived from
+those entries by the script and is optional — it appears when a round moved
+something.
