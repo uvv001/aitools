@@ -79,7 +79,9 @@ $moveRx = "(?<from>$markers)\s*\u2192\s*(?<to>$markers)"
 $fenceRx = '^\s*(?<marker>`{3,}|~{3,})'
 
 $findings = New-Object System.Collections.Generic.List[object]
+$entries = New-Object System.Collections.Generic.List[object]
 $current = $null
+$pending = $null
 $fence = $null
 $dashboardStart = -1
 $dashboardEnd = -1
@@ -111,17 +113,33 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
             Moves    = @()
         }
         $findings.Add($current)
+        $pending = $null
         continue
     }
 
     if ($null -eq $current) { continue }
     $updateMatch = [regex]::Match($line, $updateRx)
-    if (-not $updateMatch.Success) { continue }
-    $body = $updateMatch.Groups['body'].Value
-    $roundMatch = [regex]::Match($body, $roundRx)
-    $moveMatch = [regex]::Match($body, $moveRx)
+    if ($updateMatch.Success) {
+        $pending = [pscustomobject]@{ Owner = $current; Body = $updateMatch.Groups['body'].Value }
+        $entries.Add($pending)
+        continue
+    }
+    if ($null -eq $pending) { continue }
+
+    # An entry wraps across lines; its continuations are indented text.
+    if ($line -match '^\s*$' -or $line -match '^#{1,6}\s' -or $line -match '^\s*[-*+]\s') {
+        $pending = $null
+    }
+    else {
+        $pending.Body += ' ' + $line.Trim()
+    }
+}
+
+foreach ($entry in $entries) {
+    $roundMatch = [regex]::Match($entry.Body, $roundRx)
+    $moveMatch = [regex]::Match($entry.Body, $moveRx)
     if ($roundMatch.Success -and $moveMatch.Success) {
-        $current.Moves += [pscustomobject]@{
+        $entry.Owner.Moves += [pscustomobject]@{
             Round = [int]$roundMatch.Groups['n'].Value
             From  = $moveMatch.Groups['from'].Value
             To    = $moveMatch.Groups['to'].Value
