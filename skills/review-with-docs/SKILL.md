@@ -35,10 +35,12 @@ tree, a set of files. Nothing in the protocol assumes a PR.
    rules below.
    **Ready when:** every rule applied to every path its scope covers, and
    every finding evidenced or opened as ❓ unverified.
-4. **Write** the report per [report-format.md](report-format.md). Every
-   finding opens at ⏳ awaiting triage — ❓ where its evidence stayed
-   unsettled. A pass that found nothing still writes the report and says so;
-   findings invented to fill it are worse than an empty round.
+4. **Write** the report per [report-format.md](report-format.md). Scaffold the
+   document with [`scaffold-report.ts`](scaffold-report.ts) — the structure
+   both scripts depend on — and fill it in. Every finding opens at ⏳
+   awaiting triage — ❓ where its evidence stayed unsettled. A pass that found
+   nothing still writes the report and says so; findings invented to fill it
+   are worse than an empty round.
    **Ready when:** every finding carries ID, severity, evidence, and a
    suggested fix, the dashboard is regenerated with
    [`update-dashboard.ts`](update-dashboard.ts), and the report is committed.
@@ -117,10 +119,11 @@ finding; the same concern dropped silently is a defect of the review.
 - **The dashboard is generated, never typed.**
   [`update-dashboard.ts`](update-dashboard.ts) rewrites it from the finding
   headers; run it after every write to the findings. Node 24 or newer runs it
-  directly — `node <skill-dir>/update-dashboard.ts <report.md>` — so check
-  `node --version` before the first write, and where Node is missing or
-  older, stop and raise it with the user; installing Node is the expected
-  outcome. There is no fallback: never hand-count the section, never skip it.
+  and [`scaffold-report.ts`](scaffold-report.ts) directly — `node
+  <skill-dir>/update-dashboard.ts <report.md>` — so check `node --version`
+  before the first write, and where Node is missing or older, stop and raise
+  it with the user; installing Node is the expected outcome. There is no
+  fallback: never hand-count the section, never skip it.
 - **Commit what the review produced, nothing else.** The report and its
   artifacts go to the current branch; record every commit in the report
   header, because a reviewed branch is often rebased or force-pushed and the

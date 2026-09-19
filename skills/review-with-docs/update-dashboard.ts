@@ -2,11 +2,16 @@
  * Regenerates the dashboard of a review report written per report-format.md.
  *
  * The findings are the source of truth; the dashboard is derived. This script
- * reads the finding headers, groups them by state, and rewrites everything
- * between the "## Dashboard" heading and the next "## " heading with one
- * section per state present, each listing links to its findings. Lines inside
- * fenced code blocks and inside the dashboard itself are ignored, so quoted
- * examples and the previous run's output never count as findings.
+ * reads the finding headers of the `## Findings` section, groups them by
+ * state, and rewrites everything between the "## Dashboard" heading and the
+ * "## Findings" heading with one section per state present, each listing
+ * links to its findings. Lines inside fenced code blocks are ignored, so
+ * quoted examples never count as findings.
+ *
+ * The document structure report-format.md requires — `## Header`, then
+ * `## Dashboard`, then `## Findings` — is a precondition: the script fails
+ * rather than rewrite a document it cannot place the dashboard in.
+ * scaffold-report.ts writes that structure.
  *
  * Header shape, defined in report-format.md:
  *   ### <state> <severity> <ID> — <title>
@@ -91,8 +96,11 @@ function main(): void {
   const findings: Finding[] = [];
   const unknown: string[] = [];
   let fence: string | null = null;
+  let header = -1;
   let start = -1;
   let end = -1;
+  let endTitle = "";
+  let inFindings = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -108,14 +116,19 @@ function main(): void {
 
     const section = SECTION.exec(line);
     if (section) {
-      if (section.groups!.title === "Dashboard") start = i;
-      else if (start >= 0 && end < 0) end = i;
+      const title = section.groups!.title;
+      if (title === "Header") header = i;
+      else if (title === "Dashboard") start = i;
+      else if (start >= 0 && end < 0) {
+        end = i;
+        endTitle = title;
+      }
+      if (title === "Findings") inFindings = true;
       continue;
     }
 
     const heading = HEADING.exec(line);
-    if (!heading) continue;
-    if (start >= 0 && end < 0) continue; // the dashboard's own sections
+    if (!heading || !inFindings) continue;
 
     const finding = FINDING.exec(heading.groups!.rest);
     if (!finding) {
@@ -131,10 +144,14 @@ function main(): void {
     });
   }
 
-  if (start < 0) throw new Error(`no '## Dashboard' heading in ${path}`);
+  const scaffold = "scaffold the document with scaffold-report.ts";
+  if (header < 0) throw new Error(`no '## Header' section in ${path} — ${scaffold}`);
+  if (start < 0) throw new Error(`no '## Dashboard' section in ${path} — ${scaffold}`);
+  if (header > start) throw new Error(`'## Header' comes after '## Dashboard' in ${path} — ${scaffold}`);
+  if (endTitle !== "Findings")
+    throw new Error(`'## Dashboard' is not followed by '## Findings' in ${path} — ${scaffold}`);
   if (unknown.length > 0)
     throw new Error(`unknown state marker on ${unknown.join(", ")} — see the states table in report-format.md`);
-  if (end < 0) end = lines.length;
 
   const updated = [...lines.slice(0, start), ...build(findings), ...lines.slice(end)];
   writeFileSync(path, updated.join(newline), "utf8");

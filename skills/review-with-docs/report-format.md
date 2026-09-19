@@ -19,6 +19,24 @@ Texts are clean and strict: a finding says what is wrong, where, and what to
 do — nothing more. Timestamps read `yyyy-mm-dd hh:mm` from the clock, e.g.
 `2026-08-18 16:04`.
 
+## Structure
+
+Four parts, in this order: the `# Review — <target>` title, `## Header`,
+`## Dashboard`, `## Findings`. Scaffold them with the script next to this
+file — [`scaffold-report.ts`](scaffold-report.ts) — instead of writing the
+document freehand:
+
+```
+node <skill-dir>/scaffold-report.ts <report.md> [<target>]
+```
+
+It writes the skeleton — the header's entries as placeholders, the two lower
+sections empty — creates the folder on the way, and refuses to touch a file
+that already exists. The structure is a contract:
+[`update-dashboard.ts`](update-dashboard.ts) reads findings only from
+`## Findings`, and stops with a message naming what is missing rather than
+rewrite a document that breaks it.
+
 ## Header
 
 Top of the document, ahead of the dashboard:
@@ -43,9 +61,10 @@ runs directly, without a build step:
 node <skill-dir>/update-dashboard.ts <report.md>
 ```
 
-It reads the finding headers and rewrites everything between `## Dashboard`
-and the next `##` heading as one section per state that carries findings —
-marker, count, label — each listing its findings as numbered links:
+It reads the finding headers of `## Findings` and rewrites everything between
+`## Dashboard` and that heading as one section per state that carries
+findings — marker, count, label — each listing its findings as numbered
+links:
 
 ```
 ### 🔧 20 fixed
@@ -58,7 +77,8 @@ The links are GitHub heading slugs: lower-cased, every character outside
 what leave the leading hyphens. Run the script after every write to the
 findings; edit the section by hand and the next run overwrites it. A `###`
 heading it cannot read stays out of the dashboard with a warning on stderr —
-that header is malformed, fix it and run again. Nothing else belongs in the
+that header is malformed, fix it and run again; a broken structure stops the
+run with exit code 1 and the document untouched. Nothing else belongs in the
 section: state history lives in the findings' own Updates.
 
 ## Findings
