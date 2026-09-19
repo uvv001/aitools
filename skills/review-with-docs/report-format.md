@@ -36,9 +36,11 @@ It writes the skeleton — the intro's entries as placeholders, the two lower
 sections empty — creates the folder on the way, and refuses to touch a file
 that already exists. The structure is a contract:
 [`update-dashboard.ts`](update-dashboard.ts) reads findings only from
-`## Findings`, and stops with a message naming what breaks it rather than
-rewrite the document. A finding header outside that section breaks it too —
-right shape, wrong place — and is named with its line.
+`## Findings`, where every `###` heading is one, and stops with a message
+naming what breaks it rather than rewrite the document. A finding header
+outside that section breaks it too — right shape, wrong place — and a
+heading inside it the script cannot read is no less a break: a finding the
+dashboard drops is a finding the reader never sees.
 
 ## Intro
 
@@ -77,14 +79,12 @@ links:
 The links are GitHub heading slugs: lower-cased, every character outside
 `[a-z0-9 _-]` dropped, spaces turned into hyphens — the stripped markers are
 what leave the leading hyphens. Run the script after every write to the
-findings; edit the section by hand and the next run overwrites it. Inside
-`## Findings`, a `###` heading it cannot read stays out of the dashboard with
-a warning on stderr — that header is malformed, fix it and run again. A
-broken structure — a section missing, repeated, out of order, or added after
-the findings, a finding header outside `## Findings` — stops the run with
-exit code 1, the offender named with its line and the document untouched.
-Nothing else belongs in the section: state history lives in the findings' own
-Updates.
+findings; edit the section by hand and the next run overwrites it. A broken
+structure — a section missing, repeated, out of order, or added after the
+findings, a finding header outside `## Findings`, a `###` heading inside them
+that does not parse as one — stops the run with exit code 1, the offender
+named with its line and the document untouched. Nothing else belongs in the
+section: state history lives in the findings' own Updates.
 
 ## Findings
 

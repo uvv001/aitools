@@ -8,13 +8,13 @@
  * links to its findings. Lines inside fenced code blocks are ignored, so
  * quoted examples never count as findings.
  *
- * The document structure report-format.md requires — `## Intro`, then
- * `## Dashboard`, then `## Findings`, each exactly once and nothing after
- * them — is a precondition: the script fails rather than rewrite a document
- * it cannot place the dashboard in. A finding header outside `## Findings` —
- * right shape, wrong place — fails it too, named with its line, rather than
- * silently stay out of the dashboard. scaffold-report.ts writes that
- * structure.
+ * The document structure report-format.md requires — a `# Review — <target>`
+ * title, then `## Intro`, `## Dashboard` and `## Findings`, each exactly once
+ * and nothing after them — is a precondition: the script fails rather than
+ * rewrite a document that breaks it. Every `###` heading inside the findings
+ * must parse as a finding, and none may sit outside them; either way the
+ * offending line is named and nothing is written. scaffold-report.ts writes
+ * that structure.
  *
  * Header shape, defined in report-format.md:
  *   ### <state> <severity> <ID> — <title>
@@ -56,6 +56,7 @@ const FINDING =
   /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>[A-Za-z0-9-]+)\s+—\s+(?<title>.+)$/u;
 const FENCE = /^\s*(?<marker>`{3,}|~{3,})/u;
 const SECTION = /^##\s+(?<title>.*\S)\s*$/u;
+const TITLE = /^#\s+(?<rest>.*\S)\s*$/u;
 const SECTIONS = ["Intro", "Dashboard", "Findings"];
 
 function slug(heading: string): string {
@@ -100,6 +101,8 @@ function main(): void {
   const findings: Finding[] = [];
   const unknown: string[] = [];
   const misplaced: string[] = [];
+  const malformed: string[] = [];
+  const titles: { text: string; line: number }[] = [];
   const sections: { title: string; line: number }[] = [];
   let fence: string | null = null;
   let inFindings = false;
@@ -125,7 +128,11 @@ function main(): void {
     }
 
     const heading = HEADING.exec(line);
-    if (!heading) continue;
+    if (!heading) {
+      const title = TITLE.exec(line);
+      if (title) titles.push({ text: title.groups!.rest, line: i });
+      continue;
+    }
 
     const finding = FINDING.exec(heading.groups!.rest);
     if (!inFindings) {
@@ -133,7 +140,7 @@ function main(): void {
       continue;
     }
     if (!finding) {
-      console.warn(`update-dashboard: ignoring malformed finding header, line ${i + 1}: ${line}`);
+      malformed.push(`line ${i + 1}: ${line.trim()}`);
       continue;
     }
     const state = finding.groups!.state;
@@ -147,6 +154,15 @@ function main(): void {
 
   const scaffold = "scaffold the document with scaffold-report.ts";
   const expected = SECTIONS.map((title) => `## ${title}`).join(", ");
+  if (titles.length === 0) throw new Error(`no '# Review — <target>' title in ${path} — ${scaffold}`);
+  if (titles.length > 1)
+    throw new Error(
+      `more than one title in ${path}, lines ${titles.map((title) => title.line + 1).join(", ")} — ${scaffold}`,
+    );
+  if (!/^Review — \S/u.test(titles[0].text))
+    throw new Error(
+      `title in ${path}, line ${titles[0].line + 1}, reads '# ${titles[0].text}' — expected '# Review — <target>'`,
+    );
   const seen = new Set<string>();
   for (const section of sections) {
     const at = `${path}, line ${section.line + 1}`;
@@ -162,9 +178,17 @@ function main(): void {
     throw new Error(
       `sections out of order in ${path}: ${sections.map((section) => `## ${section.title}`).join(", ")} — expected ${expected}`,
     );
+  if (titles[0].line > sections[0].line)
+    throw new Error(
+      `the title comes after '## ${sections[0].title}' in ${path}, line ${titles[0].line + 1} — ${scaffold}`,
+    );
   if (misplaced.length > 0)
     throw new Error(
       `finding header outside '## Findings' in ${path} — ${misplaced.join("; ")} — move it into the findings section`,
+    );
+  if (malformed.length > 0)
+    throw new Error(
+      `malformed finding header in ${path} — ${malformed.join("; ")} — expected '### <state> <severity> <ID> — <title>'`,
     );
   if (unknown.length > 0)
     throw new Error(`unknown state marker on ${unknown.join(", ")} — see the states table in report-format.md`);
