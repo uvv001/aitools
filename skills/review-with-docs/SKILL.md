@@ -17,11 +17,13 @@ tree, a set of files. Nothing in the protocol assumes a PR.
    reviewed revision and the base it is read against: the first parent for a
    single commit, the endpoints for a range, the merge-base with the target
    branch for a PR, HEAD plus a dirty-tree note for an uncommitted tree, none
-   for files reviewed as they stand. One attempt to resolve an ambiguous
-   target or base, then ask the user — a wrong base silently changes the
-   changeset under review.
-   **Ready when:** the reviewed revision and its base stand in the report
-   header.
+   for files reviewed as they stand. Where git does not track the target, ask
+   the user how the rounds should tell one revision from the next — a content
+   pin, a date, or no tracking at all, the content read whole every round.
+   One attempt to resolve an ambiguous target or base, then ask the user — a
+   wrong base silently changes the changeset under review.
+   **Ready when:** the report header carries the reviewed state — the
+   revision and its base, or what the user put in their place.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
@@ -39,8 +41,7 @@ tree, a set of files. Nothing in the protocol assumes a PR.
    findings invented to fill it are worse than an empty round.
    **Ready when:** every finding carries ID, severity, evidence, and a
    suggested fix, the dashboard is regenerated with
-   [`Update-Dashboard.ps1`](Update-Dashboard.ps1), and the report is
-   committed.
+   [`update-dashboard.ts`](update-dashboard.ts), and the report is committed.
 5. **Triage.** Present the findings for verdict and answer the questions that
    precede one — an answer that changes a finding rewrites its description.
    Write each verdict into the finding's header: ✅ approved, ❌ discarded,
@@ -58,13 +59,13 @@ tree, a set of files. Nothing in the protocol assumes a PR.
    survives by default — a fix regresses, a deferred finding gets addressed,
    a discarded concern returns with better evidence.
    **Ready when:** every finding carries a `Round <n>:` Updates entry, new
-   findings carry round IDs, the round's revision stands in the header, the
-   dashboard is regenerated, and the report is committed.
-7. **Close.** The review ends when the user closes it. Record the closing
-   entry in the header — final revision and date — and leave every finding in
-   the state it reached; ⏳ and 📌 at the close are a result, not an
-   oversight.
-   **Ready when:** the header carries the closing entry, the dashboard is
+   findings continue the report's ID sequence, the round's revision stands in
+   the header, the dashboard is regenerated, and the report is committed.
+7. **Close.** The review ends when the user closes it. Set the header's
+   status to closed with the date and the final revision, and leave every
+   finding in the state it reached; ⏳ and 📌 at the close are a result, not
+   an oversight.
+   **Ready when:** the header's status reads closed, the dashboard is
    regenerated, and the last commit is recorded.
 
 Steps 5 and 6 are a loop: each round's findings are triaged, each change in
@@ -108,17 +109,21 @@ finding; the same concern dropped silently is a defect of the review.
 
 ## Guardrails
 
-- **Hold the index, not the findings.** Fleet reports persist to files under
-  the reviewed repository's ignored working folder —
-  `.ai/reviews/round-<n>/<rule>.md` — leaving the report the only tracked
-  output; your context holds which agent produced which verdicts. Confirm the
-  folder is ignored before dispatch, and add the ignore entry when it is not,
-  or the scratch lands in your commit. Assemble the report from the files,
-  reading one back only when the write needs it.
-- **Commit what the review produced, nothing else.** The report goes to the
-  current branch, together with any artifact kept outside the ignored working
-  folder; record every commit in the report header, because a reviewed branch
-  is often rebased or force-pushed and the SHAs are what let you restore the
-  document.
+- **Hold the index, not the findings.** Fleet reports persist beside the
+  review report — `<report-stem>/round-<n>/<rule>.md`, the folder created as
+  needed — and are committed with it; your context holds which agent produced
+  which verdicts. Assemble the report from the files, reading one back only
+  when the write needs it.
+- **The dashboard is generated, never typed.**
+  [`update-dashboard.ts`](update-dashboard.ts) rewrites it from the finding
+  headers; run it after every write to the findings. Node 24 or newer runs it
+  directly — `node <skill-dir>/update-dashboard.ts <report.md>` — so check
+  `node --version` before the first write, and where Node is missing or
+  older, stop and raise it with the user; installing Node is the expected
+  outcome. There is no fallback: never hand-count the section, never skip it.
+- **Commit what the review produced, nothing else.** The report and its
+  artifacts go to the current branch; record every commit in the report
+  header, because a reviewed branch is often rebased or force-pushed and the
+  SHAs are what let you restore the document.
 - **The document is the deliverable.** Conversation proposes; the document
   disposes. A decision that never reaches the document is lost.
