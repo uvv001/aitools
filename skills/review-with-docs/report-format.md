@@ -23,10 +23,11 @@ do — nothing more. Timestamps read `yyyy-mm-dd hh:mm` from the clock, e.g.
 
 Four parts, in this order: the `# Review — <target>` title, `## Intro`,
 `## Dashboard`, `## Findings`. Each appears once, in that order, and nothing
-follows the findings — a section repeated, misplaced, or added below them
-breaks the contract and stops the run. Scaffold them with the script next to
-this file — [`scaffold-report.ts`](scaffold-report.ts) — instead of writing
-the document freehand:
+follows the findings — a title missing or written another way, a section
+repeated, misplaced, or added below the findings breaks the contract and
+stops the run. Scaffold them with the script next to this file —
+[`scaffold-report.ts`](scaffold-report.ts) — instead of writing the document
+freehand:
 
 ```
 node <skill-dir>/scaffold-report.ts <report.md> [<target>]
@@ -80,11 +81,12 @@ The links are GitHub heading slugs: lower-cased, every character outside
 `[a-z0-9 _-]` dropped, spaces turned into hyphens — the stripped markers are
 what leave the leading hyphens. Run the script after every write to the
 findings; edit the section by hand and the next run overwrites it. A broken
-structure — a section missing, repeated, out of order, or added after the
-findings, a finding header outside `## Findings`, a `###` heading inside them
-that does not parse as one — stops the run with exit code 1, the offender
-named with its line and the document untouched. Nothing else belongs in the
-section: state history lives in the findings' own Updates.
+structure — a title missing, repeated, or not reading `# Review — <target>`,
+a section missing, repeated, out of order, or added after the findings, a
+finding header outside `## Findings`, a `###` heading inside them that does
+not parse as one — stops the run with exit code 1, the offender named with
+its line and the document untouched. Nothing else belongs in the section:
+state history lives in the findings' own Updates.
 
 ## Findings
 
