@@ -42,8 +42,7 @@ rewrite a document that breaks it.
 Top of the document, ahead of the dashboard:
 
 - **Reviewed** — per round, the pinned revision and the base it is read
-  against, with a dirty-tree note where one applies; where the target is not
-  tracked, what the user chose in place of a revision.
+  against, with a dirty-tree note where one applies.
 - **Rules** — each instruction file paired with the paths its scope covers,
   plus the user's explicit review questions.
 - **Commits** — one line per commit the review made: SHA, timestamp, what it

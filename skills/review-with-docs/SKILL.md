@@ -8,22 +8,23 @@ description: Runs a review as a document — findings, evidence, triage states, 
 The report document is the driver of the review: findings, evidence, triage
 states, and round history all live there; the conversation only steers it.
 
-The target is any changeset or text — a commit, a range, a PR, a working
-tree, a set of files. Nothing in the protocol assumes a PR.
+The target is any changeset or text inside a git repository — a commit, a
+range, a PR, a working tree, a set of files. Nothing in the protocol assumes
+a PR.
 
 ## Protocol
 
-1. **Scope.** Take the target from the user or confirm it explicitly. Pin the
-   reviewed revision and the base it is read against: the first parent for a
-   single commit, the endpoints for a range, the merge-base with the target
-   branch for a PR, HEAD plus a dirty-tree note for an uncommitted tree, none
-   for files reviewed as they stand. Where git does not track the target, ask
-   the user how the rounds should tell one revision from the next — a content
-   pin, a date, or no tracking at all, the content read whole every round.
-   One attempt to resolve an ambiguous target or base, then ask the user — a
-   wrong base silently changes the changeset under review.
-   **Ready when:** the report header carries the reviewed state — the
-   revision and its base, or what the user put in their place.
+1. **Scope.** Take the target from the user or confirm it explicitly. Git is
+   required — the rounds pin revisions and the report is committed — so where
+   the target is not in a repository, stop and raise it with the user;
+   `git init` is the expected outcome. Pin the reviewed revision and the base
+   it is read against: the first parent for a single commit, the endpoints
+   for a range, the merge-base with the target branch for a PR, HEAD plus a
+   dirty-tree note for an uncommitted tree, none for files reviewed as they
+   stand. One attempt to resolve an ambiguous target or base, then ask the
+   user — a wrong base silently changes the changeset under review.
+   **Ready when:** the reviewed revision and its base stand in the report
+   header.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
@@ -41,8 +42,8 @@ tree, a set of files. Nothing in the protocol assumes a PR.
    awaiting triage — ❓ where its evidence stayed unsettled. A pass that found
    nothing still writes the report and says so; findings invented to fill it
    are worse than an empty round.
-   **Ready when:** every finding carries ID, severity, evidence, and a
-   suggested fix, the dashboard is regenerated with
+   **Ready when:** every finding carries ID, severity, evidence, a suggested
+   fix, and a `Round 1:` Updates entry, the dashboard is regenerated with
    [`update-dashboard.ts`](update-dashboard.ts), and the report is committed.
 5. **Triage.** Present the findings for verdict and answer the questions that
    precede one — an answer that changes a finding rewrites its description.
@@ -112,10 +113,12 @@ finding; the same concern dropped silently is a defect of the review.
 ## Guardrails
 
 - **Hold the index, not the findings.** Fleet reports persist beside the
-  review report — `<report-stem>/round-<n>/<rule>.md`, the folder created as
-  needed — and are committed with it; your context holds which agent produced
-  which verdicts. Assemble the report from the files, reading one back only
-  when the write needs it.
+  review report — `<report-stem>/round-<n>/<rule>.md`, where `<report-stem>`
+  is the report's file name without `.md` and `<rule>` a short slug of the
+  rule, e.g. `2026-09-16_pr157_review/round-1/agents-self-sufficiency.md`;
+  create the folders as needed. They are committed with the report; your
+  context holds which agent produced which verdicts. Assemble the report from
+  the files, reading one back only when the write needs it.
 - **The dashboard is generated, never typed.**
   [`update-dashboard.ts`](update-dashboard.ts) rewrites it from the finding
   headers; run it after every write to the findings. Node 24 or newer runs it
