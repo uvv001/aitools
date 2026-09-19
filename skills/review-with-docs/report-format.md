@@ -134,8 +134,10 @@ Severity changes keep the ID and are logged under Updates.
 Two kinds arrive after the pass: the ones the user brings in directly, and
 the ones a question during triage surfaces. Both take the next free IDs
 alongside the agent's own, carrying the same evidence and state — a later
-arrival joins the current round rather than opening a new one. Where the user
-supplies them as text or screenshots, transcribe the substance.
+arrival joins the round just completed, the highest the report records, and
+carries its `Round <n>:` entry like every other finding. Arriving late opens
+no round. Where the user supplies them as text or screenshots, transcribe the
+substance.
 
 ### Rounds
 

@@ -48,10 +48,13 @@ a PR.
 5. **Triage.** Present the findings for verdict and answer the questions that
    precede one — an answer that changes a finding rewrites its description.
    Write each verdict into the finding's header: ✅ approved, ❌ discarded,
-   📌 deferred, 🔀 routed out as an improvement.
+   📌 deferred, 🔀 routed out as an improvement. A finding the user brings in,
+   or one a triage question surfaces, takes the next free ID and joins the
+   round just triaged; triage opens no round of its own.
    **Ready when:** every finding the user ruled on carries its state in the
-   header and an Updates entry explaining the move, the dashboard is
-   regenerated, and the report is committed.
+   header and an Updates entry explaining the move, every finding raised
+   during the triage carries a `Round <n>:` entry for that same round, the
+   dashboard is regenerated, and the report is committed.
 6. **Re-review.** A round opens when new changes land in the reviewed area;
    confirm with the user when in doubt. Every round reads the **full
    changeset** at the new revision — never a diff between revisions, because
