@@ -10,7 +10,9 @@
  *
  * The document structure report-format.md requires — `## Header`, then
  * `## Dashboard`, then `## Findings` — is a precondition: the script fails
- * rather than rewrite a document it cannot place the dashboard in.
+ * rather than rewrite a document it cannot place the dashboard in. A
+ * finding header outside `## Findings` — right shape, wrong place — fails it
+ * too, named with its line, rather than silently stay out of the dashboard.
  * scaffold-report.ts writes that structure.
  *
  * Header shape, defined in report-format.md:
@@ -95,6 +97,7 @@ function main(): void {
 
   const findings: Finding[] = [];
   const unknown: string[] = [];
+  const misplaced: string[] = [];
   let fence: string | null = null;
   let header = -1;
   let start = -1;
@@ -128,9 +131,13 @@ function main(): void {
     }
 
     const heading = HEADING.exec(line);
-    if (!heading || !inFindings) continue;
+    if (!heading) continue;
 
     const finding = FINDING.exec(heading.groups!.rest);
+    if (!inFindings) {
+      if (finding) misplaced.push(`line ${i + 1}: ${line.trim()}`);
+      continue;
+    }
     if (!finding) {
       console.warn(`update-dashboard: ignoring malformed finding header, line ${i + 1}: ${line}`);
       continue;
@@ -150,6 +157,10 @@ function main(): void {
   if (header > start) throw new Error(`'## Header' comes after '## Dashboard' in ${path} — ${scaffold}`);
   if (endTitle !== "Findings")
     throw new Error(`'## Dashboard' is not followed by '## Findings' in ${path} — ${scaffold}`);
+  if (misplaced.length > 0)
+    throw new Error(
+      `finding header outside '## Findings' in ${path} — ${misplaced.join("; ")} — move it into the findings section`,
+    );
   if (unknown.length > 0)
     throw new Error(`unknown state marker on ${unknown.join(", ")} — see the states table in report-format.md`);
 
