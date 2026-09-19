@@ -22,9 +22,11 @@ do — nothing more. Timestamps read `yyyy-mm-dd hh:mm` from the clock, e.g.
 ## Structure
 
 Four parts, in this order: the `# Review — <target>` title, `## Intro`,
-`## Dashboard`, `## Findings`. Scaffold them with the script next to this
-file — [`scaffold-report.ts`](scaffold-report.ts) — instead of writing the
-document freehand:
+`## Dashboard`, `## Findings`. Each appears once, in that order, and nothing
+follows the findings — a section repeated, misplaced, or added below them
+breaks the contract and stops the run. Scaffold them with the script next to
+this file — [`scaffold-report.ts`](scaffold-report.ts) — instead of writing
+the document freehand:
 
 ```
 node <skill-dir>/scaffold-report.ts <report.md> [<target>]
@@ -78,10 +80,11 @@ what leave the leading hyphens. Run the script after every write to the
 findings; edit the section by hand and the next run overwrites it. Inside
 `## Findings`, a `###` heading it cannot read stays out of the dashboard with
 a warning on stderr — that header is malformed, fix it and run again. A
-broken structure — a section missing or out of order, a finding header
-outside `## Findings` — stops the run with exit code 1, the offender named
-and the document untouched. Nothing else belongs in the section: state
-history lives in the findings' own Updates.
+broken structure — a section missing, repeated, out of order, or added after
+the findings, a finding header outside `## Findings` — stops the run with
+exit code 1, the offender named with its line and the document untouched.
+Nothing else belongs in the section: state history lives in the findings' own
+Updates.
 
 ## Findings
 

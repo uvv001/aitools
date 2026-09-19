@@ -9,11 +9,12 @@
  * quoted examples never count as findings.
  *
  * The document structure report-format.md requires — `## Intro`, then
- * `## Dashboard`, then `## Findings` — is a precondition: the script fails
- * rather than rewrite a document it cannot place the dashboard in. A
- * finding header outside `## Findings` — right shape, wrong place — fails it
- * too, named with its line, rather than silently stay out of the dashboard.
- * scaffold-report.ts writes that structure.
+ * `## Dashboard`, then `## Findings`, each exactly once and nothing after
+ * them — is a precondition: the script fails rather than rewrite a document
+ * it cannot place the dashboard in. A finding header outside `## Findings` —
+ * right shape, wrong place — fails it too, named with its line, rather than
+ * silently stay out of the dashboard. scaffold-report.ts writes that
+ * structure.
  *
  * Header shape, defined in report-format.md:
  *   ### <state> <severity> <ID> — <title>
@@ -55,6 +56,7 @@ const FINDING =
   /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>[A-Za-z0-9-]+)\s+—\s+(?<title>.+)$/u;
 const FENCE = /^\s*(?<marker>`{3,}|~{3,})/u;
 const SECTION = /^##\s+(?<title>.*\S)\s*$/u;
+const SECTIONS = ["Intro", "Dashboard", "Findings"];
 
 function slug(heading: string): string {
   return heading
@@ -98,11 +100,8 @@ function main(): void {
   const findings: Finding[] = [];
   const unknown: string[] = [];
   const misplaced: string[] = [];
+  const sections: { title: string; line: number }[] = [];
   let fence: string | null = null;
-  let header = -1;
-  let start = -1;
-  let end = -1;
-  let endTitle = "";
   let inFindings = false;
 
   for (let i = 0; i < lines.length; i++) {
@@ -120,13 +119,8 @@ function main(): void {
     const section = SECTION.exec(line);
     if (section) {
       const title = section.groups!.title;
-      if (title === "Intro") header = i;
-      else if (title === "Dashboard") start = i;
-      else if (start >= 0 && end < 0) {
-        end = i;
-        endTitle = title;
-      }
-      if (title === "Findings") inFindings = true;
+      sections.push({ title, line: i });
+      inFindings = title === "Findings";
       continue;
     }
 
@@ -152,11 +146,22 @@ function main(): void {
   }
 
   const scaffold = "scaffold the document with scaffold-report.ts";
-  if (header < 0) throw new Error(`no '## Intro' section in ${path} — ${scaffold}`);
-  if (start < 0) throw new Error(`no '## Dashboard' section in ${path} — ${scaffold}`);
-  if (header > start) throw new Error(`'## Intro' comes after '## Dashboard' in ${path} — ${scaffold}`);
-  if (endTitle !== "Findings")
-    throw new Error(`'## Dashboard' is not followed by '## Findings' in ${path} — ${scaffold}`);
+  const expected = SECTIONS.map((title) => `## ${title}`).join(", ");
+  const seen = new Set<string>();
+  for (const section of sections) {
+    const at = `${path}, line ${section.line + 1}`;
+    if (!SECTIONS.includes(section.title))
+      throw new Error(`unexpected section '## ${section.title}' in ${at} — the report holds ${expected} and nothing else`);
+    if (seen.has(section.title))
+      throw new Error(`'## ${section.title}' appears twice in ${at} — ${scaffold}`);
+    seen.add(section.title);
+  }
+  for (const title of SECTIONS)
+    if (!seen.has(title)) throw new Error(`no '## ${title}' section in ${path} — ${scaffold}`);
+  if (sections.map((section) => section.title).join() !== SECTIONS.join())
+    throw new Error(
+      `sections out of order in ${path}: ${sections.map((section) => `## ${section.title}`).join(", ")} — expected ${expected}`,
+    );
   if (misplaced.length > 0)
     throw new Error(
       `finding header outside '## Findings' in ${path} — ${misplaced.join("; ")} — move it into the findings section`,
@@ -164,6 +169,8 @@ function main(): void {
   if (unknown.length > 0)
     throw new Error(`unknown state marker on ${unknown.join(", ")} — see the states table in report-format.md`);
 
+  const start = sections.find((section) => section.title === "Dashboard")!.line;
+  const end = sections.find((section) => section.title === "Findings")!.line;
   const updated = [...lines.slice(0, start), ...build(findings), ...lines.slice(end)];
   writeFileSync(path, updated.join(newline), "utf8");
   console.log(`Dashboard updated: ${findings.length} findings in ${path}`);
