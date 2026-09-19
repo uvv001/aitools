@@ -68,11 +68,11 @@ a PR.
    findings continue the report's ID sequence, the round's revision stands in
    the intro, the dashboard is regenerated, and the report is committed.
 7. **Close.** The review ends when the user closes it. Set the intro's status
-   to closed with the date and the final revision, and leave every finding in
-   the state it reached; ⏳ and 📌 at the close are a result, not an
-   oversight.
-   **Ready when:** the intro's status reads closed, the dashboard is
-   regenerated, and the last commit is recorded.
+   to `closed yyyy-mm-dd hh:mm at <revision>` — the timestamp off the clock,
+   the revision the last one reviewed — and leave every finding in the state
+   it reached; ⏳ and 📌 at the close are a result, not an oversight.
+   **Ready when:** the intro's status reads closed with its timestamp and
+   revision, the dashboard is regenerated, and the last commit is recorded.
 
 Steps 5 and 6 are a loop: each round's findings are triaged, each change in
 the reviewed area opens the next round, and the review runs until step 7.
