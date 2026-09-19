@@ -8,7 +8,7 @@
  * links to its findings. Lines inside fenced code blocks are ignored, so
  * quoted examples never count as findings.
  *
- * The document structure report-format.md requires — `## Header`, then
+ * The document structure report-format.md requires — `## Intro`, then
  * `## Dashboard`, then `## Findings` — is a precondition: the script fails
  * rather than rewrite a document it cannot place the dashboard in. A
  * finding header outside `## Findings` — right shape, wrong place — fails it
@@ -120,7 +120,7 @@ function main(): void {
     const section = SECTION.exec(line);
     if (section) {
       const title = section.groups!.title;
-      if (title === "Header") header = i;
+      if (title === "Intro") header = i;
       else if (title === "Dashboard") start = i;
       else if (start >= 0 && end < 0) {
         end = i;
@@ -152,9 +152,9 @@ function main(): void {
   }
 
   const scaffold = "scaffold the document with scaffold-report.ts";
-  if (header < 0) throw new Error(`no '## Header' section in ${path} — ${scaffold}`);
+  if (header < 0) throw new Error(`no '## Intro' section in ${path} — ${scaffold}`);
   if (start < 0) throw new Error(`no '## Dashboard' section in ${path} — ${scaffold}`);
-  if (header > start) throw new Error(`'## Header' comes after '## Dashboard' in ${path} — ${scaffold}`);
+  if (header > start) throw new Error(`'## Intro' comes after '## Dashboard' in ${path} — ${scaffold}`);
   if (endTitle !== "Findings")
     throw new Error(`'## Dashboard' is not followed by '## Findings' in ${path} — ${scaffold}`);
   if (misplaced.length > 0)

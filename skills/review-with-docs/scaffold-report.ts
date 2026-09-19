@@ -17,7 +17,7 @@ import { dirname } from "node:path";
 function skeleton(target: string): string {
   return `# Review — ${target}
 
-## Header
+## Intro
 
 **Reviewed**
 

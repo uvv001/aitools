@@ -23,14 +23,14 @@ a PR.
    dirty-tree note for an uncommitted tree, none for files reviewed as they
    stand. One attempt to resolve an ambiguous target or base, then ask the
    user — a wrong base silently changes the changeset under review.
-   **Ready when:** the reviewed revision and its base stand in the report
-   header.
+   **Ready when:** the reviewed revision and its base stand in the report's
+   intro.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
    The user's explicit review questions join the rule set. Ask where a scope
    is genuinely unclear.
-   **Ready when:** the report header pairs every changed path with every
+   **Ready when:** the report's intro pairs every changed path with every
    instruction file whose scope covers it.
 3. **Validate.** Apply the rule set to the changeset under the Validation
    rules below.
@@ -66,12 +66,12 @@ a PR.
    a discarded concern returns with better evidence.
    **Ready when:** every finding carries a `Round <n>:` Updates entry, new
    findings continue the report's ID sequence, the round's revision stands in
-   the header, the dashboard is regenerated, and the report is committed.
-7. **Close.** The review ends when the user closes it. Set the header's
-   status to closed with the date and the final revision, and leave every
-   finding in the state it reached; ⏳ and 📌 at the close are a result, not
-   an oversight.
-   **Ready when:** the header's status reads closed, the dashboard is
+   the intro, the dashboard is regenerated, and the report is committed.
+7. **Close.** The review ends when the user closes it. Set the intro's status
+   to closed with the date and the final revision, and leave every finding in
+   the state it reached; ⏳ and 📌 at the close are a result, not an
+   oversight.
+   **Ready when:** the intro's status reads closed, the dashboard is
    regenerated, and the last commit is recorded.
 
 Steps 5 and 6 are a loop: each round's findings are triaged, each change in
@@ -131,8 +131,8 @@ finding; the same concern dropped silently is a defect of the review.
   it with the user; installing Node is the expected outcome. There is no
   fallback: never hand-count the section, never skip it.
 - **Commit what the review produced, nothing else.** The report and its
-  artifacts go to the current branch; record every commit in the report
-  header, because a reviewed branch is often rebased or force-pushed and the
+  artifacts go to the current branch; record every commit in the report's
+  intro, because a reviewed branch is often rebased or force-pushed and the
   SHAs are what let you restore the document.
 - **The document is the deliverable.** Conversation proposes; the document
   disposes. A decision that never reaches the document is lost.

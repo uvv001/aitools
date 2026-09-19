@@ -11,7 +11,7 @@ later round appends to this same file.
 
 Commit it to the current branch after the initial write, after each triage
 batch, after each round, and at the close — the report and the artifacts the
-review produced beside it, nothing else. Record each commit in the header: a
+review produced beside it, nothing else. Record each commit in the intro: a
 reviewed branch is often rebased or force-pushed, and the SHAs are what let
 you restore the document.
 
@@ -21,7 +21,7 @@ do — nothing more. Timestamps read `yyyy-mm-dd hh:mm` from the clock, e.g.
 
 ## Structure
 
-Four parts, in this order: the `# Review — <target>` title, `## Header`,
+Four parts, in this order: the `# Review — <target>` title, `## Intro`,
 `## Dashboard`, `## Findings`. Scaffold them with the script next to this
 file — [`scaffold-report.ts`](scaffold-report.ts) — instead of writing the
 document freehand:
@@ -30,7 +30,7 @@ document freehand:
 node <skill-dir>/scaffold-report.ts <report.md> [<target>]
 ```
 
-It writes the skeleton — the header's entries as placeholders, the two lower
+It writes the skeleton — the intro's entries as placeholders, the two lower
 sections empty — creates the folder on the way, and refuses to touch a file
 that already exists. The structure is a contract:
 [`update-dashboard.ts`](update-dashboard.ts) reads findings only from
@@ -38,7 +38,7 @@ that already exists. The structure is a contract:
 rewrite the document. A finding header outside that section breaks it too —
 right shape, wrong place — and is named with its line.
 
-## Header
+## Intro
 
 Top of the document, ahead of the dashboard:
 
@@ -53,7 +53,7 @@ Top of the document, ahead of the dashboard:
 
 ## Dashboard
 
-Below the header. Generated, never hand-counted, by the script next to this
+Below the intro. Generated, never hand-counted, by the script next to this
 file — [`update-dashboard.ts`](update-dashboard.ts), which Node 24 or newer
 runs directly, without a build step:
 
