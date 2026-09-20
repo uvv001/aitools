@@ -25,7 +25,7 @@ function skeleton(target: string): string {
 
 **Reviewed**
 
-- Round 1 — \`<revision>\`, base \`<revision>\` — or \`base none — reviewed as it stands\`; <clean or dirty tree>.
+- Round 1 — \`<revision>\`, <base>; <clean or dirty tree>.
 
 **Rules**
 
