@@ -130,6 +130,11 @@ finding; the same concern dropped silently is a defect of the review.
   before the first write, and where Node is missing or older, stop and raise
   it with the user; installing Node is the expected outcome. There is no
   fallback: never hand-count the section, never skip it.
+- **The docs are the contract; the scripts serve them.** Where
+  [`update-dashboard.ts`](update-dashboard.ts) or
+  [`scaffold-report.ts`](scaffold-report.ts) disagrees with
+  [report-format.md](report-format.md) or this file, the script is what
+  changes — never the document bent to fit what a script happens to accept.
 - **Commit what the review produced, nothing else.** The report and its
   artifacts go to the current branch; record every commit in the report's
   intro, because a reviewed branch is often rebased or force-pushed and the
