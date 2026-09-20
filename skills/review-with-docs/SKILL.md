@@ -138,8 +138,8 @@ finding; the same concern dropped silently is a defect of the review.
   [report-format.md](report-format.md) or this file, the script is what
   changes — never the document bent to fit what a script happens to accept.
 - **Commit what the review produced, nothing else.** The report and its
-  artifacts go to the current branch; record every commit in the report's
-  intro, because a reviewed branch is often rebased or force-pushed and the
-  SHAs are what let you restore the document.
+  artifacts go to the current branch; the intro records those commits, per
+  [report-format.md](report-format.md#intro) — the cadence, the trailing
+  rule, and why the SHAs matter live there, not here.
 - **The document is the deliverable.** Conversation proposes; the document
   disposes. A decision that never reaches the document is lost.
