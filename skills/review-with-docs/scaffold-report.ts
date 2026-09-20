@@ -7,8 +7,9 @@
  *
  * The skeleton follows report-format.md's Intro spec, which defines the
  * wording this file writes and leaves as slots: `<base>` takes either form
- * the spec gives, and **Commits** carries its empty-record line verbatim.
- * The spec is the source; change it there first.
+ * the spec gives, **Rules** either its pairs or the spec's empty line, and
+ * **Commits** carries its empty-record line verbatim. The spec is the
+ * source; change it there first.
  *
  * Usage: node scaffold-report.ts <report.md> [<target>]
  *

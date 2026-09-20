@@ -32,7 +32,8 @@ a PR.
    The user's explicit review questions join the rule set. Ask where a scope
    is genuinely unclear.
    **Ready when:** the report's intro pairs every changed path with every
-   instruction file whose scope covers it.
+   instruction file whose scope covers it, or carries the empty rule set in
+   the form [report-format.md](report-format.md#intro) defines.
 3. **Validate.** Apply the rule set to the changeset under the Validation
    rules below.
    **Ready when:** every rule applied to every path its scope covers, and

@@ -78,7 +78,11 @@ Top of the document, ahead of the dashboard:
   stands` where there is none, so an absent base never looks like a
   forgotten one.
 - **Rules** — each instruction file paired with the paths its scope covers,
-  plus the user's explicit review questions.
+  plus the user's explicit review questions. Where no instruction file covers
+  the changed paths and the user asked nothing extra, the entry carries one
+  line in their place — `- none apply — no instruction file covers the
+  changed paths, and no review questions were asked` — so an empty rule set
+  never reads as an unfinished step.
 - **Commits** — one line per commit the review made: SHA, timestamp, what it
   carried. The newest is written by the commit after it, so the list trails
   the branch by one; before the first is recorded the entry carries one line
