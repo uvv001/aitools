@@ -5,6 +5,11 @@
  * the document freehand is what lets a section go missing, so the report is
  * always scaffolded first — the script refuses to touch a file that exists.
  *
+ * The skeleton follows report-format.md's Intro spec, which defines the
+ * wording this file writes and leaves as slots: `<base>` takes either form
+ * the spec gives, and **Commits** carries its empty-record line verbatim.
+ * The spec is the source; change it there first.
+ *
  * Usage: node scaffold-report.ts <report.md> [<target>]
  *
  * The target names what is under review. Omitted, it is written as a
