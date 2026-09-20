@@ -9,11 +9,11 @@
  * quoted examples never count as findings.
  *
  * The structure contract of report-format.md is a precondition: each break it
- * lists — the title, the sections, the intro's entries, a finding header's
- * place or shape, an unknown marker, a duplicate or out-of-sequence ID, a
- * finding missing a subsection — makes the script name the offending line and
- * write nothing, rather than rewrite a document it cannot read.
- * scaffold-report.ts writes that structure.
+ * lists — a fence left open, the title, the sections, the intro's entries, a
+ * finding header's place or shape, an unknown marker, a duplicate or
+ * out-of-sequence ID, a finding missing a subsection — makes the script name
+ * the offending line and write nothing, rather than rewrite a document it
+ * cannot read. scaffold-report.ts writes that structure.
  *
  * Header shape, defined in report-format.md:
  *   ### <state> <severity> <ID> — <title>
@@ -117,6 +117,7 @@ function main(): void {
   const entries = new Set<string>();
   const blocks: { id: string; line: number; parts: Set<string> }[] = [];
   let fence: string | null = null;
+  let fenceLine = 0;
   let inFindings = false;
   let inIntro = false;
 
@@ -126,8 +127,10 @@ function main(): void {
     const fenced = FENCE.exec(line);
     if (fenced) {
       const marker = fenced.groups!.marker;
-      if (fence === null) fence = marker;
-      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      if (fence === null) {
+        fence = marker;
+        fenceLine = i + 1;
+      } else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
       continue;
     }
     if (fence !== null) continue;
@@ -193,6 +196,10 @@ function main(): void {
 
   const scaffold = "scaffold the document with scaffold-report.ts";
   const expected = SECTIONS.map((title) => `## ${title}`).join(", ");
+  if (fence !== null)
+    throw new Error(
+      `the fence opened in ${path}, line ${fenceLine}, is never closed — everything below it reads as quoted text`,
+    );
   if (titles.length === 0) throw new Error(`no '# Review — <target>' title in ${path} — ${scaffold}`);
   if (titles.length > 1)
     throw new Error(

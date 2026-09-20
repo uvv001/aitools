@@ -48,6 +48,8 @@ these stops the run with exit code 1 and leaves the document untouched,
 naming the offending line where there is one and the expectation where the
 offender is an absence:
 
+- A fence opens and never closes: the rest of the document would read as
+  quoted text, and its findings would vanish.
 - The title is missing, repeated, sits below `## Intro`, or reads anything
   but `# Review — <target>`.
 - A section is missing, repeated, out of order, added after the findings, or
