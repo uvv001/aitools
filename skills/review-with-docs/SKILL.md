@@ -24,7 +24,7 @@ a PR.
    stand. One attempt to resolve an ambiguous target or base, then ask the
    user — a wrong base silently changes the changeset under review.
    **Ready when:** the reviewed revision and its base stand in the report's
-   intro.
+   intro — `base none — reviewed as it stands` where there is none.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
