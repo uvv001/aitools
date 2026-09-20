@@ -85,9 +85,10 @@ findings; edit the section by hand and the next run overwrites it. A broken
 structure — a title missing, repeated, or not reading `# Review — <target>`,
 a section missing, repeated, out of order, or added after the findings, a
 finding header outside `## Findings`, a `###` heading inside them that does
-not parse as one — stops the run with exit code 1, the offender named with
-its line and the document untouched. Nothing else belongs in the section:
-state history lives in the findings' own Updates.
+not parse as one, a state or severity marker outside the scales — stops the
+run with exit code 1, the offender named with its line and the document
+untouched. Nothing else belongs in the section: state history lives in the
+findings' own Updates.
 
 ## Findings
 
@@ -136,7 +137,10 @@ transition table to satisfy — the rule is that every change of state, by the
 user or by a round's re-check, is written into Updates with its reason, so an
 odd move is visible in the finding's own history.
 
-Severity changes keep the ID and are logged under Updates.
+Severity is one of 🔴 high, 🟡 medium, ⚪ low — the scale
+[SKILL.md](SKILL.md) defines. A state or a severity outside these markers
+stops the run with its line named. Severity changes keep the ID and are
+logged under Updates.
 
 ### Findings raised outside the validation pass
 

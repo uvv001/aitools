@@ -19,6 +19,9 @@
  * Header shape, defined in report-format.md:
  *   ### <state> <severity> <ID> — <title>
  *
+ * State and severity are the markers report-format.md lists; a header
+ * carrying any other one stops the run with its line named.
+ *
  * Links follow the GitHub heading-slug rule: lower-cased, every character
  * outside [a-z0-9 _-] dropped, spaces turned into hyphens.
  *
@@ -50,6 +53,8 @@ const STATES: State[] = [
   { marker: "📌", label: "deferred" },
   { marker: "🔀", label: "improvement" },
 ];
+
+const SEVERITIES = ["🔴", "🟡", "⚪"];
 
 const HEADING = /^###\s+(?<rest>.*\S)\s*$/u;
 const FINDING =
@@ -144,7 +149,11 @@ function main(): void {
       continue;
     }
     const state = finding.groups!.state;
-    if (!STATES.some((known) => known.marker === state)) unknown.push(`${finding.groups!.id} (${state})`);
+    const severity = finding.groups!.severity;
+    if (!STATES.some((known) => known.marker === state))
+      unknown.push(`line ${i + 1}: state '${state}'`);
+    if (!SEVERITIES.includes(severity))
+      unknown.push(`line ${i + 1}: severity '${severity}'`);
     findings.push({
       id: finding.groups!.id,
       state,
@@ -191,7 +200,9 @@ function main(): void {
       `malformed finding header in ${path} — ${malformed.join("; ")} — expected '### <state> <severity> <ID> — <title>'`,
     );
   if (unknown.length > 0)
-    throw new Error(`unknown state marker on ${unknown.join(", ")} — see the states table in report-format.md`);
+    throw new Error(
+      `unknown marker in ${path} — ${unknown.join("; ")} — see the states table and the severity scale in report-format.md`,
+    );
 
   const start = sections.find((section) => section.title === "Dashboard")!.line;
   const end = sections.find((section) => section.title === "Findings")!.line;
