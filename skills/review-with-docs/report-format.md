@@ -78,6 +78,9 @@ links:
   1. [F1](#--f1--re-review-records-a-re-check-entry-but-never-moves-a-marker)
 ```
 
+A report with no findings carries one line in their place:
+`**No findings** — the review raised none.`
+
 The links are GitHub heading slugs: lower-cased, every character outside
 `[a-z0-9 _-]` dropped, spaces turned into hyphens — the stripped markers are
 what leave the leading hyphens. Run the script after every write to the
