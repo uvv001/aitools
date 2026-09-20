@@ -66,9 +66,10 @@ This list is the contract; nowhere else restates it.
 Top of the document, ahead of the dashboard:
 
 - **Reviewed** — per round, the pinned revision and the base it is read
-  against, with a dirty-tree note where one applies. Where there is no base —
-  files reviewed as they stand — it reads `base none — reviewed as it
-  stands`, so an absent base never looks like a forgotten one.
+  against, with a dirty-tree note where one applies. The base is written
+  `` base `<revision>` `` where one exists and `base none — reviewed as it
+  stands` where there is none, so an absent base never looks like a
+  forgotten one.
 - **Rules** — each instruction file paired with the paths its scope covers,
   plus the user's explicit review questions.
 - **Commits** — one line per commit the review made: SHA, timestamp, what it
