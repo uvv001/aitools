@@ -103,10 +103,11 @@ the reviewed area opens the next round, and the review runs until step 7.
 ## Evidence
 
 Every finding carries a verbatim snippet from the reviewed revision, with
-file path and lines; multiple occurrences are each illustrated. Where the
-finding is an absence — a missing test, guard, or accessible name — the
-snippet shows the site that should carry it. Paraphrased code hides the very
-drift the review exists to catch.
+file path and lines, fenced as [report-format.md](report-format.md#structure)
+requires; multiple occurrences are each illustrated. Where the finding is an
+absence — a missing test, guard, or accessible name — the snippet shows the
+site that should carry it. Paraphrased code hides the very drift the review
+exists to catch.
 
 Verify before claiming: run the test, trace the call path, measure the value.
 An assumption reaches the report along one of two paths — verified or

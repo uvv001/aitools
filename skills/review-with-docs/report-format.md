@@ -41,9 +41,12 @@ that already exists or to write a blank `<target>`, which would title the
 document in a way the dashboard script rejects.
 
 The structure is a contract, and [`update-dashboard.ts`](update-dashboard.ts)
-enforces it. Each of these stops the run with exit code 1 and leaves the
-document untouched, naming the offending line where there is one and the
-expectation where the offender is an absence:
+enforces it. Fenced code blocks sit outside it: nothing inside a fence is
+read as a heading or a finding, so quoted examples are always fenced — an
+unfenced finding-shaped line is a finding, and validated as one. Each of
+these stops the run with exit code 1 and leaves the document untouched,
+naming the offending line where there is one and the expectation where the
+offender is an absence:
 
 - The title is missing, repeated, sits below `## Intro`, or reads anything
   but `# Review — <target>`.
