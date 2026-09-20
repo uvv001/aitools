@@ -9,9 +9,10 @@
  * quoted examples never count as findings.
  *
  * The structure contract of report-format.md is a precondition: each break it
- * lists — the title, the sections, a finding header's place or shape, an
- * unknown marker, a duplicate ID — makes the script name the offending line
- * and write nothing, rather than rewrite a document it cannot read.
+ * lists — the title, the sections, the intro's entries, a finding header's
+ * place or shape, an unknown marker, a duplicate or out-of-sequence ID, a
+ * finding missing a subsection — makes the script name the offending line and
+ * write nothing, rather than rewrite a document it cannot read.
  * scaffold-report.ts writes that structure.
  *
  * Header shape, defined in report-format.md:
@@ -52,13 +53,17 @@ const STATES: State[] = [
 const SEVERITIES = ["🔴", "🟡", "⚪"];
 
 const HEADING = /^###\s+(?<rest>.*\S)\s*$/u;
+const SUBHEADING = /^####\s+(?<title>.*\S)\s*$/u;
 const FINDING =
   /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>[A-Za-z0-9-]+)\s+—\s+(?<title>.+)$/u;
 const FENCE = /^\s*(?<marker>`{3,}|~{3,})/u;
 const SECTION = /^##\s+(?<title>.*\S)\s*$/u;
 const TITLE = /^#\s+(?<rest>.*\S)\s*$/u;
 const ID = /^F(?<number>\d+)$/u;
+const ENTRY = /^\s*(?:-\s+)?\*\*(?<label>[^*]+)\*\*/u;
 const SECTIONS = ["Intro", "Dashboard", "Findings"];
+const ENTRIES = ["Reviewed", "Rules", "Commits", "Status"];
+const SUBSECTIONS = ["Description", "Updates"];
 
 function slug(heading: string): string {
   return heading
@@ -109,8 +114,11 @@ function main(): void {
   let previous: number | null = null;
   const titles: { text: string; line: number }[] = [];
   const sections: { title: string; line: number }[] = [];
+  const entries = new Set<string>();
+  const blocks: { id: string; line: number; parts: Set<string> }[] = [];
   let fence: string | null = null;
   let inFindings = false;
+  let inIntro = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -129,13 +137,24 @@ function main(): void {
       const title = section.groups!.title;
       sections.push({ title, line: i });
       inFindings = title === "Findings";
+      inIntro = title === "Intro";
       continue;
+    }
+
+    if (inIntro) {
+      const entry = ENTRY.exec(line);
+      if (entry) entries.add(entry.groups!.label.trim());
     }
 
     const heading = HEADING.exec(line);
     if (!heading) {
-      const title = TITLE.exec(line);
-      if (title) titles.push({ text: title.groups!.rest, line: i });
+      const subheading = SUBHEADING.exec(line);
+      if (subheading && blocks.length > 0 && inFindings)
+        blocks[blocks.length - 1].parts.add(subheading.groups!.title);
+      if (!subheading) {
+        const title = TITLE.exec(line);
+        if (title) titles.push({ text: title.groups!.rest, line: i });
+      }
       continue;
     }
 
@@ -169,6 +188,7 @@ function main(): void {
       state,
       anchor: slug(heading.groups!.rest),
     });
+    blocks.push({ id, line: i + 1, parts: new Set<string>() });
   }
 
   const scaffold = "scaffold the document with scaffold-report.ts";
@@ -225,6 +245,20 @@ function main(): void {
   if (disordered.length > 0)
     throw new Error(
       `finding IDs out of order in ${path} — ${disordered.join("; ")} — they rise down the section`,
+    );
+  const missingEntries = ENTRIES.filter((entry) => !entries.has(entry));
+  if (missingEntries.length > 0)
+    throw new Error(
+      `intro entry missing in ${path} — ${missingEntries.map((entry) => `**${entry}**`).join(", ")} — the intro carries ${ENTRIES.map((entry) => `**${entry}**`).join(", ")}`,
+    );
+  const incomplete = blocks
+    .map((block) => ({ block, missing: SUBSECTIONS.filter((part) => !block.parts.has(part)) }))
+    .filter(({ missing }) => missing.length > 0);
+  if (incomplete.length > 0)
+    throw new Error(
+      `finding subsection missing in ${path} — ${incomplete
+        .map(({ block, missing }) => `${block.id} on line ${block.line} has no ${missing.map((part) => `'#### ${part}'`).join(" or ")}`)
+        .join("; ")} — every finding carries '#### Description' and '#### Updates'`,
     );
 
   const start = sections.find((section) => section.title === "Dashboard")!.line;

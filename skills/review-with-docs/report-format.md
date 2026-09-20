@@ -50,6 +50,10 @@ with its line, and leaves the document untouched:
 - Two findings carry the same ID.
 - An ID reads anything but `F<n>`, or a lower one follows a higher: the
   findings rise down the section.
+- The intro lacks one of its four entries — **Reviewed**, **Rules**,
+  **Commits**, **Status** — written as a bold label, on its own or opening a
+  bullet.
+- A finding lacks `#### Description` or `#### Updates`.
 
 This list is the contract; nowhere else restates it.
 
