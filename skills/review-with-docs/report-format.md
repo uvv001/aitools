@@ -48,6 +48,8 @@ with its line, and leaves the document untouched:
   finding the dashboard drops is a finding the reader never sees.
 - A state or severity marker falls outside the scales below.
 - Two findings carry the same ID.
+- An ID reads anything but `F<n>`, or a lower one follows a higher: the
+  findings rise down the section.
 
 This list is the contract; nowhere else restates it.
 

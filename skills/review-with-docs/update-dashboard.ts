@@ -57,6 +57,7 @@ const FINDING =
 const FENCE = /^\s*(?<marker>`{3,}|~{3,})/u;
 const SECTION = /^##\s+(?<title>.*\S)\s*$/u;
 const TITLE = /^#\s+(?<rest>.*\S)\s*$/u;
+const ID = /^F(?<number>\d+)$/u;
 const SECTIONS = ["Intro", "Dashboard", "Findings"];
 
 function slug(heading: string): string {
@@ -103,6 +104,9 @@ function main(): void {
   const misplaced: string[] = [];
   const malformed: string[] = [];
   const idLines = new Map<string, number[]>();
+  const misshaped: string[] = [];
+  const disordered: string[] = [];
+  let previous: number | null = null;
   const titles: { text: string; line: number }[] = [];
   const sections: { title: string; line: number }[] = [];
   let fence: string | null = null;
@@ -152,6 +156,14 @@ function main(): void {
     if (!SEVERITIES.includes(severity))
       unknown.push(`line ${i + 1}: severity '${severity}'`);
     idLines.set(id, [...(idLines.get(id) ?? []), i + 1]);
+    const shaped = ID.exec(id);
+    if (!shaped) misshaped.push(`line ${i + 1}: ${id}`);
+    else {
+      const number = Number(shaped.groups!.number);
+      if (previous !== null && number <= previous)
+        disordered.push(`line ${i + 1}: ${id} after F${previous}`);
+      previous = number;
+    }
     findings.push({
       id,
       state,
@@ -205,6 +217,14 @@ function main(): void {
   if (reused.length > 0)
     throw new Error(
       `duplicate finding ID in ${path} — ${reused.map(([id, at]) => `${id} on lines ${at.join(", ")}`).join("; ")} — an ID is never reused`,
+    );
+  if (misshaped.length > 0)
+    throw new Error(
+      `finding ID out of shape in ${path} — ${misshaped.join("; ")} — an ID reads F<n>, as F7`,
+    );
+  if (disordered.length > 0)
+    throw new Error(
+      `finding IDs out of order in ${path} — ${disordered.join("; ")} — they rise down the section`,
     );
 
   const start = sections.find((section) => section.title === "Dashboard")!.line;
