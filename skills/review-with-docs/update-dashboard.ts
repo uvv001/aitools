@@ -213,9 +213,10 @@ function main(): void {
   }
   for (const title of SECTIONS)
     if (!seen.has(title)) throw new Error(`no '## ${title}' section in ${path} — ${scaffold}`);
-  if (sections.map((section) => section.title).join() !== SECTIONS.join())
+  const order = sections.findIndex((section, index) => section.title !== SECTIONS[index]);
+  if (order >= 0)
     throw new Error(
-      `sections out of order in ${path}: ${sections.map((section) => `## ${section.title}`).join(", ")} — expected ${expected}`,
+      `sections out of order in ${path}, line ${sections[order].line + 1}: '## ${sections[order].title}' where '## ${SECTIONS[order]}' belongs — the report reads ${sections.map((section) => `## ${section.title}`).join(", ")}, expected ${expected}`,
     );
   if (titles[0].line > sections[0].line)
     throw new Error(
