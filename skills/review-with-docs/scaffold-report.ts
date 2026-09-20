@@ -7,6 +7,10 @@
  *
  * Usage: node scaffold-report.ts <report.md> [<target>]
  *
+ * The target names what is under review. Omitted, it is written as a
+ * placeholder; blank, it is refused — the title it would write is one
+ * update-dashboard.ts rejects.
+ *
  * Requires Node 24 or newer — it runs this TypeScript file directly, with no
  * build step and no dependencies.
  */
@@ -43,10 +47,15 @@ function skeleton(target: string): string {
 function main(): void {
   const [path, target] = process.argv.slice(2);
   if (!path) throw new Error("usage: node scaffold-report.ts <report.md> [<target>]");
+  const name = target === undefined ? "<target>" : target.trim();
+  if (name === "")
+    throw new Error(
+      "blank <target> — name what is under review, or omit the argument; '# Review — ' is a title update-dashboard.ts rejects",
+    );
   if (existsSync(path)) throw new Error(`report already exists: ${path}`);
 
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, skeleton(target ?? "<target>"), "utf8");
+  writeFileSync(path, skeleton(name), "utf8");
   console.log(`Report scaffolded: ${path}`);
 }
 

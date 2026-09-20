@@ -35,7 +35,8 @@ node <skill-dir>/scaffold-report.ts <report.md> [<target>]
 
 It writes the skeleton — the intro's entries as placeholders, the two lower
 sections empty — creates the folder on the way, and refuses to touch a file
-that already exists. The structure is a contract:
+that already exists or to write a blank `<target>`, which would title the
+document in a way the dashboard script rejects. The structure is a contract:
 [`update-dashboard.ts`](update-dashboard.ts) reads findings only from
 `## Findings`, where every `###` heading is one, and stops with a message
 naming what breaks it rather than rewrite the document. A finding header
