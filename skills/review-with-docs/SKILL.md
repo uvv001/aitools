@@ -72,7 +72,9 @@ a PR.
    the revision the last one reviewed — and leave every finding in the state
    it reached; ⏳ and 📌 at the close are a result, not an oversight.
    **Ready when:** the intro's status reads closed with its timestamp and
-   revision, the dashboard is regenerated, and the last commit is recorded.
+   revision, the dashboard is regenerated, and every commit before the
+   closing one stands in the intro — the closing commit is the trailing
+   entry the record never carries.
 
 Steps 5 and 6 are a loop: each round's findings are triaged, each change in
 the reviewed area opens the next round, and the review runs until step 7.

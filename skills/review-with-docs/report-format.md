@@ -13,7 +13,10 @@ Commit it to the current branch after the initial write, after each triage
 batch, after each round, and at the close — the report and the artifacts the
 review produced beside it, nothing else. Record each commit in the intro: a
 reviewed branch is often rebased or force-pushed, and the SHAs are what let
-you restore the document.
+you restore the document. The record trails by one: a SHA exists only once
+its commit does, so each commit is written into the intro by the next one to
+touch the report — the next triage batch, round, or close. When no later
+commit comes, the list ends one short; that is the rule holding, not a gap.
 
 Texts are clean and strict: a finding says what is wrong, where, and what to
 do — nothing more. Timestamps read `yyyy-mm-dd hh:mm` from the clock, e.g.
@@ -66,7 +69,8 @@ Top of the document, ahead of the dashboard:
 - **Rules** — each instruction file paired with the paths its scope covers,
   plus the user's explicit review questions.
 - **Commits** — one line per commit the review made: SHA, timestamp, what it
-  carried.
+  carried. The newest is written by the commit after it, so the list trails
+  the branch by one.
 - **Status** — `active` while the review runs; at the close, `closed
   yyyy-mm-dd hh:mm at <revision>`.
 
