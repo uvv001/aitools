@@ -34,7 +34,7 @@ function skeleton(target: string): string {
 
 **Commits**
 
-- \`<sha>\` · <yyyy-mm-dd hh:mm> · \`<subject>\`
+- none recorded yet, the record trails by one
 
 **Status** — active
 

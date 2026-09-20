@@ -70,7 +70,9 @@ Top of the document, ahead of the dashboard:
   plus the user's explicit review questions.
 - **Commits** — one line per commit the review made: SHA, timestamp, what it
   carried. The newest is written by the commit after it, so the list trails
-  the branch by one.
+  the branch by one; before the first is recorded the entry carries one line
+  in their place — `- none recorded yet, the record trails by one` — the line
+  [`scaffold-report.ts`](scaffold-report.ts) writes into a fresh report.
 - **Status** — `active` while the review runs; at the close, `closed
   yyyy-mm-dd hh:mm at <revision>`.
 
