@@ -188,7 +188,8 @@ substance.
 
 ### Rounds
 
-A round leaves its trace in the findings themselves: every finding carries a
-`Round <n>:` Updates entry for that round, whether the round moved it or not.
-That record is the only one the format keeps — the dashboard holds no round
-history, so a round is read off the findings it touched.
+A round leaves two traces, with distinct jobs. The intro's **Reviewed** entry
+pins what the round read — its revision and its base. Every finding carries a
+`Round <n>:` Updates entry for that round, whether the round moved it or not,
+and that is where the round's effects live. The dashboard keeps no round
+history, so a round is read off the intro and the findings it touched.
