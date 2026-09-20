@@ -8,19 +8,14 @@
  * links to its findings. Lines inside fenced code blocks are ignored, so
  * quoted examples never count as findings.
  *
- * The document structure report-format.md requires — a `# Review — <target>`
- * title, then `## Intro`, `## Dashboard` and `## Findings`, each exactly once
- * and nothing after them — is a precondition: the script fails rather than
- * rewrite a document that breaks it. Every `###` heading inside the findings
- * must parse as a finding, and none may sit outside them; either way the
- * offending line is named and nothing is written. scaffold-report.ts writes
- * that structure.
+ * The structure contract of report-format.md is a precondition: each break it
+ * lists — the title, the sections, a finding header's place or shape, an
+ * unknown marker, a duplicate ID — makes the script name the offending line
+ * and write nothing, rather than rewrite a document it cannot read.
+ * scaffold-report.ts writes that structure.
  *
  * Header shape, defined in report-format.md:
  *   ### <state> <severity> <ID> — <title>
- *
- * State and severity are the markers report-format.md lists; a header
- * carrying any other one stops the run with its line named.
  *
  * Links follow the GitHub heading-slug rule: lower-cased, every character
  * outside [a-z0-9 _-] dropped, spaces turned into hyphens.

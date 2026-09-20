@@ -23,9 +23,7 @@ do — nothing more. Timestamps read `yyyy-mm-dd hh:mm` from the clock, e.g.
 
 Four parts, in this order: the `# Review — <target>` title, `## Intro`,
 `## Dashboard`, `## Findings`. Each appears once, in that order, and nothing
-follows the findings — a title missing or written another way, a section
-repeated, misplaced, or added below the findings breaks the contract and
-stops the run. Scaffold them with the script next to this file —
+follows the findings. Scaffold them with the script next to this file —
 [`scaffold-report.ts`](scaffold-report.ts) — instead of writing the document
 freehand:
 
@@ -36,13 +34,22 @@ node <skill-dir>/scaffold-report.ts <report.md> [<target>]
 It writes the skeleton — the intro's entries as placeholders, the two lower
 sections empty — creates the folder on the way, and refuses to touch a file
 that already exists or to write a blank `<target>`, which would title the
-document in a way the dashboard script rejects. The structure is a contract:
-[`update-dashboard.ts`](update-dashboard.ts) reads findings only from
-`## Findings`, where every `###` heading is one, and stops with a message
-naming what breaks it rather than rewrite the document. A finding header
-outside that section breaks it too — right shape, wrong place — and a
-heading inside it the script cannot read is no less a break: a finding the
-dashboard drops is a finding the reader never sees.
+document in a way the dashboard script rejects.
+
+The structure is a contract, and [`update-dashboard.ts`](update-dashboard.ts)
+enforces it. Each of these stops the run with exit code 1, the offender named
+with its line, and leaves the document untouched:
+
+- The title is missing, repeated, sits below `## Intro`, or reads anything
+  but `# Review — <target>`.
+- A section is missing, repeated, out of order, or added after the findings.
+- A finding header stands outside `## Findings` — right shape, wrong place.
+- A `###` heading inside `## Findings` does not parse as a finding header: a
+  finding the dashboard drops is a finding the reader never sees.
+- A state or severity marker falls outside the scales below.
+- Two findings carry the same ID.
+
+This list is the contract; nowhere else restates it.
 
 ## Intro
 
@@ -84,14 +91,10 @@ A report with no findings carries one line in their place:
 The links are GitHub heading slugs: lower-cased, every character outside
 `[a-z0-9 _-]` dropped, spaces turned into hyphens — the stripped markers are
 what leave the leading hyphens. Run the script after every write to the
-findings; edit the section by hand and the next run overwrites it. A broken
-structure — a title missing, repeated, or not reading `# Review — <target>`,
-a section missing, repeated, out of order, or added after the findings, a
-finding header outside `## Findings`, a `###` heading inside them that does
-not parse as one, a state or severity marker outside the scales, an ID two
-findings share — stops the run with exit code 1, the offender named with its
-line and the document untouched. Nothing else belongs in the section: state
-history lives in the findings' own Updates.
+findings; edit the section by hand and the next run overwrites it. Any break
+of the [structure contract](#structure) stops it before it writes. Nothing
+else belongs in the section: state history lives in the findings' own
+Updates.
 
 ## Findings
 
@@ -122,7 +125,7 @@ with the finding:
 
 IDs run in one sequence across every round — `F1`, `F2`, …; a new round
 continues from the next free number. An ID is never reused and never
-renamed; two findings sharing one stop the run.
+renamed.
 
 | Marker | State |
 |---|---|
@@ -141,9 +144,8 @@ user or by a round's re-check, is written into Updates with its reason, so an
 odd move is visible in the finding's own history.
 
 Severity is one of 🔴 high, 🟡 medium, ⚪ low — the scale
-[SKILL.md](SKILL.md) defines. A state or a severity outside these markers
-stops the run with its line named. Severity changes keep the ID and are
-logged under Updates.
+[SKILL.md](SKILL.md) defines. Severity changes keep the ID and are logged
+under Updates.
 
 ### Findings raised outside the validation pass
 
