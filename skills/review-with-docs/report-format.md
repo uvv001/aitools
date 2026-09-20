@@ -46,7 +46,8 @@ with its line, and leaves the document untouched:
 
 - The title is missing, repeated, sits below `## Intro`, or reads anything
   but `# Review — <target>`.
-- A section is missing, repeated, out of order, or added after the findings.
+- A section is missing, repeated, out of order, added after the findings, or
+  is not one of the three.
 - A finding header stands outside `## Findings` — right shape, wrong place.
 - A `###` heading inside `## Findings` does not parse as a finding header: a
   finding the dashboard drops is a finding the reader never sees.
