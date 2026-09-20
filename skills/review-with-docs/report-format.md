@@ -85,10 +85,10 @@ findings; edit the section by hand and the next run overwrites it. A broken
 structure — a title missing, repeated, or not reading `# Review — <target>`,
 a section missing, repeated, out of order, or added after the findings, a
 finding header outside `## Findings`, a `###` heading inside them that does
-not parse as one, a state or severity marker outside the scales — stops the
-run with exit code 1, the offender named with its line and the document
-untouched. Nothing else belongs in the section: state history lives in the
-findings' own Updates.
+not parse as one, a state or severity marker outside the scales, an ID two
+findings share — stops the run with exit code 1, the offender named with its
+line and the document untouched. Nothing else belongs in the section: state
+history lives in the findings' own Updates.
 
 ## Findings
 
@@ -119,7 +119,7 @@ with the finding:
 
 IDs run in one sequence across every round — `F1`, `F2`, …; a new round
 continues from the next free number. An ID is never reused and never
-renamed.
+renamed; two findings sharing one stop the run.
 
 | Marker | State |
 |---|---|

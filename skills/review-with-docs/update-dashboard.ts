@@ -107,6 +107,7 @@ function main(): void {
   const unknown: string[] = [];
   const misplaced: string[] = [];
   const malformed: string[] = [];
+  const idLines = new Map<string, number[]>();
   const titles: { text: string; line: number }[] = [];
   const sections: { title: string; line: number }[] = [];
   let fence: string | null = null;
@@ -150,12 +151,14 @@ function main(): void {
     }
     const state = finding.groups!.state;
     const severity = finding.groups!.severity;
+    const id = finding.groups!.id;
     if (!STATES.some((known) => known.marker === state))
       unknown.push(`line ${i + 1}: state '${state}'`);
     if (!SEVERITIES.includes(severity))
       unknown.push(`line ${i + 1}: severity '${severity}'`);
+    idLines.set(id, [...(idLines.get(id) ?? []), i + 1]);
     findings.push({
-      id: finding.groups!.id,
+      id,
       state,
       anchor: slug(heading.groups!.rest),
     });
@@ -202,6 +205,11 @@ function main(): void {
   if (unknown.length > 0)
     throw new Error(
       `unknown marker in ${path} — ${unknown.join("; ")} — see the states table and the severity scale in report-format.md`,
+    );
+  const reused = [...idLines].filter(([, at]) => at.length > 1);
+  if (reused.length > 0)
+    throw new Error(
+      `duplicate finding ID in ${path} — ${reused.map(([id, at]) => `${id} on lines ${at.join(", ")}`).join("; ")} — an ID is never reused`,
     );
 
   const start = sections.find((section) => section.title === "Dashboard")!.line;
