@@ -34,7 +34,8 @@ freehand:
 node <skill-dir>/scaffold-report.ts <report.md> [<target>]
 ```
 
-It writes the skeleton — the intro's entries as placeholders, the two lower
+It writes the skeleton — the intro's entries as placeholders, except
+**Commits**, which already carries its empty-record line, and the two lower
 sections empty — creates the folder on the way, and refuses to touch a file
 that already exists or to write a blank `<target>`, which would title the
 document in a way the dashboard script rejects.
