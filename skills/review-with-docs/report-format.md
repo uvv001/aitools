@@ -41,8 +41,9 @@ that already exists or to write a blank `<target>`, which would title the
 document in a way the dashboard script rejects.
 
 The structure is a contract, and [`update-dashboard.ts`](update-dashboard.ts)
-enforces it. Each of these stops the run with exit code 1, the offender named
-with its line, and leaves the document untouched:
+enforces it. Each of these stops the run with exit code 1 and leaves the
+document untouched, naming the offending line where there is one and the
+expectation where the offender is an absence:
 
 - The title is missing, repeated, sits below `## Intro`, or reads anything
   but `# Review — <target>`.
