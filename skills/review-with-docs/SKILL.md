@@ -55,22 +55,26 @@ a PR.
    round just triaged; triage opens no round of its own.
    **Ready when:** every finding the user ruled on carries its state in the
    header and an Updates entry explaining the move, every finding raised
-   during the triage carries a `Round <n>:` entry for that same round, the
+   during the triage carries a `Round <n>:` entry for that same round, a
+   triage that reopened the review left the status in its reopened form, the
    dashboard is regenerated, and the report is committed.
 6. **Re-review.** A round opens when new changes land in the reviewed area;
-   confirm with the user when in doubt. Changes landing after the close
-   reopen the review instead of starting another: the same report continues,
-   its status returns to the reopened form
-   [report-format.md](report-format.md#intro) defines, and the round and ID
-   sequences carry on — history stays in one document. Where the new work is
-   really a different target, ask the user which it is. Every round reads the
-   **full changeset** at the new revision — never a diff between revisions,
-   because authors amend and force-push and per-commit attribution misleads.
-   Re-check every finding the report carries, whatever its state, and search
-   the changeset afresh for what nobody has raised yet. Comparing revisions
-   serves one purpose: telling whether the feedback was acted on. No state
-   survives by default — a fix regresses, a deferred finding gets addressed,
-   a discarded concern returns with better evidence.
+   confirm with the user when in doubt. Anything that touches the report
+   after the close reopens the review instead of starting another — a change
+   landing in the reviewed area, or a verdict on a finding the close left
+   open: the same report continues, its status returns to the reopened form
+   [report-format.md](report-format.md#intro) defines, naming what landed,
+   and the round and ID sequences carry on — history stays in one document.
+   A change opens the round below; a verdict is step 5 and opens none. Where
+   the new work is really a different target, ask the user which it is.
+   Every round reads the **full changeset** at the new revision — never a
+   diff between revisions, because authors amend and force-push and
+   per-commit attribution misleads. Re-check every finding the report
+   carries, whatever its state, and search the changeset afresh for what
+   nobody has raised yet. Comparing revisions serves one purpose: telling
+   whether the feedback was acted on. No state survives by default — a fix
+   regresses, a deferred finding gets addressed, a discarded concern returns
+   with better evidence.
    **Ready when:** every finding carries a `Round <n>:` Updates entry, new
    findings continue the report's ID sequence, the round's revision stands in
    the intro, a round that reopened the review left the status in its
