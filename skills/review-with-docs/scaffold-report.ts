@@ -7,9 +7,11 @@
  *
  * The skeleton follows report-format.md's Intro spec, which defines the
  * wording this file writes and leaves as slots: `<base>` takes either form
- * the spec gives, **Rules** either its pairs or the spec's empty line, and
- * **Commits** carries its empty-record line verbatim. The spec is the
- * source; change it there first.
+ * the spec gives, **Rules** either its pairs or the spec's empty line,
+ * **Commits** carries its empty-record line verbatim, and **Status** opens
+ * `active since` the moment this script runs — the timestamp a first close
+ * records as the state it left. The spec is the source; change it there
+ * first.
  *
  * Usage: node scaffold-report.ts <report.md> [<target>]
  *
@@ -23,6 +25,11 @@
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+
+function stamp(now: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
 
 function skeleton(target: string): string {
   return `# Review — ${target}
@@ -42,7 +49,7 @@ function skeleton(target: string): string {
 
 - none recorded yet, the record trails by one
 
-**Status** — active
+**Status** — active since ${stamp(new Date())}
 
 ## Dashboard
 
