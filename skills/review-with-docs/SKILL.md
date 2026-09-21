@@ -56,8 +56,9 @@ a PR.
    **Ready when:** every finding the user ruled on carries its state in the
    header and an Updates entry explaining the move, every finding raised
    during the triage carries a `Round <n>:` entry for that same round, a
-   triage that reopened the review left the status in its reopened form, the
-   dashboard is regenerated, and the report is committed.
+   triage that reopened the review left the status in the form
+   [report-format.md](report-format.md#intro) defines, the dashboard is
+   regenerated, and the report is committed.
 6. **Re-review.** A round opens when new changes land in the reviewed area;
    confirm with the user when in doubt. Anything that touches the report
    after the close reopens the review instead of starting another — a change
@@ -77,9 +78,9 @@ a PR.
    with better evidence.
    **Ready when:** every finding carries a `Round <n>:` Updates entry, new
    findings continue the report's ID sequence, the round's revision stands in
-   the intro, a round that reopened the review left the status in its
-   reopened form with the close it came from under the entry, the dashboard
-   is regenerated, and the report is committed.
+   the intro, a round that reopened the review left the status in the form
+   [report-format.md](report-format.md#intro) defines, the dashboard is
+   regenerated, and the report is committed.
 7. **Close.** The review ends when the user closes it. Set the intro's status
    to the closed form [report-format.md](report-format.md#intro) defines —
    its timestamp off the clock, its revision the last one reviewed — and
