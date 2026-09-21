@@ -88,11 +88,13 @@ Top of the document, ahead of the dashboard:
   the branch by one; before the first is recorded the entry carries one line
   in their place — `- none recorded yet, the record trails by one` — the line
   [`scaffold-report.ts`](scaffold-report.ts) writes into a fresh report.
-- **Status** — `active` while the review runs; at the close, `closed
-  yyyy-mm-dd hh:mm at <revision>`. A review reopened by a later change
-  returns to `active — reopened yyyy-mm-dd hh:mm, <what landed>, after the
-  close of yyyy-mm-dd hh:mm at <revision>`, carrying the close it came back
-  from instead of overwriting it.
+- **Status** — the label line holds the state now: `active` while the review
+  runs, `closed yyyy-mm-dd hh:mm at <revision>` at the close, `active —
+  reopened yyyy-mm-dd hh:mm, <what landed>` after a reopen. Every state the
+  review leaves is added under the entry as its own line, oldest first —
+  `- closed yyyy-mm-dd hh:mm at <revision>`, `- reopened yyyy-mm-dd hh:mm,
+  <what landed>` — so a second close never erases the first. A review still
+  on its first `active` carries none.
 
 ## Dashboard
 

@@ -78,15 +78,18 @@ a PR.
    **Ready when:** every finding carries a `Round <n>:` Updates entry, new
    findings continue the report's ID sequence, the round's revision stands in
    the intro, a round that reopened the review left the status in its
-   reopened form, the dashboard is regenerated, and the report is committed.
+   reopened form with the close it came from under the entry, the dashboard
+   is regenerated, and the report is committed.
 7. **Close.** The review ends when the user closes it. Set the intro's status
-   to `closed yyyy-mm-dd hh:mm at <revision>` — the timestamp off the clock,
-   the revision the last one reviewed — and leave every finding in the state
-   it reached; ⏳ and 📌 at the close are a result, not an oversight.
+   to the closed form [report-format.md](report-format.md#intro) defines —
+   its timestamp off the clock, its revision the last one reviewed — and
+   leave every finding in the state it reached; ⏳ and 📌 at the close are a
+   result, not an oversight.
    **Ready when:** the intro's status reads closed with its timestamp and
-   revision, the dashboard is regenerated, and every commit before the
-   closing one stands in the intro — the closing commit trails, and the
-   record picks it up only where a reopen brings a later commit.
+   revision, the state it left stands under the entry, the dashboard is
+   regenerated, and every commit before the closing one stands in the intro —
+   the closing commit trails, and the record picks it up only where a reopen
+   brings a later commit.
 
 Steps 5 and 6 are a loop: each round's findings are triaged, each change in
 the reviewed area opens the next round, and the review runs until step 7 —
