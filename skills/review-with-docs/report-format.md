@@ -90,8 +90,9 @@ Top of the document, ahead of the dashboard:
   [`scaffold-report.ts`](scaffold-report.ts) writes into a fresh report.
 - **Status** — `active` while the review runs; at the close, `closed
   yyyy-mm-dd hh:mm at <revision>`. A review reopened by a later change
-  returns to `active — reopened yyyy-mm-dd hh:mm, <what landed>`, so the
-  close it came back from stays on record.
+  returns to `active — reopened yyyy-mm-dd hh:mm, <what landed>, after the
+  close of yyyy-mm-dd hh:mm at <revision>`, carrying the close it came back
+  from instead of overwriting it.
 
 ## Dashboard
 
