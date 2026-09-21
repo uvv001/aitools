@@ -81,8 +81,8 @@ a PR.
    it reached; ⏳ and 📌 at the close are a result, not an oversight.
    **Ready when:** the intro's status reads closed with its timestamp and
    revision, the dashboard is regenerated, and every commit before the
-   closing one stands in the intro — the closing commit is the trailing
-   entry the record never carries.
+   closing one stands in the intro — the closing commit trails, and the
+   record picks it up only where a reopen brings a later commit.
 
 Steps 5 and 6 are a loop: each round's findings are triaged, each change in
 the reviewed area opens the next round, and the review runs until step 7 —
