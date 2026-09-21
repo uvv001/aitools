@@ -93,7 +93,7 @@ a PR.
 
 Steps 5 and 6 are a loop: each round's findings are triaged, each change in
 the reviewed area opens the next round, and the review runs until step 7 —
-which a later change reopens, back into the same loop.
+which any later event touching the report reopens, back into the same loop.
 
 ## Validation
 
