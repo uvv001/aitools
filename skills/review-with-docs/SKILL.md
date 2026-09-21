@@ -58,17 +58,23 @@ a PR.
    during the triage carries a `Round <n>:` entry for that same round, the
    dashboard is regenerated, and the report is committed.
 6. **Re-review.** A round opens when new changes land in the reviewed area;
-   confirm with the user when in doubt. Every round reads the **full
-   changeset** at the new revision — never a diff between revisions, because
-   authors amend and force-push and per-commit attribution misleads. Re-check
-   every finding the report carries, whatever its state, and search the
-   changeset afresh for what nobody has raised yet. Comparing revisions
+   confirm with the user when in doubt. Changes landing after the close
+   reopen the review instead of starting another: the same report continues,
+   its status returns to the reopened form
+   [report-format.md](report-format.md#intro) defines, and the round and ID
+   sequences carry on — history stays in one document. Where the new work is
+   really a different target, ask the user which it is. Every round reads the
+   **full changeset** at the new revision — never a diff between revisions,
+   because authors amend and force-push and per-commit attribution misleads.
+   Re-check every finding the report carries, whatever its state, and search
+   the changeset afresh for what nobody has raised yet. Comparing revisions
    serves one purpose: telling whether the feedback was acted on. No state
    survives by default — a fix regresses, a deferred finding gets addressed,
    a discarded concern returns with better evidence.
    **Ready when:** every finding carries a `Round <n>:` Updates entry, new
    findings continue the report's ID sequence, the round's revision stands in
-   the intro, the dashboard is regenerated, and the report is committed.
+   the intro, a round that reopened the review left the status in its
+   reopened form, the dashboard is regenerated, and the report is committed.
 7. **Close.** The review ends when the user closes it. Set the intro's status
    to `closed yyyy-mm-dd hh:mm at <revision>` — the timestamp off the clock,
    the revision the last one reviewed — and leave every finding in the state
@@ -79,7 +85,8 @@ a PR.
    entry the record never carries.
 
 Steps 5 and 6 are a loop: each round's findings are triaged, each change in
-the reviewed area opens the next round, and the review runs until step 7.
+the reviewed area opens the next round, and the review runs until step 7 —
+which a later change reopens, back into the same loop.
 
 ## Validation
 

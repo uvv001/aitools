@@ -89,7 +89,9 @@ Top of the document, ahead of the dashboard:
   in their place — `- none recorded yet, the record trails by one` — the line
   [`scaffold-report.ts`](scaffold-report.ts) writes into a fresh report.
 - **Status** — `active` while the review runs; at the close, `closed
-  yyyy-mm-dd hh:mm at <revision>`.
+  yyyy-mm-dd hh:mm at <revision>`. A review reopened by a later change
+  returns to `active — reopened yyyy-mm-dd hh:mm, <what landed>`, so the
+  close it came back from stays on record.
 
 ## Dashboard
 
