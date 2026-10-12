@@ -1,0 +1,77 @@
+# Pull request
+
+Reached when the target is a pull request: reading what others wrote,
+publishing findings, answering duplicates. Only `finding post` and `link
+reply` write to GitHub; `pr sync` reads.
+
+## Connect
+
+`pr show --json` tells whether the review is connected. `init --pr <url>`
+connects it at the start; `pr connect <url>` later, where the PR did not
+exist yet. `pr sync`, `finding post` (dry runs too), and `link reply` need a
+token — see the Guardrails of [SKILL.md](SKILL.md) — and the last two need
+write permission.
+
+## Read what others wrote
+
+`pr sync` downloads the PR into the database — comments, reviews, threads,
+check annotations. Run it after every push and before every publish.
+`link pending` then lists each comment and check annotation that no link names
+yet; empty output means every one is handled, and the exit code is 0 either
+way. Classify each line and record it with a link:
+
+| The comment or annotation | Command |
+|---|---|
+| a comment the user wrote by hand saying what a finding says | `link own <F> <ref>` |
+| the same issue as a finding | `link duplicate <F> <ref>` |
+| no finding | `link note <ref> "<reason>"` |
+| a new issue | `finding add`, then `link duplicate <F> <ref>` |
+| a check annotation, always | `link duplicate <F> <ref>` — never a note |
+
+Links are records in the database; nothing reaches GitHub. Put a doubtful
+classification to the user; `link remove <ref>` undoes a link.
+
+`report comments [--author <login>]...` prints the PR as markdown for reading
+— description, conversation, threads with code, annotations. `--out <file>`
+writes it to a file, which stays out of the review's commit unless the user
+says otherwise.
+
+## Publish
+
+1. `finding list --unposted` lists the approved findings that have no comment
+   of their own yet.
+2. `finding post <F> --dry-run --by-agent` writes nothing and prints the exact
+   text and the place. Check the anchor, the warnings, and `links removed`.
+3. `finding post <F> --by-agent` adds the comment to the user's **pending
+   review**, which nobody else sees. The tool never submits it: tell the user
+   the comments wait for their submit in the web UI.
+4. A comment that duplicates a finding is answered with `link reply <ref>
+   --dry-run --by-agent`, then without `--dry-run`. The reply goes into the
+   same pending review. A conversation comment (`c…`) can only be answered at
+   once, and its answer links to a comment that others cannot open before the
+   submit: answer it after the user has submitted the review.
+
+`--by-agent` goes on every post and reply, dry runs included, so the preview
+is the exact text. `--now` publishes at once, and a conversation comment (`c…`)
+or a finding without an anchor can only go that way: use it on the user's
+explicit word, since an immediate comment cannot be taken back with the
+pending review. Posting an already posted finding again edits its live
+comment: do it on the user's word too.
+
+## A refused post
+
+A comment lands on the PR's latest revision, and the reviewed checkout may
+have diverged from it. A refusal is the signal: bring the message, the finding,
+and the commentable ranges the message lists to the user, and act on their
+decision. Re-anchoring, `--commit`, or editing the description to get past it
+are the user's call.
+
+The other refusals — a missing token, a pending review that blocks `--now`, a
+gone own comment — carry their fix in the message; follow it, and bring to
+the user whatever it asks that changes GitHub.
+
+## The user's part
+
+The user submits the pending review, resolves threads, and answers the
+author. A `fixed` finding says nothing about a resolved thread; the two move
+independently.
