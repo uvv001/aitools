@@ -133,7 +133,7 @@ the expected outcome.
    finding the review carries is re-checked, whatever its state, and the
    changeset is searched afresh for what nobody has raised yet. Each outcome
    is an Updates entry carrying `--round <n>` — `finding update`, or
-   `set-state` where the state moves, `fixed` with `--revision`. Comparing
+   `set-state` where the state moves, `fixed` per [States](#states). Comparing
    revisions serves one purpose: telling whether the feedback was acted on.
    No state survives by default — a fix regresses, a deferred finding gets
    addressed, a discarded concern returns with better evidence.
@@ -166,6 +166,16 @@ in the finding's own history.
 | ❌ | `discarded` | not a finding; the note holds the rationale |
 | 📌 | `deferred` | valid, consciously left as it is |
 | 🔀 | `improvement` | valid, routed outside this changeset |
+
+**Fixed** is reached two ways. When the PR moves, the user's sync opens a
+round (step 7), and the agent decides, finding by finding, from the code at
+the new revision: wide, every finding unless the round note narrows it. When
+the user asks for a fix, the agent implements it, commits it apart from the
+review files, and verifies it the way the finding was verified — the same
+test, trace or measurement now comes out clean: narrow, the finding named,
+and the next round's re-check at the pushed head confirms it. Both end in
+`set-state <F> fixed --revision <rev> --note <how verified>`, with
+`--round <n>` for the first only.
 
 ## Validation
 
