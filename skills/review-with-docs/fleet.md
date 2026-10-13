@@ -36,4 +36,4 @@ raised; the database holds its current version.
 The orchestrator's context holds the index — which agent produced which
 findings — and the briefs carry the pairing of instruction files and paths
 from step 2 of [SKILL.md](SKILL.md). `finding add` reads the files, so the
-orchestrator passes paths and retypes no description.
+orchestrator passes paths.

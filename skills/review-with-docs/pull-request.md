@@ -28,7 +28,7 @@ with a link:
 | the same issue as a finding | `link duplicate <F> <ref>` |
 | no finding | `link note <ref> "<reason>"` |
 | a new issue | `finding add`, then `link duplicate <F> <ref>` |
-| a check annotation, always | `link duplicate <F> <ref>` — never a note |
+| a check annotation, always | `link duplicate <F> <ref>` |
 
 Links are records in the database; nothing reaches GitHub. A doubtful
 classification is the user's call ([SKILL.md](SKILL.md)); `link remove <ref>`
@@ -68,8 +68,8 @@ comment: re-posting is the user's call too.
 A comment lands on the PR's latest revision, and the reviewed checkout may
 have diverged from it. A refusal is the signal, and the user's call: the
 message, the finding, and the commentable ranges the message lists go to the
-user, and the agent acts on the answer. Re-anchoring, `--commit`, or editing
-the description to get past it are the user's call.
+user, and the agent acts on the answer. Re-anchoring, `--commit`, or a
+rewritten description are the ways past it; the user picks.
 
 The other refusals — a missing token, a pending review that blocks `--now`, a
 gone own comment — carry their fix in the message; follow it, and whatever it

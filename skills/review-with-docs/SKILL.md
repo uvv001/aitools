@@ -90,8 +90,8 @@ is step 5, a publish request step 6, new changes step 7.
    that two agents raised on the same anchor merge into one: record the
    stronger description, and where the other adds occurrences, write the
    merged text to a file in the round's folder first (layout in
-   [fleet.md](fleet.md)). A pass that found nothing still renders the report
-   and says so; findings invented to fill it are worse than an empty round.
+   [fleet.md](fleet.md)). An empty pass is a result: render the report and
+   tell the user.
    **Ready when:** every finding carries severity, evidence, and a suggested
    fix in its description, `finding list` shows each of them, the review is
    checkpointed (see Guardrails), and the user has the report's path.
@@ -106,9 +106,8 @@ is step 5, a publish request step 6, new changes step 7.
    question or a remark that moves nothing goes in as `finding update`. A
    finding the user brings in, or one a triage question surfaces, is a
    `finding add` carrying the same evidence — text or screenshots from the
-   user are transcribed in substance — and it joins the round just triaged;
-   triage opens no round of its own. The user may rule on part of the
-   findings; the rest keep their state.
+   user are transcribed in substance — and is filed in the round just triaged.
+   The user may rule on part of the findings; the rest keep their state.
    **Ready when:** every finding the user ruled on carries its state and an
    Updates entry saying why, every finding raised during the triage is
    recorded, and the review is checkpointed.
@@ -136,8 +135,8 @@ is step 5, a publish request step 6, new changes step 7.
    is an Updates entry carrying `--round <n>` — `finding update`, or
    `set-state` where the state moves, `fixed` per [States](#states). Comparing
    revisions serves one purpose: telling whether the feedback was acted on.
-   No state survives by default — a fix regresses, a deferred finding gets
-   addressed, a discarded concern returns with better evidence.
+   Every state is re-earned each round — a fix regresses, a deferred finding
+   gets addressed, a discarded concern returns with better evidence.
    The user may narrow a round to some findings or paths; the re-check covers
    that subset.
    **Ready when:** the round stands in the database with its revision, its
@@ -180,7 +179,7 @@ and the next round's re-check at the pushed head confirms it. Both end in
 ## Validation
 
 - A **rule** is one enforceable statement — a single bullet of an instruction
-  file, or one explicit question from the user. Not a file, not a section.
+  file, or one explicit question from the user.
 - Iterate every changed line: does it serve the change's purpose, and does it
   meet the rules covering its path and the ecosystem's best practices?
 - Challenge the implementation. A review that summarizes the diff finds
@@ -188,8 +187,7 @@ and the next round's re-check at the pushed head confirms it. Both end in
 - Past a handful of files or a few hundred changed lines, dispatch a fleet
   per [fleet.md](fleet.md).
 - Severity: 🔴 high breaks or violates a rule, 🟡 medium risks harm under
-  realistic conditions, ⚪ low is polish or a suggestion. A style preference
-  reported as 🔴 reads as noise.
+  realistic conditions, ⚪ low is polish or a suggestion.
 
 ## Evidence
 
