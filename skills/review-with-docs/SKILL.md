@@ -226,7 +226,7 @@ finding; the same concern dropped silently is a defect of the review.
 
 - **Checkpoint: commit what the review produced, nothing else.** A checkpoint
   is `report render`, then one commit of the database, the report and the
-  round's folder to the current branch; the commits are a backup on a
-  temporary branch, never meant for the main branch. Only the database and
-  the report together are a complete state.
+  round's folder to the current branch, which the user prepares for the
+  review: the commits are a backup that stays out of the main branch. Only
+  the database and the report together are a complete state.
 - **The review is the deliverable.** A decision that never reaches it is lost.
