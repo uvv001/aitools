@@ -75,8 +75,9 @@ included) step 7, a fix request the paragraph under States.
    pairing travels in the briefs of a fleet ([fleet.md](fleet.md)). Then
    `round open --revision <pinned> (--base <rev> | --no-base) --note <text>`
    records round 1. The note cannot be amended, so it carries the dirty-tree
-   remark, the scope, and the rule sources in one line — `dirty tree; scope:
-   src/; rules: AGENTS.md, src/AGENTS.md; agreed check: no network calls`.
+   remark, the scope with its exclusions, and the rule sources in one line —
+   `dirty tree; scope: src/ without generated files; rules: AGENTS.md,
+   src/AGENTS.md; agreed check: no network calls`.
    **Ready when:** every changed path is paired with every instruction file
    whose scope covers it, checks agreed with the user are in the rule set, and
    round 1 stands in the database with the reviewed revision, its base, and a
@@ -188,6 +189,12 @@ and the next round's re-check at the pushed head confirms it. Both end in
   file, or one check agreed with the user.
 - Iterate every changed line: does it serve the change's purpose, and does it
   meet the rules covering its path and the ecosystem's best practices?
+- Files nobody wrote by hand stay out of the line-by-line pass: the review's
+  own files, and generated or vendored files, recognized by
+  `linguist-generated` or `linguist-vendored` in `.gitattributes` or by a
+  "generated — do not edit" header. A changed generated file gets one check:
+  did its source change with it? The round note's scope names the exclusions,
+  so the user can overrule them; a file in doubt is the user's call.
 - Challenge the implementation. A review that summarizes the diff finds
   nothing.
 - Past a handful of files or a few hundred changed lines, dispatch a fleet
