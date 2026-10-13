@@ -20,6 +20,18 @@ alone runs commands that change the review, so the agent writes files only
 and replies with one line per finding — file, severity, title, anchor — or
 `no findings`.
 
+## Later rounds
+
+From round 2 on, each brief also lists the findings the review carries — id,
+state, title, and the file or report entry holding its description — and
+asks for what none of them covers, so an agent hands back only what is new.
+One more agent, `recheck`, re-checks every finding in the round's scope and
+replies one line per finding — finding, outcome (`fixed`, `holds`, `partial`,
+`regressed` or `defective`), one phrase of evidence — plus a finding file for
+each new defect it meets, a defective fix included. The orchestrator turns
+each line into `finding update --round <n>`, or `set-state` where the state
+moves, `fixed` per the States paragraph of [SKILL.md](SKILL.md).
+
 ## Files
 
 The files persist beside the report, in the round's folder —
@@ -27,7 +39,7 @@ The files persist beside the report, in the round's folder —
 `<report-stem>/round-<n>/<rule>/<slug>.md` for each finding — where
 `<report-stem>` is the report's file name without `.md` and `<rule>` a short
 slug of the rule — `purpose-fit` and `best-practices` for the two agents no
-rule covers — e.g.
+rule covers, `recheck` for the re-check of a later round — e.g.
 `2026-09-16_pr157_review/round-1/agents-self-sufficiency.md`; create the
 folders as needed. They are committed with the report and hold the text as
 raised; the database holds its current version.
