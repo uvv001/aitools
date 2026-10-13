@@ -88,10 +88,9 @@ Node is the expected outcome.
    merged text to a file in the round's folder first (layout in
    [fleet.md](fleet.md)). A pass that found nothing still renders the report
    and says so; findings invented to fill it are worse than an empty round.
-   Then `report render` and commit.
    **Ready when:** every finding carries severity, evidence, and a suggested
-   fix in its description, `finding list` shows each of them, the report is
-   rendered and committed with the database, and the user has its path.
+   fix in its description, `finding list` shows each of them, the review is
+   checkpointed (see Guardrails), and the user has the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
@@ -108,7 +107,7 @@ Node is the expected outcome.
    findings; the rest keep their state.
    **Ready when:** every finding the user ruled on carries its state and an
    Updates entry saying why, every finding raised during the triage is
-   recorded, and the report is rendered and committed with the database.
+   recorded, and the review is checkpointed.
 6. **Publish** — a pull request target, on the user's request: approved
    findings go to the PR as comments, and what others wrote is linked to the
    review. The triage batch the user just ruled on may be partial, and its
@@ -116,7 +115,7 @@ Node is the expected outcome.
    [pull-request.md](pull-request.md).
    **Ready when:** every approved finding the user asked to publish is posted
    or its refusal stands with the user, every comment of others is linked, and
-   the report is rendered and committed with the database.
+   the review is checkpointed.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR;
    confirm with the user when in doubt. A pull request target is synced
@@ -141,7 +140,7 @@ Node is the expected outcome.
    base, and a note carrying any narrowing; step 3's Ready-when holds for the
    round's scope at the new revision; every finding in that scope carries a
    `Round <n>:` entry; on a pull request target, `link pending` prints
-   nothing; and the report is rendered and committed with the database.
+   nothing; and the review is checkpointed.
 
 Steps 5 to 7 are a loop: each round's findings are triaged, approved ones
 published on request, and each change in the reviewed area opens the next
@@ -211,13 +210,12 @@ finding; the same concern dropped silently is a defect of the review.
 
 ## Guardrails
 
-- **Commit what the review produced, nothing else.** The review's commits are
-  a backup on a temporary branch, never meant for the main branch. Run
-  `report render` first, then commit the database and the report together
-  with the round's folder to the current branch — after the first
-  recording, each triage batch, each publish, and each round. Only the pair
-  is a complete state: the database is the source of truth and the report its
-  reading. `report dump` prints the database as text, for comparing it
-  between commits.
+- **Checkpoint: commit what the review produced, nothing else.** A checkpoint
+  is `report render`, then one commit of the database, the report and the
+  round's folder to the current branch; the commits are a backup on a
+  temporary branch, never meant for the main branch. Only the database and
+  the report together are a complete state: the database is the source of
+  truth and the report its reading. `report dump` prints the database as
+  text, for comparing it between commits.
 - **The document is the deliverable.** Conversation proposes; the database
   disposes. A decision that never reaches the review is lost.
