@@ -159,7 +159,7 @@ in the finding's own history.
 |---|---|---|
 | ⏳ | `awaiting` | raised, no verdict yet |
 | ❓ | `unverified` | evidence tried and unsettled — the user's call |
-| ✅ | `approved` | the user agreed it is a finding; only these are published |
+| ✅ | `approved` | the user agreed it is a finding; the findings to publish |
 | 🔧 | `fixed` | the changeset now addresses it; `--revision` names where |
 | ❌ | `discarded` | not a finding; the note holds the rationale |
 | 📌 | `deferred` | valid, consciously left as it is |

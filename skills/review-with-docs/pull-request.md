@@ -38,8 +38,10 @@ says otherwise.
 
 ## Publish
 
-1. `finding list --unposted` lists the approved findings that have no comment
-   of their own yet.
+1. `finding list --state approved --unposted` lists the approved findings that
+   have no comment of their own yet. The tool posts a finding in any state, so
+   the filter does the selecting: a finding in another state, one fixed after
+   its approval for example, goes out on the user's word.
 2. `finding post <F> --dry-run --by-agent` writes nothing and prints the exact
    text and the place. Check the anchor, the warnings, and `links removed`.
 3. `finding post <F> --by-agent` adds the comment to the user's **pending
