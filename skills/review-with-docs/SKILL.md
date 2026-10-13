@@ -86,7 +86,8 @@ included) step 7, a fix request the paragraph under States.
    **Ready when:** every rule applied to every path its scope covers, every
    changed line read for purpose and the ecosystem's best practices, and
    every finding evidenced or opened as ❓ unverified; with a fleet, the
-   round's folder holds a coverage file per rule.
+   round's folder holds a coverage file per agent: one per rule, plus
+   purpose fit and best practices.
 4. **Record.** `finding add --severity --title --description-file` records
    each finding in the open round, with `--unverified` where its evidence
    stayed unsettled; the description follows [Evidence](#evidence). Findings
