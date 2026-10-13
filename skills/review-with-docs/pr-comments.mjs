@@ -2924,7 +2924,7 @@ function setMeta(db, key, value) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+935edf9`;
+	return `pr-comments ${VERSION}+08cb82c`;
 }
 //#endregion
 //#region src/review-files.ts
@@ -3785,7 +3785,7 @@ function headerBlock(header, firstLine) {
 }
 function composeContent(finding, header, body, withTitle) {
 	const text = withTitle ? [
-		`${finding.severity} **${finding.title}**`,
+		`${finding.severity} **${finding.id} — ${finding.title}**`,
 		"",
 		...body
 	] : body;
