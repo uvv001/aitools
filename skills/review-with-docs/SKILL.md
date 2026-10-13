@@ -27,8 +27,7 @@ Node is the expected outcome.
   them.
 - The report is rendered by `report render` and overwritten each time. Change
   the review with commands; an edit made in the report is lost.
-- The orchestrator alone runs commands that change the review; fleet agents
-  write files.
+- The orchestrator alone runs commands that change the review.
 - Run every command in the reviewed repository: revisions resolve with git in
   the working directory.
 - The tool searches the repository for the review database. Where several
@@ -67,11 +66,11 @@ Node is the expected outcome.
    several, per directory — and pair each with the paths inside its scope.
    The user's explicit review questions join the rule set. Ask where a scope
    is genuinely unclear. The database stores no rules: the pairing travels in
-   the fleet briefs. Then `round open --revision <pinned> (--base <rev> |
-   --no-base) --note <text>` records round 1. The note cannot be amended, so
-   it carries the dirty-tree remark, the scope, and the rule sources in one
-   line — `dirty tree; scope: src/; rules: AGENTS.md, src/AGENTS.md; 2 user
-   questions`.
+   the briefs of a fleet ([fleet.md](fleet.md)). Then `round open --revision
+   <pinned> (--base <rev> | --no-base) --note <text>` records round 1. The
+   note cannot be amended, so it carries the dirty-tree remark, the scope,
+   and the rule sources in one line — `dirty tree; scope: src/; rules:
+   AGENTS.md, src/AGENTS.md; 2 user questions`.
    **Ready when:** every changed path is paired with every instruction file
    whose scope covers it, the user's questions are in the rule set, and round
    1 stands in the database with the reviewed revision, its base, and a note
@@ -86,9 +85,10 @@ Node is the expected outcome.
    stayed unsettled; the description follows [Evidence](#evidence). Findings
    that two agents raised on the same anchor merge into one: record the
    stronger description, and where the other adds occurrences, write the
-   merged text to a file in the round's fleet folder first. A pass that found
-   nothing still renders the report and says so; findings invented to fill it
-   are worse than an empty round. Then `report render` and commit.
+   merged text to a file in the round's folder first (layout in
+   [fleet.md](fleet.md)). A pass that found nothing still renders the report
+   and says so; findings invented to fill it are worse than an empty round.
+   Then `report render` and commit.
    **Ready when:** every finding carries severity, evidence, and a suggested
    fix in its description, `finding list` shows each of them, the report is
    rendered and committed with the database, and the user has its path.
@@ -173,18 +173,8 @@ in the finding's own history.
   meet the rules covering its path and the ecosystem's best practices?
 - Challenge the implementation. A review that summarizes the diff finds
   nothing.
-- Dispatch a fleet once the changeset outgrows a handful of files or a few
-  hundred changed lines: one agent per rule, each scoped to the paths that
-  rule covers, plus two agents no instruction file covers — one for purpose
-  fit, one for the ecosystem's best practices. A narrow, single-rule brief is
-  what keeps an agent's verdict checkable.
-- Every brief carries the rule verbatim, the paths in its scope, the pinned
-  revision, the Evidence rules below, the severity scale, and its output:
-  one file per finding — the description exactly as `finding add` takes it —
-  and a verdict file, placed per the Guardrail "Hold the index, not the
-  findings". The agent writes files
-  only and replies with one line per finding — file, severity, title, anchor
-  — or `no findings`.
+- Past a handful of files or a few hundred changed lines, dispatch a fleet
+  per [fleet.md](fleet.md).
 - Severity: 🔴 high breaks or violates a rule, 🟡 medium risks harm under
   realistic conditions, ⚪ low is polish or a suggestion. A style preference
   reported as 🔴 reads as noise.
@@ -221,21 +211,10 @@ finding; the same concern dropped silently is a defect of the review.
 
 ## Guardrails
 
-- **Hold the index, not the findings.** Fleet files persist beside the
-  report — `<report-stem>/round-<n>/<rule>.md` for the verdict, naming the
-  paths checked and the outcome, `no findings` included, and
-  `<report-stem>/round-<n>/<rule>/<slug>.md` for each finding — where
-  `<report-stem>` is the report's file name without `.md` and `<rule>` a short
-  slug of the rule, e.g.
-  `2026-09-16_pr157_review/round-1/agents-self-sufficiency.md`; create the
-  folders as needed. They are committed with the report and hold the text as
-  raised; the database holds its current version. Your context holds the
-  index — which agent produced which findings — and `finding add` reads the
-  files, so the orchestrator passes paths and retypes no description.
 - **Commit what the review produced, nothing else.** The review's commits are
   a backup on a temporary branch, never meant for the main branch. Run
   `report render` first, then commit the database and the report together
-  with the round's fleet folder to the current branch — after the first
+  with the round's folder to the current branch — after the first
   recording, each triage batch, each publish, and each round. Only the pair
   is a complete state: the database is the source of truth and the report its
   reading. `report dump` prints the database as text, for comparing it
