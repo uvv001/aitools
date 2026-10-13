@@ -68,17 +68,19 @@ included) step 7, a fix request the paragraph under States.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
-   The user's explicit review questions join the rule set. A scope that is
+   A review question the user raises opens a discussion; the check it settles
+   on joins the rule set, is named in the round note in a few words, and
+   carries into later rounds only where the user says so. A scope that is
    genuinely unclear is the user's call. The database stores no rules: the
    pairing travels in the briefs of a fleet ([fleet.md](fleet.md)). Then
    `round open --revision <pinned> (--base <rev> | --no-base) --note <text>`
    records round 1. The note cannot be amended, so it carries the dirty-tree
    remark, the scope, and the rule sources in one line — `dirty tree; scope:
-   src/; rules: AGENTS.md, src/AGENTS.md; 2 user questions`.
+   src/; rules: AGENTS.md, src/AGENTS.md; agreed check: no network calls`.
    **Ready when:** every changed path is paired with every instruction file
-   whose scope covers it, the user's questions are in the rule set, and round
-   1 stands in the database with the reviewed revision, its base, and a note
-   naming the rule sources — or `rules: none apply`, so an empty rule set
+   whose scope covers it, checks agreed with the user are in the rule set, and
+   round 1 stands in the database with the reviewed revision, its base, and a
+   note naming the rule sources — or `rules: none apply`, so an empty rule set
    never reads as an unfinished step.
 3. **Validate.** Apply the rule set to the changeset under the Validation
    rules below.
@@ -183,7 +185,7 @@ and the next round's re-check at the pushed head confirms it. Both end in
 ## Validation
 
 - A **rule** is one enforceable statement — a single bullet of an instruction
-  file, or one explicit question from the user.
+  file, or one check agreed with the user.
 - Iterate every changed line: does it serve the change's purpose, and does it
   meet the rules covering its path and the ecosystem's best practices?
 - Challenge the implementation. A review that summarizes the diff finds
