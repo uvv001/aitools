@@ -60,9 +60,11 @@ is step 5, a publish request step 6, new changes step 7.
    goes in `--report`. Git must track the database and the report: before
    `init`, `git check-ignore` on the intended paths reports nothing — where it
    reports one, it is the user's call.
-   **Ready when:** the database exists at a path git does not ignore, the
-   reviewed revision and its base (or none) are pinned, and the user's target
-   and base were confirmed or unambiguous.
+   **Ready when:** the database exists, and git ignores neither its path nor
+   its report's (the `.md` it renders to, beside it by default); the reviewed
+   revision and its base (or none) are pinned; on a pull request target,
+   `pr show` names that pull request; and the user's target and base were
+   confirmed or unambiguous.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
@@ -116,9 +118,10 @@ is step 5, a publish request step 6, new changes step 7.
    review. The triage batch the user just ruled on may be partial, and its
    approved findings can go out before the rest are ruled. Follow
    [pull-request.md](pull-request.md).
-   **Ready when:** every approved finding the user asked to publish is posted
-   or its refusal stands with the user, every comment of others is linked, and
-   the review is checkpointed.
+   **Ready when:** `finding list --state approved --unposted` lists only
+   findings the user chose to hold back or whose refused post is the user's
+   call; `link pending` prints nothing; the user knows the pending review
+   waits for their submit; and the review is checkpointed.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR;
    where in doubt, it is the user's call. A pull request target is synced
@@ -203,7 +206,7 @@ more. It is laid out as:
 
 - A line holding only `` `path:lines` `` opens it — the anchor, the place of
   the pull request comment. A finding about a whole file anchors at `path:1`
-  where the PR adds the file, and at its nearest changed line where the PR
+  where the PR adds the file, and at its first changed line where the PR
   only changes it: GitHub takes a comment only inside a diff hunk.
 - The explanation, the snippet in a closed code fence, the suggested fix.
 - Each further occurrence gets its own anchor line and snippet.
