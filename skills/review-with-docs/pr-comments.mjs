@@ -1862,7 +1862,6 @@ const SEVERITY_NAMES$1 = [
 	"medium",
 	"low"
 ];
-const APPROVED$1 = "✅";
 const normalise = (text) => text.trim().replace(/\s+/gu, " ").toLowerCase();
 const firstWord = (label) => label.split(" ")[0] ?? label;
 const stateLabel = (marker) => STATES.find((state) => state.marker === marker)?.label ?? marker;
@@ -1897,7 +1896,7 @@ function parseFilter(values) {
 }
 function filterFindings(findings, { state, severity, unposted }, links) {
 	const posted = new Set(links.filter(({ role }) => role === "own").map(({ finding }) => finding));
-	return findings.filter((finding) => (state === void 0 || finding.state === state) && (severity === void 0 || finding.severity === severity) && (unposted !== true || finding.state === APPROVED$1 && !posted.has(finding.id)));
+	return findings.filter((finding) => (state === void 0 || finding.state === state) && (severity === void 0 || finding.severity === severity) && (unposted !== true || !posted.has(finding.id)));
 }
 function findingLine({ id, state, severity, title }, idWidth) {
 	return `${id.padEnd(idWidth)}  ${state} ${severity}  ${title}`;
@@ -2925,7 +2924,7 @@ function setMeta(db, key, value) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+05c28df`;
+	return `pr-comments ${VERSION}+935edf9`;
 }
 //#endregion
 //#region src/review-files.ts
@@ -3545,7 +3544,6 @@ function parseCommentFile(text, fileName) {
 }
 //#endregion
 //#region src/report-extract.ts
-const APPROVED = "✅";
 const FENCE = /^\s*(`{3,}|~{3,})/;
 const ANCHOR = /^\s*`([^`\s]+):(\d+)(?:-(\d+))?`\s*$/;
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
@@ -3563,12 +3561,6 @@ function findFinding(report, id) {
 	if (found) return found;
 	const known = report.findings.map((finding) => finding.id).join(", ");
 	throw new Error(`unknown finding "${id}"; ${known ? `the report has ${known}` : "the report has no findings"}`);
-}
-function checkState(finding) {
-	if (finding.state === APPROVED) return;
-	const state = STATES.find((entry) => entry.marker === finding.state);
-	const shown = state ? `${state.marker} ${state.label}` : finding.state;
-	throw new Error(`${finding.id} is ${shown}; only approved (${APPROVED}) findings are posted`);
 }
 function checkCommit(commit) {
 	if (!/^[0-9a-fA-F]{7,40}$/.test(commit)) throw new Error(`commit "${commit}" must be 7-40 hex digits`);
@@ -3810,7 +3802,6 @@ function checkWritten(content, id) {
 const reportStem = (path) => path.replace(/^.*[\\/]/, "").replace(/\.md$/i, "");
 function extractComment(report, findingId, options = {}) {
 	const finding = findFinding(report, findingId);
-	checkState(finding);
 	if (options.commit !== void 0) checkCommit(options.commit);
 	const description = readDescription$1(report, finding);
 	const anchors = findAnchors(description);
@@ -4653,7 +4644,7 @@ const DEFINITIONS = [
 			},
 			{
 				name: "unposted",
-				description: "only approved findings that have no comment of their own on the pull request yet"
+				description: "only findings that have no comment of their own on the pull request yet"
 			},
 			jsonOption("the findings as an array")
 		],
@@ -4751,9 +4742,9 @@ const DEFINITIONS = [
 	},
 	{
 		words: "finding post",
-		summary: "publishes the comment of an approved finding",
+		summary: "publishes the comment of a finding",
 		description: [
-			"Publishes the comment of one approved finding to the connected pull request (to your pending review unless --now) and",
+			"Publishes the comment of one finding, in any state, to the connected pull request (to your pending review unless --now) and",
 			"links it to the finding as its own comment. Run again, it updates that comment. The downloaded pull request is",
 			"refreshed so that the new comment is in the database. Without --dry-run the result is recorded in the database."
 		],
