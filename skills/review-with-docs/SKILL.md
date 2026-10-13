@@ -26,15 +26,12 @@ where Node is missing or older, it is the user's call — installing Node is
 the expected outcome.
 
 - Options and examples live in `pr-comments <command> --help`; read it before
-  a command's first use. This file names the commands and the judgment around
-  them.
+  a command's first use.
 - `report render` overwrites the report each time: change the review with
   commands, since an edit made in the report is lost.
 - The orchestrator alone runs commands that change the review.
 - Run every command in the reviewed repository: revisions resolve with git in
   the working directory.
-- The tool searches the repository for the review database. Where several
-  live there, it lists them and refuses to guess — pass `--db <file.sqlite>`.
 
 ## Protocol
 
@@ -59,11 +56,10 @@ is step 5, a publish request step 6, new changes step 7.
    the user asks for the sync, and the comments enrich the report
    ([pull-request.md](pull-request.md)).
    The name is the report's title, derived from the review context — PR
-   number, PR author, feature name; the files land in `docs/` at the git
-   root as `<date>_<name>_review.{md,sqlite}`. An explicit user-supplied name
-   or location goes in `--report`. Git must track both files: before `init`,
-   `git check-ignore` on the intended paths reports nothing — where it reports
-   one, it is the user's call.
+   number, PR author, feature name. An explicit user-supplied name or location
+   goes in `--report`. Git must track the database and the report: before
+   `init`, `git check-ignore` on the intended paths reports nothing — where it
+   reports one, it is the user's call.
    **Ready when:** the database exists at a path git does not ignore, the
    reviewed revision and its base (or none) are pinned, and the user's target
    and base were confirmed or unambiguous.
@@ -205,8 +201,7 @@ drift the review exists to catch.
 
 The description is what a reader meets — in the report and, once published, in
 the pull request — so it says what is wrong, where, and what to do, nothing
-more. It is UTF-8 text — a file, which fleet findings already are, or
-standard input (`--description-file -`) — laid out as:
+more. It is laid out as:
 
 - A line holding only `` `path:lines` `` opens it — the anchor, the place of
   the pull request comment. A finding about a whole file anchors at `path:1`
@@ -231,6 +226,5 @@ finding; the same concern dropped silently is a defect of the review.
   is `report render`, then one commit of the database, the report and the
   round's folder to the current branch; the commits are a backup on a
   temporary branch, never meant for the main branch. Only the database and
-  the report together are a complete state. `report dump` prints the database
-  as text, for comparing it between commits.
+  the report together are a complete state.
 - **The review is the deliverable.** A decision that never reaches it is lost.

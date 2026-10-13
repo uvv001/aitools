@@ -19,8 +19,8 @@ the user to create it.
 `pr sync` downloads the PR into the database — comments, reviews, threads,
 check annotations. Run it after every push and before every publish.
 `link pending` then lists each comment and check annotation that no link names
-yet; empty output means every one is handled, and the exit code is 0 either
-way. Classify each line and record it with a link:
+yet; empty output means every one is handled. Classify each line and record it
+with a link:
 
 | The comment or annotation | Command |
 |---|---|
