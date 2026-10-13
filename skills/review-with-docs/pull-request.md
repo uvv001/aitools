@@ -30,8 +30,9 @@ way. Classify each line and record it with a link:
 | a new issue | `finding add`, then `link duplicate <F> <ref>` |
 | a check annotation, always | `link duplicate <F> <ref>` — never a note |
 
-Links are records in the database; nothing reaches GitHub. Put a doubtful
-classification to the user; `link remove <ref>` undoes a link.
+Links are records in the database; nothing reaches GitHub. A doubtful
+classification is the user's call ([SKILL.md](SKILL.md)); `link remove <ref>`
+undoes a link.
 
 `report comments [--author <login>]...` prints the PR as markdown for reading
 — description, conversation, threads with code, annotations. `--out <file>`
@@ -43,7 +44,7 @@ says otherwise.
 1. `finding list --state approved --unposted` lists the approved findings that
    have no comment of their own yet. The tool posts a finding in any state, so
    the filter does the selecting: a finding in another state, one fixed after
-   its approval for example, goes out on the user's word.
+   its approval for example, goes out as the user's call.
 2. `finding post <F> --dry-run --by-agent` writes nothing and prints the exact
    text and the place. Check the anchor, the warnings, and `links removed`.
 3. `finding post <F> --by-agent` adds the comment to the user's **pending
@@ -57,22 +58,22 @@ says otherwise.
 
 `--by-agent` goes on every post and reply, dry runs included, so the preview
 is the exact text. `--now` publishes at once, and a conversation comment (`c…`)
-or a finding without an anchor can only go that way: use it on the user's
-explicit word, since an immediate comment cannot be taken back with the
+or a finding without an anchor can only go that way: `--now` is
+the user's call, since an immediate comment cannot be taken back with the
 pending review. Posting an already posted finding again edits its live
-comment: do it on the user's word too.
+comment: re-posting is the user's call too.
 
 ## A refused post
 
 A comment lands on the PR's latest revision, and the reviewed checkout may
-have diverged from it. A refusal is the signal: bring the message, the finding,
-and the commentable ranges the message lists to the user, and act on their
-decision. Re-anchoring, `--commit`, or editing the description to get past it
-are the user's call.
+have diverged from it. A refusal is the signal, and the user's call: the
+message, the finding, and the commentable ranges the message lists go to the
+user, and the agent acts on the answer. Re-anchoring, `--commit`, or editing
+the description to get past it are the user's call.
 
 The other refusals — a missing token, a pending review that blocks `--now`, a
-gone own comment — carry their fix in the message; follow it, and bring to
-the user whatever it asks that changes GitHub.
+gone own comment — carry their fix in the message; follow it, and whatever it
+asks that changes GitHub is the user's call.
 
 ## The user's part
 

@@ -15,12 +15,15 @@ range, a PR, a working tree, a set of files. The protocol does not assume a
 PR; where the target has one, [pull-request.md](pull-request.md) adds reading
 its comments and publishing findings.
 
+**The user's call** is a stop: put the evidence and the options to the user,
+and act on the answer.
+
 ## The tool
 
 `pr-comments` below is `node <skill-dir>/pr-comments.mjs`, one file that
 needs Node 24 or newer. Check `node --version` before the first command;
-where Node is missing or older, stop and raise it with the user — installing
-Node is the expected outcome.
+where Node is missing or older, it is the user's call — installing Node is
+the expected outcome.
 
 - Options and examples live in `pr-comments <command> --help`; read it before
   a command's first use. This file names the commands and the judgment around
@@ -37,13 +40,13 @@ Node is the expected outcome.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions and the review is committed — so where
-   the target is not in a repository, stop and raise it with the user;
+   the target is not in a repository, it is the user's call;
    `git init` is the expected outcome. Pin the reviewed revision and the base
    it is read against: the first parent for a single commit, the endpoints
    for a range, the merge-base with the target branch for a PR, HEAD plus a
    dirty-tree note for an uncommitted tree, none for files reviewed as they
-   stand. One attempt to resolve an ambiguous target or base, then ask the
-   user — a wrong base silently changes the changeset under review.
+   stand. One attempt to resolve an ambiguous target or base, then the
+   user's call — a wrong base silently changes the changeset under review.
    A review database already in the repository means the request continues
    it: read `finding list`, then step 5, 6, or 7 by what the user asked;
    where several live there, take the one whose title or `pr show` matches
@@ -57,20 +60,20 @@ Node is the expected outcome.
    root as `<date>_<name>_review.{md,sqlite}`. An explicit user-supplied name
    or location goes in `--report`. Git must track both files: before `init`,
    `git check-ignore` on the intended paths reports nothing — where it reports
-   one, raise it with the user.
+   one, it is the user's call.
    **Ready when:** the database exists at a path git does not ignore, the
    reviewed revision and its base (or none) are pinned, and the user's target
    and base were confirmed or unambiguous.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
-   The user's explicit review questions join the rule set. Ask where a scope
-   is genuinely unclear. The database stores no rules: the pairing travels in
-   the briefs of a fleet ([fleet.md](fleet.md)). Then `round open --revision
-   <pinned> (--base <rev> | --no-base) --note <text>` records round 1. The
-   note cannot be amended, so it carries the dirty-tree remark, the scope,
-   and the rule sources in one line — `dirty tree; scope: src/; rules:
-   AGENTS.md, src/AGENTS.md; 2 user questions`.
+   The user's explicit review questions join the rule set. A scope that is
+   genuinely unclear is the user's call. The database stores no rules: the
+   pairing travels in the briefs of a fleet ([fleet.md](fleet.md)). Then
+   `round open --revision <pinned> (--base <rev> | --no-base) --note <text>`
+   records round 1. The note cannot be amended, so it carries the dirty-tree
+   remark, the scope, and the rule sources in one line — `dirty tree; scope:
+   src/; rules: AGENTS.md, src/AGENTS.md; 2 user questions`.
    **Ready when:** every changed path is paired with every instruction file
    whose scope covers it, the user's questions are in the rule set, and round
    1 stands in the database with the reviewed revision, its base, and a note
@@ -118,10 +121,10 @@ Node is the expected outcome.
    the review is checkpointed.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR;
-   confirm with the user when in doubt. A pull request target is synced
+   where in doubt, it is the user's call. A pull request target is synced
    first (`pr sync`, then `link pending` for what is new), so the round sees
-   what others wrote. Where the new work is really a different target, ask
-   the user which it is.
+   what others wrote. Where the new work is really a different target, that
+   is the user's call.
    Every round reads the **full changeset** at the new revision — never a
    diff between revisions, because authors amend and force-push and
    per-commit attribution misleads. `round open --revision --base --note`
@@ -204,7 +207,7 @@ Verify before claiming: run the test, trace the call path, measure the value.
 An assumption reaches the review along one of two paths — verified or
 falsified — and either settles it. Where both attempts fail, the assumption
 opens as a ❓ unverified finding stating what was tried and what would settle
-it, and the user makes the call. This holds hardest where a wrong
+it, and settling it is the user's call. This holds hardest where a wrong
 assumption carries serious consequences: an unproven concern raised is a
 finding; the same concern dropped silently is a defect of the review.
 
