@@ -219,9 +219,5 @@ finding; the same concern dropped silently is a defect of the review.
   is a complete state: the database is the source of truth and the report its
   reading. `report dump` prints the database as text, for comparing it
   between commits.
-- **Tokens stay with the user.** The tool reads them from the user's token
-  files or environment, so their values never pass through the conversation.
-  Where one is missing, the error names the file to create — ask the user to
-  create it.
 - **The document is the deliverable.** Conversation proposes; the database
   disposes. A decision that never reaches the review is lost.

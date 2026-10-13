@@ -9,8 +9,10 @@ reply` write to GitHub; `pr sync` reads.
 `pr show --json` tells whether the review is connected. `init --pr <url>`
 connects it at the start; `pr connect <url>` later, where the PR did not
 exist yet. `pr sync`, `finding post` (dry runs too), and `link reply` need a
-token — see the Guardrails of [SKILL.md](SKILL.md) — and the last two need
-write permission.
+token, and the last two need write permission. The tool reads tokens from the
+user's token files or environment, so their values never pass through the
+conversation; where one is missing, the error names the file to create — ask
+the user to create it.
 
 ## Read what others wrote
 
