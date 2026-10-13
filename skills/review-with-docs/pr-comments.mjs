@@ -24,6 +24,9 @@ function commentUrl(pullRequestUrl, ref) {
 	const base = pullRequestUrl.replace(/#.*$/, "");
 	return ref.startsWith("r") ? `${base}#discussion_${ref}` : `${base}#issuecomment-${ref.slice(1)}`;
 }
+function commentLink(pullRequestUrl, ref) {
+	return pullRequestUrl === void 0 || !isCommentRef(ref) ? ref : `[${ref}](${commentUrl(pullRequestUrl, ref)})`;
+}
 const ANNOTATION_PATTERN = /^a[0-9a-f]{8}$/;
 function isAnnotationRef(value) {
 	return ANNOTATION_PATTERN.test(value);
@@ -2922,7 +2925,7 @@ function setMeta(db, key, value) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+88d0ef2`;
+	return `pr-comments ${VERSION}+05c28df`;
 }
 //#endregion
 //#region src/review-files.ts
@@ -3192,7 +3195,7 @@ const NOTHING_TO_REPLY = "; there is nothing to reply to";
 function refuseAnnotation(ref, why) {
 	if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation${why}`);
 }
-const subject = (ref) => isAnnotationRef(ref) ? `check annotation ${ref}` : `PR comment ${ref}`;
+const subject = (state, ref) => isAnnotationRef(ref) ? `check annotation ${ref}` : `PR comment ${commentLink(state.pullRequest, ref)}`;
 const linkOf = (links, ref) => links.find((link) => link.ref === ref);
 const ownOf = (links, findingId) => links.find((link) => link.role === "own" && link.finding === findingId);
 function describeLink({ role, finding, note }) {
@@ -3210,7 +3213,7 @@ function linkToFinding(state, findingId, ref, role, now, note) {
 	if (linked !== void 0) throw alreadyLinked(linked);
 	const own = role === "own" ? ownOf(state.links, found.id) : void 0;
 	if (own !== void 0) throw alreadyHasOwn(found.id, own);
-	const data = amend(state.data, found, now, { note }, `${subject(ref)} linked as ${asRole(role)}`);
+	const data = amend(state.data, found, now, { note }, `${subject(state, ref)} linked as ${asRole(role)}`);
 	return {
 		...state,
 		data,
@@ -3260,7 +3263,7 @@ function unlink$1(state, ref, now, note) {
 		};
 	}
 	const found = findFinding$1(state.data, link.finding);
-	const data = amend(state.data, found, now, { note }, `${subject(ref)} unlinked (was ${asRole(link.role)})`);
+	const data = amend(state.data, found, now, { note }, `${subject(state, ref)} unlinked (was ${asRole(link.role)})`);
 	return {
 		...state,
 		data,
@@ -3277,10 +3280,12 @@ function recordPosted(state, findingId, ref, action, where, now) {
 	const own = ownOf(state.links, found.id);
 	if (own !== void 0 && own.ref !== ref) throw alreadyHasOwn(found.id, own, "a posted comment cannot move: ");
 	if (own !== void 0 && action === "unchanged") return state;
+	const pending = where === "pending" ? " to the pending review" : "";
+	const comment = commentLink(state.pullRequest, ref);
 	const what = {
-		created: `posted PR comment ${ref}${where === "pending" ? " to the pending review" : ""}`,
-		updated: `updated PR comment ${ref}`,
-		unchanged: `adopted PR comment ${ref} (identical)`
+		created: `posted PR comment ${comment}${pending}`,
+		updated: `updated PR comment ${comment}`,
+		unchanged: `adopted PR comment ${comment} (identical)`
 	}[action];
 	const data = amend(state.data, found, now, {}, what);
 	return {
@@ -3302,9 +3307,12 @@ function recordReplied(state, ref, replyRef, where, now) {
 	if (link === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate <finding> ${ref}"`);
 	if (link.role !== "duplicate") throw new Error(link.role === "note" ? `${ref} is recorded as a note, not as a duplicate of a finding` : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`);
 	const found = findFinding$1(state.data, link.finding);
-	const what = `replied to duplicate ${ref} with ${replyRef}`;
-	const recorded = new RegExp(`^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} — ${what}(?!\\d)`, "u");
-	if (found.updates.some((entry) => recorded.test(entry.text))) return state;
+	const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;
+	const recorded = (text) => {
+		const rest = text.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} — /u, "");
+		return rest.startsWith(what) && !/^\d/u.test(rest.slice(what.length));
+	};
+	if (found.updates.some((entry) => recorded(entry.text))) return state;
 	return {
 		...state,
 		data: amend(state.data, found, now, {}, `${what}${where === "pending" ? " in the pending review" : ""}`)
