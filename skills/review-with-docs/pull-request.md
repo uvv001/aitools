@@ -45,16 +45,21 @@ says otherwise.
    have no comment of their own yet. The tool posts a finding in any state, so
    the filter does the selecting: a finding in another state, one fixed after
    its approval for example, goes out as the user's call.
-2. `finding post <F> --dry-run --by-agent` writes nothing and prints the exact
+2. A dry run comes first where a mistake is costly or likely: `--now`, a
+   finding without an anchor, a whole-file anchor on a modified file, a
+   description with relative links, and the first post of a session.
+   `finding post <F> --dry-run --by-agent` writes nothing and prints the exact
    text and the place. Check the anchor, the warnings, and `links removed`.
 3. `finding post <F> --by-agent` adds the comment to the user's **pending
    review**, which nobody else sees. The tool never submits it: tell the user
-   the comments wait for their submit in the web UI.
+   the comments wait for their submit in the web UI. Any other post goes
+   straight here: the post checks the place before it writes, and the comment
+   stays unseen until that submit.
 4. A comment that duplicates a finding is answered with `link reply <ref>
-   --dry-run --by-agent`, then without `--dry-run`. The reply goes into the
-   same pending review. A conversation comment (`c…`) can only be answered at
-   once, and its answer links to a comment that others cannot open before the
-   submit: answer it after the user has submitted the review.
+   --by-agent`, with a dry run first before a `--now` reply. The reply goes
+   into the same pending review. A conversation comment (`c…`) can only be
+   answered at once, and its answer links to a comment that others cannot open
+   before the submit: answer it after the user has submitted the review.
 
 `--by-agent` goes on every post and reply, dry runs included, so the preview
 is the exact text. `--now` publishes at once, and a conversation comment (`c…`)
