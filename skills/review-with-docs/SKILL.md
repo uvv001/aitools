@@ -49,7 +49,10 @@ Node is the expected outcome.
    it: read `finding list`, then step 5, 6, or 7 by what the user asked;
    where several live there, take the one whose title or `pr show` matches
    the target and pass `--db` on every command. Otherwise `init <name>`
-   creates one — `--pr <url>` where the target is a pull request.
+   creates one — `--pr <url>` where the target is a pull request. That first
+   pass reads the changeset without the PR's existing comments, so they
+   cannot frame it; once the report is compiled, the user asks for the sync,
+   and the comments enrich the report ([pull-request.md](pull-request.md)).
    The name is the report's title, derived from the review context — PR
    number, PR author, feature name; the files land in `docs/` at the git
    root as `<date>_<name>_review.{md,sqlite}`. An explicit user-supplied name
