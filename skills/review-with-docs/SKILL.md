@@ -135,10 +135,11 @@ Node is the expected outcome.
    addressed, a discarded concern returns with better evidence.
    The user may narrow a round to some findings or paths; the re-check covers
    that subset.
-   **Ready when:** every finding in the round's scope carries a `Round <n>:`
-   entry, new findings continue the ID sequence, the round's revision and
-   base are recorded with any narrowing in its note, and the report is
-   rendered and committed with the database.
+   **Ready when:** the round stands in the database with its revision, its
+   base, and a note carrying any narrowing; step 3's Ready-when holds for the
+   round's scope at the new revision; every finding in that scope carries a
+   `Round <n>:` entry; on a pull request target, `link pending` prints
+   nothing; and the report is rendered and committed with the database.
 
 Steps 5 to 7 are a loop: each round's findings are triaged, approved ones
 published on request, and each change in the reviewed area opens the next
