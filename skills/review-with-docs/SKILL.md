@@ -37,7 +37,8 @@ the expected outcome.
 
 A review database already in the repository means the request continues it:
 read `finding list`, then start at the step the request calls for — a verdict
-is step 5, a publish request step 6, new changes step 7.
+is step 5, a publish or sync request step 6, new changes (a moved PR head
+included) step 7, a fix request the paragraph under States.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions and the review is committed — so where
@@ -177,7 +178,7 @@ review files, and verifies it the way the finding was verified — the same
 test, trace or measurement now comes out clean: narrow, the finding named,
 and the next round's re-check at the pushed head confirms it. Both end in
 `set-state <F> fixed --revision <rev> --note <how verified>`, with
-`--round <n>` for the first only.
+`--round <n>` for the first only, and the review is checkpointed.
 
 ## Validation
 
