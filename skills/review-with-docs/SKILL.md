@@ -28,8 +28,8 @@ the expected outcome.
 - Options and examples live in `pr-comments <command> --help`; read it before
   a command's first use. This file names the commands and the judgment around
   them.
-- The report is rendered by `report render` and overwritten each time. Change
-  the review with commands; an edit made in the report is lost.
+- `report render` overwrites the report each time: change the review with
+  commands, since an edit made in the report is lost.
 - The orchestrator alone runs commands that change the review.
 - Run every command in the reviewed repository: revisions resolve with git in
   the working directory.
@@ -37,6 +37,10 @@ the expected outcome.
   live there, it lists them and refuses to guess — pass `--db <file.sqlite>`.
 
 ## Protocol
+
+A review database already in the repository means the request continues it:
+read `finding list`, then start at the step the request calls for — a verdict
+is step 5, a publish request step 6, new changes step 7.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions and the review is committed — so where
@@ -47,14 +51,13 @@ the expected outcome.
    dirty-tree note for an uncommitted tree, none for files reviewed as they
    stand. One attempt to resolve an ambiguous target or base, then the
    user's call — a wrong base silently changes the changeset under review.
-   A review database already in the repository means the request continues
-   it: read `finding list`, then step 5, 6, or 7 by what the user asked;
-   where several live there, take the one whose title or `pr show` matches
-   the target and pass `--db` on every command. Otherwise `init <name>`
-   creates one — `--pr <url>` where the target is a pull request. That first
-   pass reads the changeset without the PR's existing comments, so they
-   cannot frame it; once the report is compiled, the user asks for the sync,
-   and the comments enrich the report ([pull-request.md](pull-request.md)).
+   Where several review databases live in the repository, take the one whose
+   title or `pr show` matches the target and pass `--db` on every command;
+   with none, `init <name>` creates one — `--pr <url>` where the target is a
+   pull request. That first pass reads the changeset without the PR's
+   existing comments, so they cannot frame it; once the report is compiled,
+   the user asks for the sync, and the comments enrich the report
+   ([pull-request.md](pull-request.md)).
    The name is the report's title, derived from the review context — PR
    number, PR author, feature name; the files land in `docs/` at the git
    root as `<date>_<name>_review.{md,sqlite}`. An explicit user-supplied name
@@ -148,8 +151,7 @@ the expected outcome.
 Steps 5 to 7 are a loop: each round's findings are triaged, approved ones
 published on request, and each change in the reviewed area opens the next
 round. The review ends when the user ends it; the last commit is its closing
-state, and a later request continues the same review — a verdict is step 5,
-new changes are step 7.
+state.
 
 ## States
 
@@ -227,8 +229,6 @@ finding; the same concern dropped silently is a defect of the review.
   is `report render`, then one commit of the database, the report and the
   round's folder to the current branch; the commits are a backup on a
   temporary branch, never meant for the main branch. Only the database and
-  the report together are a complete state: the database is the source of
-  truth and the report its reading. `report dump` prints the database as
-  text, for comparing it between commits.
-- **The document is the deliverable.** Conversation proposes; the database
-  disposes. A decision that never reaches the review is lost.
+  the report together are a complete state. `report dump` prints the database
+  as text, for comparing it between commits.
+- **The review is the deliverable.** A decision that never reaches it is lost.
