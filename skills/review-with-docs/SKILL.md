@@ -1,6 +1,6 @@
 ---
 name: review-with-docs
-description: Runs a review as a document the user triages over rounds. Invoke only on explicit request: the user names this process, asks to triage a review report, asks for another round on one, or asks to publish its findings to a pull request. A plain "review this" does not qualify.
+description: Runs a review as a document the user triages over rounds. Invoke only on explicit request — the user names this process, asks to triage a review report, asks for another round on one, or asks to publish its findings to a pull request. A plain "review this" does not qualify.
 ---
 
 # Review with docs
