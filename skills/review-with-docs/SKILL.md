@@ -57,10 +57,9 @@ included) step 7, a fix request the paragraph under States.
    the user asks for the sync, and the comments enrich the report
    ([pull-request.md](pull-request.md)).
    The name is the report's title, derived from the review context — PR
-   number, PR author, feature name. An explicit user-supplied name or location
-   goes in `--report`. Git must track the database and the report: before
-   `init`, `git check-ignore` on the intended paths reports nothing — where it
-   reports one, it is the user's call.
+   number, PR author, feature name. Git must track the database and the
+   report: before `init`, `git check-ignore` on the intended paths reports
+   nothing — where it reports one, it is the user's call.
    **Ready when:** the database exists, and git ignores neither its path nor
    its report's (the `.md` it renders to, beside it by default); the reviewed
    revision and its base (or none) are pinned; on a pull request target,
