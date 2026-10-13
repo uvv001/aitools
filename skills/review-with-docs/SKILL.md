@@ -90,10 +90,12 @@ Node is the expected outcome.
    nothing still renders the report and says so; findings invented to fill it
    are worse than an empty round. Then `report render` and commit.
    **Ready when:** every finding carries severity, evidence, and a suggested
-   fix in its description, `finding list` shows each of them, and the report
-   is rendered and committed with the database.
-5. **Triage.** Present the findings for verdict (`finding list`, `finding
-   show`) and answer the questions that precede one. Write each verdict with
+   fix in its description, `finding list` shows each of them, the report is
+   rendered and committed with the database, and the user has its path.
+5. **Triage.** The user triages from the report — handed over at the end of
+   step 4 — in the order and at the pace the user chooses; the agent answers
+   the questions that precede a verdict, walks through findings when asked,
+   and records each verdict the user gives. Write each verdict with
    `finding set-state <F> <state> --note <why> --round <n>`, `<n>` the round
    being triaged: ✅ approved, ❌ discarded, 📌 deferred, 🔀 routed out as an
    improvement. An answer that changes a finding rewrites it —
