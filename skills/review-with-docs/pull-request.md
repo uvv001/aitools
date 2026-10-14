@@ -79,9 +79,3 @@ rewritten description are the ways past it; the user picks.
 The other refusals — a missing token, a pending review that blocks `--now`, a
 gone own comment — carry their fix in the message; follow it, and whatever it
 asks that changes GitHub is the user's call.
-
-## The user's part
-
-The user submits the pending review, resolves threads, and answers the
-author. A `fixed` finding says nothing about a resolved thread; the two move
-independently.
