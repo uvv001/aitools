@@ -135,21 +135,24 @@ included) step 7, a fix request the paragraph under States.
    diff between revisions, because authors amend and force-push and
    per-commit attribution misleads. `round open --revision --base --note`
    records it — the note carries the scope, the rule sources where the
-   instruction files changed, and any narrowing — then every
-   finding the review carries is re-checked, whatever its state, and the
-   changeset is searched afresh for what nobody has raised yet. Each outcome
+   instruction files changed, and any narrowing — then every open finding
+   (⏳ ❓ ✅) and every fixed one, since a fix regresses, is re-checked, and
+   the changeset is searched afresh for what nobody has raised yet. A closed
+   finding (❌ 📌 🔀) is re-checked where the code it points at changed, or
+   the bundle for a tool-side one: only changed ground overturns the user's
+   ruling, and a concern that returns with better evidence is a new finding
+   naming the old one, whose state stands until the user rules. Each outcome
    is an Updates entry carrying `--round <n>` — `finding update`, or
    `set-state` where the state moves, `fixed` per [States](#states). Comparing
-   revisions serves one purpose: telling whether the feedback was acted on.
-   Every state is re-earned each round — a fix regresses, a deferred finding
-   gets addressed, a discarded concern returns with better evidence.
+   revisions serves one purpose: telling where the code the findings point at
+   changed.
    The user may narrow a round to some findings or paths; the re-check covers
    that subset.
    **Ready when:** the round stands in the database with its revision, its
    base, and a note carrying any narrowing; step 3's Ready-when holds for the
-   round's scope at the new revision; every finding in that scope carries a
-   `Round <n>:` entry; on a pull request target, `link pending` prints
-   nothing; and the review is checkpointed.
+   round's scope at the new revision; every finding the re-check covers
+   carries a `Round <n>:` entry; on a pull request target, `link pending`
+   prints nothing; and the review is checkpointed.
 
 Steps 5 to 7 are a loop: each round's findings are triaged, approved ones
 published on request, and each change in the reviewed area opens the next
@@ -174,12 +177,12 @@ in the finding's own history.
 
 **Fixed** is reached two ways. When the PR moves, the user's sync opens a
 round (step 7), and the agent decides, finding by finding, from the code at
-the new revision: wide, every finding unless the round note narrows it. When
-the user asks for a fix, the agent implements it, commits it apart from the
-review files, and verifies it the way the finding was verified — the same
-test, trace or measurement now comes out clean: narrow, the finding named,
-and the next round's re-check at the pushed head confirms it. Both end in
-`set-state <F> fixed --revision <rev> --note <how verified>`, with
+the new revision: wide, the findings step 7 re-checks unless the round note
+narrows it. When the user asks for a fix, the agent implements it, commits it
+apart from the review files, and verifies it the way the finding was verified
+— the same test, trace or measurement now comes out clean: narrow, the finding
+named, and the next round's re-check at the pushed head confirms it. Both end
+in `set-state <F> fixed --revision <rev> --note <how verified>`, with
 `--round <n>` for the first only, and the review is checkpointed.
 
 ## Validation
