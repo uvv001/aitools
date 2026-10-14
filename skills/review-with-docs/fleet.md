@@ -12,13 +12,13 @@ ecosystem's best practices. A narrow, single-rule brief is what keeps an
 agent's findings checkable.
 
 Every brief carries the rule verbatim, the paths in its scope, the pinned
-revision, the Evidence section and the Validation severity scale of
-[SKILL.md](SKILL.md), and its output: one file per finding — the description
-exactly as `finding add` takes it — and a **coverage file** naming the rule,
-the paths checked, and the outcome, `no findings` included. The orchestrator
-alone runs commands that change the review, so the agent writes files only
-and replies with one line per finding — file, severity, title, anchor — or
-`no findings`.
+revision and its base (or none), the Evidence section and the Validation
+severity scale of [SKILL.md](SKILL.md), and its output: one file per
+finding — the description exactly as `finding add` takes it — and a
+**coverage file** naming the rule, the paths checked, and the outcome,
+`no findings` included. The orchestrator alone runs commands that change the
+review, so the agent writes files only and replies with one line per
+finding — file, severity, title, anchor — or `no findings`.
 
 ## Later rounds
 
