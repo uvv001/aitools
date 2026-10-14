@@ -50,3 +50,8 @@ The orchestrator's context holds the index — which agent produced which
 findings — and the briefs carry the pairing of instruction files and paths
 from step 2 of [SKILL.md](SKILL.md). `finding add` reads the files, so the
 orchestrator passes paths.
+
+Findings two agents raised on the same anchor merge into one: record the
+description whose evidence is stronger, and where the other adds occurrences,
+write the merged text to a file in the round's folder, beside the files it
+merges, and pass that path to `finding add`.

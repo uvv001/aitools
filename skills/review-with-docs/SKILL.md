@@ -94,12 +94,9 @@ included) step 7, a fix request the paragraph under States.
    purpose fit and best practices.
 4. **Record.** `finding add --severity --title --description-file` records
    each finding in the open round, with `--unverified` where its evidence
-   stayed unsettled; the description follows [Evidence](#evidence). Findings
-   that two agents raised on the same anchor merge into one: record the
-   stronger description, and where the other adds occurrences, write the
-   merged text to a file in the round's folder first (layout in
-   [fleet.md](fleet.md)). An empty pass is a result: render the report and
-   tell the user.
+   stayed unsettled; the description follows [Evidence](#evidence). With a
+   fleet, findings on a shared anchor merge per [fleet.md](fleet.md). An empty
+   pass is a result: render the report and tell the user.
    **Ready when:** every finding carries severity, evidence, and a suggested
    fix in its description, `finding list` shows each of them, the review is
    checkpointed (see Guardrails), and the user has the report's path.
