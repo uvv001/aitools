@@ -805,6 +805,13 @@ async function fetchPullFiles(rest, ref) {
 }
 //#endregion
 //#region src/publish.ts
+var OwnCommentError = class extends Error {
+	reason;
+	constructor(message, reason) {
+		super(message);
+		this.reason = reason;
+	}
+};
 const AGENT_DISCLAIMER = "🤖 *Written by an AI agent.*";
 function composeBody(text, byAgent) {
 	return byAgent ? [AGENT_DISCLAIMER, text].join("\n\n") : text;
@@ -813,7 +820,7 @@ const VIEWER_QUERY$1 = "query { viewer { login } }";
 const ADD_THREAD = `
 mutation($input: AddPullRequestReviewThreadInput!) {
   addPullRequestReviewThread(input: $input) {
-    thread { id comments(first: 1) { nodes { id databaseId url pullRequestReview { id state } } } }
+    thread { id comments(first: 1) { nodes { id databaseId url } } }
   }
 }`;
 const ADD_REVIEW$1 = `
@@ -847,7 +854,6 @@ const REJECTED$1 = "GitHub rejected the comment (is the anchor still part of the
 const PENDING_BLOCKS_NOW = "you have a pending review; GitHub cannot publish a single comment while it exists. Submit or discard it in the web UI, or post without --now";
 const PENDING_BLOCKS_COMMIT = "a commit can only be pinned when the pending review is created; submit or discard your pending review first (or drop \"commit\")";
 const pendingCannotBeNow = (ref) => `comment ${ref} is in your pending review and cannot be published on its own; submit your review in the web UI, or run without --now to update it`;
-const PLANNED_REVIEW = "(planned pending review)";
 const MAX_LISTED_RANGES = 8;
 const ADOPTED = "an identical comment of yours already exists; adopted";
 const ID_NOT_READ$1 = "created, but its id could not be read from the URL";
@@ -856,10 +862,8 @@ const normalize$1 = (body) => body.replaceAll("\r\n", "\n").trim();
 const sameText$1 = (a, b) => normalize$1(a) === normalize$1(b);
 const messageOf$1 = (error) => error instanceof Error ? error.message : String(error);
 const formatLines = ({ start, end }) => start === end ? `${start}` : `${start}-${end}`;
-function outcome(run, input, action, fields = {}) {
-	const { path, lines } = input.comment;
+function outcome(run, { path, lines }, action, fields = {}) {
 	return {
-		file: input.file,
 		action,
 		dryRun: run.options.dryRun,
 		...path === void 0 ? {} : { path },
@@ -867,12 +871,12 @@ function outcome(run, input, action, fields = {}) {
 		...fields
 	};
 }
-const failure = (run, input, message) => outcome(run, input, "error", { message });
-function created$1(run, input, state, node) {
-	if (!node) return outcome(run, input, "created", { state });
-	const comment = commentRefFromUrl(node.url);
-	return outcome(run, input, "created", {
-		...comment ? { comment } : { message: ID_NOT_READ$1 },
+const failure = (run, comment, message) => outcome(run, comment, "error", { message });
+function created$1(run, comment, state, node) {
+	if (!node) return outcome(run, comment, "created", { state });
+	const ref = commentRefFromUrl(node.url);
+	return outcome(run, comment, "created", {
+		...ref ? { comment: ref } : { message: ID_NOT_READ$1 },
 		state,
 		url: node.url,
 		commentId: node.id
@@ -882,9 +886,7 @@ async function startRun(context, ref, options, deps) {
 	const { viewer } = await context.client(VIEWER_QUERY$1, {});
 	const data = await (deps.loadPullRequest ?? fetchPullRequest)(context.client, ref);
 	const pending = data.reviews.find((r) => r.state === "PENDING" && sameLogin$1(r.author, viewer.login));
-	let rest = deps.rest;
-	let files;
-	const getRest = () => rest ??= createRestClient(context.host, context.token, context.fetchImpl);
+	const rest = deps.rest ?? createRestClient(context.host, context.token, context.fetchImpl);
 	return {
 		context,
 		ref,
@@ -892,25 +894,15 @@ async function startRun(context, ref, options, deps) {
 		data,
 		viewer: viewer.login,
 		pendingReviewId: pending?.id,
-		written: 0,
-		handled: /* @__PURE__ */ new Map(),
-		commits: /* @__PURE__ */ new Map(),
-		stopped: void 0,
-		files: () => files ??= (deps.fetchFiles ?? fetchPullFiles)(getRest(), ref),
-		rest: getRest,
-		onResult: deps.onResult
+		files: () => (deps.fetchFiles ?? fetchPullFiles)(rest, ref),
+		rest
 	};
 }
 function findOwn(run, ref) {
 	const found = run.data.comments.find((c) => commentRefFromUrl(c.url) === ref);
-	if (!found) throw new Error(`comment ${ref} no longer exists in this pull request; remove the "comment:" line to post it again`);
-	if (!sameLogin$1(found.author, run.viewer)) throw new Error(`comment ${ref} was written by ${found.author}; only your own comments can be updated`);
+	if (!found) throw new OwnCommentError(`comment ${ref} no longer exists in this pull request`, "gone");
+	if (!sameLogin$1(found.author, run.viewer)) throw new OwnCommentError(`comment ${ref} was written by ${found.author}; only your own comments can be updated`, "not-yours");
 	return found;
-}
-function claim(run, ref, file) {
-	const owner = run.handled.get(ref);
-	if (owner !== void 0) throw new Error(`comment ${ref} is already handled by ${owner} in this run`);
-	run.handled.set(ref, file);
 }
 function threadLines(thread) {
 	if (thread.isOutdated || thread.line === null) return void 0;
@@ -923,7 +915,8 @@ function explicitCommit(run, comment) {
 	const { commit } = comment;
 	return commit && !run.data.pullRequest.headSha.toLowerCase().startsWith(commit.toLowerCase()) ? commit : void 0;
 }
-async function lookUpCommit(run, commit) {
+async function resolveCommit(run, commit) {
+	if (FULL_SHA.test(commit)) return commit;
 	const { owner, repo } = run.ref;
 	const oid = (await run.context.client(COMMIT_QUERY, {
 		owner,
@@ -933,45 +926,39 @@ async function lookUpCommit(run, commit) {
 	if (!oid) throw new Error(`commit ${commit} was not found in ${owner}/${repo}`);
 	return oid;
 }
-function resolveCommit(run, commit) {
-	if (FULL_SHA.test(commit)) return Promise.resolve(commit);
-	let oid = run.commits.get(commit);
-	if (!oid) run.commits.set(commit, oid = lookUpCommit(run, commit));
-	return oid;
-}
-const headLines = (run, thread, file) => explicitCommit(run, file) ? void 0 : threadLines(thread);
-function sameAnchor(run, existing, file) {
-	if (file.path === void 0) return existing.kind === "issue";
+const headLines = (run, thread, comment) => explicitCommit(run, comment) ? void 0 : threadLines(thread);
+function sameAnchor(run, existing, comment) {
+	if (comment.path === void 0) return existing.kind === "issue";
 	const thread = run.data.threads.find((t) => t.id === existing.threadId);
-	if (existing.kind !== "review" || thread?.path !== file.path) return false;
-	if (existing.diffHunk === "" !== (file.lines === void 0)) return false;
-	if (!file.lines) return true;
-	const current = headLines(run, thread, file);
-	if (current) return current.start === file.lines.start && current.end === file.lines.end;
-	return thread.originalLine === file.lines.end;
+	if (existing.kind !== "review" || thread?.path !== comment.path) return false;
+	if (existing.diffHunk === "" !== (comment.lines === void 0)) return false;
+	if (!comment.lines) return true;
+	const current = headLines(run, thread, comment);
+	if (current) return current.start === comment.lines.start && current.end === comment.lines.end;
+	return thread.originalLine === comment.lines.end;
 }
-function describeLines(run, existing, thread, file) {
+function describeLines(run, existing, thread, comment) {
 	if (existing.diffHunk === "") return void 0;
-	const current = headLines(run, thread, file);
+	const current = headLines(run, thread, comment);
 	if (current) return formatLines(current);
 	return thread.originalLine === null ? void 0 : `${thread.originalLine}`;
 }
-function describeFile({ path, lines }) {
+function describePlace({ path, lines }) {
 	if (path === void 0) return "the conversation";
 	return lines ? `${path}:${formatLines(lines)}` : path;
 }
-function describeAnchor(run, existing, file) {
+function describeAnchor(run, existing, comment) {
 	if (existing.kind === "issue") return "the conversation";
 	const thread = run.data.threads.find((t) => t.id === existing.threadId);
 	if (!thread) return "an unknown place in the diff";
-	const lines = describeLines(run, existing, thread, file);
+	const lines = describeLines(run, existing, thread, comment);
 	return lines ? `${thread.path}:${lines}` : thread.path;
 }
 const isPending$1 = (run, comment) => run.data.reviews.find((r) => r.id === comment.reviewId)?.state === "PENDING";
-function findIdentical(run, file, body) {
+function findIdentical(run, comment, body) {
 	for (const existing of run.data.comments) {
 		const ref = commentRefFromUrl(existing.url);
-		if (ref && sameLogin$1(existing.author, run.viewer) && sameText$1(existing.body, body) && sameAnchor(run, existing, file)) return {
+		if (ref && sameLogin$1(existing.author, run.viewer) && sameText$1(existing.body, body) && sameAnchor(run, existing, comment)) return {
 			existing,
 			ref
 		};
@@ -986,7 +973,6 @@ async function updateBody(run, existing, body) {
 		body
 	}];
 	await run.context.client(query, { input });
-	run.written += 1;
 }
 function existingFields(run, existing, ref) {
 	return {
@@ -996,14 +982,13 @@ function existingFields(run, existing, ref) {
 		commentId: existing.id
 	};
 }
-async function publishExisting(run, input, existing, ref, body) {
-	const { comment } = input;
-	if (!sameAnchor(run, existing, comment)) throw new Error(`comment ${ref} is on ${describeAnchor(run, existing, comment)}, the file says ${describeFile(comment)}; an existing comment cannot be moved: remove the "comment:" line to post a new one`);
+async function publishExisting(run, comment, existing, ref, body) {
+	if (!sameAnchor(run, existing, comment)) throw new OwnCommentError(`comment ${ref} is on ${describeAnchor(run, existing, comment)}, the finding says ${describePlace(comment)}; an existing comment cannot be moved`, "moved");
 	if (run.options.now && isPending$1(run, existing)) throw new Error(pendingCannotBeNow(ref));
 	const fields = existingFields(run, existing, ref);
-	if (sameText$1(existing.body, body)) return outcome(run, input, "unchanged", fields);
+	if (sameText$1(existing.body, body)) return outcome(run, comment, "unchanged", fields);
 	if (!run.options.dryRun) await updateBody(run, existing, body);
-	return outcome(run, input, "updated", fields);
+	return outcome(run, comment, "updated", fields);
 }
 function listRanges(ranges) {
 	const listed = ranges.slice(0, MAX_LISTED_RANGES).map(formatLines);
@@ -1014,7 +999,7 @@ async function validateAnchor(run, path, lines) {
 	if (!file) throw new Error(`${path} is not changed by this pull request`);
 	if (file.status === "removed") throw new Error(`cannot comment on ${path}: this pull request removes it`);
 	if (!lines) return;
-	if (!file.patch) throw new Error(`GitHub gives no diff for ${path} (binary or too large); omit "lines" for a file-level comment`);
+	if (!file.patch) throw new Error(`GitHub gives no diff for ${path} (binary or too large), so a finding anchored in that file cannot be posted as an inline comment`);
 	const ranges = rightHunkRanges(file.patch);
 	if (ranges.some((r) => r.start <= lines.start && lines.end <= r.end)) return;
 	throw new Error(`lines ${formatLines(lines)} of ${path} are not inside the pull request diff; commentable ranges: ${listRanges(ranges)}`);
@@ -1029,21 +1014,16 @@ function rightSide(lines) {
 		} : {}
 	};
 }
-async function createGeneral(run, input, body) {
+async function createGeneral(run, comment, body) {
 	if (!run.options.now) throw new Error("a general comment cannot be pending; add --now to post it immediately");
-	if (run.options.dryRun) return created$1(run, input, "posted");
-	const data = await run.context.client(ADD_COMMENT$1, { input: {
+	if (run.options.dryRun) return created$1(run, comment, "posted");
+	return created$1(run, comment, "posted", (await run.context.client(ADD_COMMENT$1, { input: {
 		subjectId: run.data.pullRequest.id,
 		body
-	} });
-	run.written += 1;
-	return created$1(run, input, "posted", data.addComment.commentEdge.node);
+	} })).addComment.commentEdge.node);
 }
-async function createPending(run, { input, path, lines, body }) {
-	if (run.options.dryRun) {
-		run.pendingReviewId ??= PLANNED_REVIEW;
-		return created$1(run, input, "pending");
-	}
+async function createPending(run, { comment, path, lines, body }) {
+	if (run.options.dryRun) return created$1(run, comment, "pending");
 	const target = run.pendingReviewId ? { pullRequestReviewId: run.pendingReviewId } : { pullRequestId: run.data.pullRequest.id };
 	const anchor = lines ? {
 		...rightSide(lines),
@@ -1056,9 +1036,7 @@ async function createPending(run, { input, path, lines, body }) {
 		body
 	} })).addPullRequestReviewThread.thread?.comments.nodes[0];
 	if (!first) throw new Error(REJECTED$1);
-	run.written += 1;
-	run.pendingReviewId = first.pullRequestReview.id;
-	return created$1(run, input, "pending", first);
+	return created$1(run, comment, "pending", first);
 }
 async function discardEmptyReview$1(run, reviewId) {
 	try {
@@ -1068,13 +1046,10 @@ async function discardEmptyReview$1(run, reviewId) {
 	}
 	throw new Error(REJECTED$1);
 }
-async function createPinned(run, { input, path, lines, body }, commit) {
+async function createPinned(run, { comment, path, lines, body }, commit) {
 	if (!lines) throw new Error("file-level comments cannot be pinned to a commit");
 	if (run.pendingReviewId) throw new Error(PENDING_BLOCKS_COMMIT);
-	if (run.options.dryRun) {
-		run.pendingReviewId = PLANNED_REVIEW;
-		return created$1(run, input, "pending");
-	}
+	if (run.options.dryRun) return created$1(run, comment, "pending");
 	const review = (await run.context.client(ADD_REVIEW$1, { input: {
 		pullRequestId: run.data.pullRequest.id,
 		commitOID: commit,
@@ -1086,9 +1061,7 @@ async function createPinned(run, { input, path, lines, body }, commit) {
 	} })).addPullRequestReview.pullRequestReview;
 	const first = review.comments.nodes[0];
 	if (!first) return discardEmptyReview$1(run, review.id);
-	run.written += 1;
-	run.pendingReviewId = review.id;
-	return created$1(run, input, "pending", first);
+	return created$1(run, comment, "pending", first);
 }
 function postSingleComment(run, { path, lines, body }, commitId) {
 	const { owner, repo, number } = run.ref;
@@ -1100,7 +1073,7 @@ function postSingleComment(run, { path, lines, body }, commitId) {
 			start_side: "RIGHT"
 		} : {}
 	} : { subject_type: "file" };
-	return run.rest()("POST", `/repos/${owner}/${repo}/pulls/${number}/comments`, {
+	return run.rest("POST", `/repos/${owner}/${repo}/pulls/${number}/comments`, {
 		body,
 		commit_id: commitId,
 		path,
@@ -1109,19 +1082,17 @@ function postSingleComment(run, { path, lines, body }, commitId) {
 }
 async function createSingle(run, inline, commit) {
 	if (run.pendingReviewId) throw new Error(PENDING_BLOCKS_NOW);
-	if (run.options.dryRun) return created$1(run, inline.input, "posted");
-	const comment = await postSingleComment(run, inline, commit ?? run.data.pullRequest.headSha);
-	run.written += 1;
-	return created$1(run, inline.input, "posted", {
-		id: comment.node_id,
-		url: comment.html_url
+	if (run.options.dryRun) return created$1(run, inline.comment, "posted");
+	const posted = await postSingleComment(run, inline, commit ?? run.data.pullRequest.headSha);
+	return created$1(run, inline.comment, "posted", {
+		id: posted.node_id,
+		url: posted.html_url
 	});
 }
-async function createComment(run, input, body) {
-	const { comment } = input;
-	if (comment.path === void 0) return createGeneral(run, input, body);
+async function createComment(run, comment, body) {
+	if (comment.path === void 0) return createGeneral(run, comment, body);
 	const inline = {
-		input,
+		comment,
 		path: comment.path,
 		lines: comment.lines,
 		body
@@ -1132,49 +1103,37 @@ async function createComment(run, input, body) {
 	if (run.options.now) return createSingle(run, inline, commit);
 	return commit ? createPinned(run, inline, commit) : createPending(run, inline);
 }
-async function dispatch(run, input) {
-	const { comment } = input;
+async function dispatch(run, comment) {
 	const body = composeBody(comment.body, run.options.byAgent);
-	if (comment.commentRef !== void 0) {
-		const existing = findOwn(run, comment.commentRef);
-		claim(run, comment.commentRef, input.file);
-		return publishExisting(run, input, existing, comment.commentRef, body);
-	}
+	if (comment.commentRef !== void 0) return publishExisting(run, comment, findOwn(run, comment.commentRef), comment.commentRef, body);
 	const identical = findIdentical(run, comment, body);
-	if (!identical) return createComment(run, input, body);
-	claim(run, identical.ref, input.file);
-	return outcome(run, input, "unchanged", {
+	if (!identical) return createComment(run, comment, body);
+	return outcome(run, comment, "unchanged", {
 		...existingFields(run, identical.existing, identical.ref),
 		message: ADOPTED
 	});
 }
-async function settle(run, input) {
-	if (run.stopped) return failure(run, input, run.stopped);
+async function settle(run, comment) {
 	try {
-		return await dispatch(run, input);
+		return await dispatch(run, comment);
 	} catch (error) {
-		if (error instanceof AccessDeniedError) {
-			if (run.written === 0) throw error;
-			run.stopped = `access was refused after ${run.written} comment(s) had been written`;
-			return failure(run, input, run.stopped);
-		}
-		return failure(run, input, messageOf$1(error));
+		if (error instanceof AccessDeniedError) throw error;
+		if (error instanceof OwnCommentError) return outcome(run, comment, "error", {
+			message: error.message,
+			reason: error.reason
+		});
+		return failure(run, comment, messageOf$1(error));
 	}
 }
-async function publishOne(run, input) {
-	const result = await settle(run, input);
-	if (!run.onResult) return result;
-	try {
-		return await run.onResult(input, result);
-	} catch (error) {
-		return failure(run, input, messageOf$1(error));
-	}
-}
-async function publishComments(context, ref, inputs, options, deps = {}) {
+async function publishComment(context, ref, comment, options, deps = {}) {
 	const run = await startRun(context, ref, options, deps);
-	const results = [];
-	for (const input of inputs) results.push(await publishOne(run, input));
-	return results;
+	const result = await settle(run, comment);
+	if (!deps.onResult) return result;
+	try {
+		return await deps.onResult(result);
+	} catch (error) {
+		return failure(run, comment, messageOf$1(error));
+	}
 }
 //#endregion
 //#region src/reply.ts
@@ -1365,270 +1324,27 @@ const SEVERITIES = [
 	"🟡",
 	"⚪"
 ];
-const HEADING$1 = /^###\s+(?<rest>.*\S)\s*$/u;
-const SUBHEADING$1 = /^####\s+(?<title>.*\S)\s*$/u;
+const HEADING$1 = /^(?<hashes>#{1,4})\s+(?<title>.*\S)\s*$/u;
 const FINDING$1 = /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>[A-Za-z0-9-]+)\s+—\s+(?<title>.+)$/u;
-const FENCE$3 = /^\s*(?<marker>`{3,}|~{3,})/u;
-const SECTION = /^##\s+(?<title>.*\S)\s*$/u;
-const TITLE$2 = /^#\s+(?<rest>.*\S)\s*$/u;
+const FENCE$2 = /^\s*(?<marker>`{3,}|~{3,})/u;
+const TITLE$1 = /^Review — (?<target>\S.*)$/u;
 const ID = /^F(?<number>\d+)$/u;
-const ENTRY = /^\s*(?:-\s+)?\*\*(?<label>[^*]+)\*\*/u;
 const SECTIONS = [
 	"Intro",
 	"Dashboard",
 	"Findings"
 ];
-const REQUIRED_ENTRY = "Reviewed";
-const SUBSECTIONS$1 = ["Description", "Updates"];
-const HINT = "start a review with `pr-comments init <name> [--report <file>]`";
-const EXPECTED = SECTIONS.map((title) => `## ${title}`).join(", ");
 function groups(match) {
 	return match.groups;
 }
 function slug$1(heading) {
 	return heading.toLowerCase().replace(/[^a-z0-9 _-]/gu, "").replace(/ /gu, "-");
 }
-function isHeading(line) {
-	return SECTION.test(line) || HEADING$1.test(line) || SUBHEADING$1.test(line);
-}
-function inFence(scan, line, index) {
-	const fenced = FENCE$3.exec(line);
-	if (!fenced) return scan.fence !== null;
-	const { marker } = groups(fenced);
-	if (scan.fence === null) scan.fence = {
-		marker,
-		line: index + 1
-	};
-	else if (marker[0] === scan.fence.marker[0] && marker.length >= scan.fence.marker.length) scan.fence = null;
-	return true;
-}
-function openSection(scan, title, index) {
-	scan.sections.push({
-		title,
-		line: index
-	});
-	scan.inFindings = title === "Findings";
-	scan.inIntro = title === "Intro";
-}
-function checkSequence(scan, id, at) {
-	const shaped = ID.exec(id);
-	if (!shaped) {
-		scan.misshaped.push(`line ${at}: ${id}`);
-		return;
-	}
-	const number = Number(groups(shaped).number);
-	if (scan.previous !== null && number <= scan.previous) scan.disordered.push(`line ${at}: ${id} after F${scan.previous}`);
-	scan.previous = number;
-}
-function addFinding$1(scan, { state, severity, id, title }, rest, index) {
-	const at = index + 1;
-	if (!STATES.some((known) => known.marker === state)) scan.unknown.push(`line ${at}: state '${state}'`);
-	if (!SEVERITIES.includes(severity)) scan.unknown.push(`line ${at}: severity '${severity}'`);
-	scan.idLines.set(id, [...scan.idLines.get(id) ?? [], at]);
-	checkSequence(scan, id, at);
-	const finding = {
-		id,
-		state,
-		severity,
-		title,
-		headerLine: index,
-		anchor: slug$1(rest)
-	};
-	scan.blocks.push({
-		finding,
-		parts: /* @__PURE__ */ new Set()
-	});
-}
-function scanHeader(scan, line, rest, index) {
-	const finding = FINDING$1.exec(rest);
-	const where = `line ${index + 1}: ${line.trim()}`;
-	if (!scan.inFindings) {
-		if (finding) scan.misplaced.push(where);
-		return;
-	}
-	if (finding) addFinding$1(scan, groups(finding), rest, index);
-	else scan.malformed.push(where);
-}
-function notePart(scan, part, index) {
-	const block = scan.blocks.at(-1);
-	if (!block) return;
-	block.parts.add(part);
-	if (part !== "Description" || block.description) return;
-	block.description = {
-		start: index + 1,
-		end: scan.total
-	};
-	scan.openDescription = block.description;
-}
-function scanSubheadingOrTitle(scan, line, index) {
-	const subheading = SUBHEADING$1.exec(line);
-	if (subheading) {
-		if (scan.inFindings) notePart(scan, groups(subheading).title, index);
-		return;
-	}
-	const title = TITLE$2.exec(line);
-	if (title) scan.titles.push({
-		text: groups(title).rest,
-		line: index
-	});
-}
-function scanLine(scan, line, index) {
-	if (inFence(scan, line, index)) return;
-	if (scan.openDescription && isHeading(line)) {
-		scan.openDescription.end = index;
-		scan.openDescription = null;
-	}
-	const section = SECTION.exec(line);
-	if (section) {
-		openSection(scan, groups(section).title, index);
-		return;
-	}
-	if (scan.inIntro) {
-		const entry = ENTRY.exec(line);
-		if (entry) scan.entries.add(groups(entry).label.trim());
-	}
-	const heading = HEADING$1.exec(line);
-	if (heading) scanHeader(scan, line, groups(heading).rest, index);
-	else scanSubheadingOrTitle(scan, line, index);
-}
-function scanLines(lines) {
-	const scan = {
-		total: lines.length,
-		blocks: [],
-		unknown: [],
-		misplaced: [],
-		malformed: [],
-		misshaped: [],
-		disordered: [],
-		idLines: /* @__PURE__ */ new Map(),
-		previous: null,
-		titles: [],
-		sections: [],
-		entries: /* @__PURE__ */ new Set(),
-		fence: null,
-		inFindings: false,
-		inIntro: false,
-		openDescription: null
-	};
-	lines.forEach((line, index) => scanLine(scan, line, index));
-	return scan;
-}
-function checkTitle({ titles }, path) {
-	const [first] = titles;
-	if (!first) throw new Error(`no '# Review — <target>' title in ${path} — ${HINT}`);
-	if (titles.length > 1) {
-		const lines = titles.map((title) => title.line + 1).join(", ");
-		throw new Error(`more than one title in ${path}, lines ${lines} — ${HINT}`);
-	}
-	if (!/^Review — \S/u.test(first.text)) throw new Error(`title in ${path}, line ${first.line + 1}, reads '# ${first.text}' — expected '# Review — <target>'`);
-}
-function checkSections({ sections }, path) {
-	const seen = /* @__PURE__ */ new Set();
-	for (const section of sections) {
-		const at = `${path}, line ${section.line + 1}`;
-		if (!SECTIONS.includes(section.title)) throw new Error(`unexpected section '## ${section.title}' in ${at} — the report holds ${EXPECTED} and nothing else`);
-		if (seen.has(section.title)) throw new Error(`'## ${section.title}' appears twice in ${at} — ${HINT}`);
-		seen.add(section.title);
-	}
-	for (const title of SECTIONS) if (!seen.has(title)) throw new Error(`no '## ${title}' section in ${path} — ${HINT}`);
-	const order = sections.findIndex((section, index) => section.title !== SECTIONS[index]);
-	const wrong = sections[order];
-	if (!wrong) return;
-	const reads = sections.map((section) => `## ${section.title}`).join(", ");
-	throw new Error(`sections out of order in ${path}, line ${wrong.line + 1}: '## ${wrong.title}' where '## ${SECTIONS[order]}' belongs — the report reads ${reads}, expected ${EXPECTED}`);
-}
-function checkTitlePlace({ titles, sections }, path) {
-	const [title] = titles;
-	const [section] = sections;
-	if (title && section && title.line > section.line) throw new Error(`the title comes after '## ${section.title}' in ${path}, line ${title.line + 1} — ${HINT}`);
-}
-function checkHeaders(scan, path) {
-	if (scan.misplaced.length > 0) {
-		const where = scan.misplaced.join("; ");
-		throw new Error(`finding header outside '## Findings' in ${path} — ${where} — move it into the findings section`);
-	}
-	if (scan.malformed.length > 0) {
-		const where = scan.malformed.join("; ");
-		throw new Error(`malformed finding header in ${path} — ${where} — expected '### <state> <severity> <ID> — <title>'`);
-	}
-	if (scan.unknown.length > 0) {
-		const where = scan.unknown.join("; ");
-		throw new Error(`unknown marker in ${path} — ${where} — see the states table and the severity scale in report-format.md`);
-	}
-	const reused = [...scan.idLines].filter(([, at]) => at.length > 1);
-	if (reused.length > 0) {
-		const where = reused.map(([id, at]) => `${id} on lines ${at.join(", ")}`).join("; ");
-		throw new Error(`duplicate finding ID in ${path} — ${where} — an ID is never reused`);
-	}
-	if (scan.misshaped.length > 0) throw new Error(`finding ID out of shape in ${path} — ${scan.misshaped.join("; ")} — an ID reads F<n>, as F7`);
-	if (scan.disordered.length > 0) throw new Error(`finding IDs out of order in ${path} — ${scan.disordered.join("; ")} — they rise down the section`);
-}
-function checkIntro({ entries }, path) {
-	if (entries.has(REQUIRED_ENTRY)) return;
-	throw new Error(`intro entry missing in ${path} — **${REQUIRED_ENTRY}** — the intro carries **${REQUIRED_ENTRY}**`);
-}
-function checkSubsections({ blocks }, path) {
-	const incomplete = blocks.map(({ finding, parts }) => ({
-		finding,
-		missing: SUBSECTIONS$1.filter((part) => !parts.has(part))
-	})).filter(({ missing }) => missing.length > 0);
-	if (incomplete.length === 0) return;
-	const where = incomplete.map(({ finding, missing }) => {
-		const parts = missing.map((part) => `'#### ${part}'`).join(" or ");
-		return `${finding.id} on line ${finding.headerLine + 1} has no ${parts}`;
-	});
-	throw new Error(`finding subsection missing in ${path} — ${where.join("; ")} — every finding carries '#### Description' and '#### Updates'`);
-}
-function validate(scan, path) {
-	if (scan.fence !== null) throw new Error(`the fence opened in ${path}, line ${scan.fence.line}, is never closed — everything below it reads as quoted text`);
-	checkTitle(scan, path);
-	checkSections(scan, path);
-	checkTitlePlace(scan, path);
-	checkHeaders(scan, path);
-	checkIntro(scan, path);
-	checkSubsections(scan, path);
-}
-function parseReport(text, path) {
-	const lines = text.split("\n");
-	const scan = scanLines(lines);
-	validate(scan, path);
-	return {
-		path,
-		lines,
-		findings: scan.blocks.map(({ finding, description }) => ({
-			...finding,
-			description
-		})),
-		sections: scan.sections
-	};
-}
-//#endregion
-//#region src/review-read.ts
-const STAMP = String.raw`\d{4}-\d{2}-\d{2} \d{2}:\d{2}`;
-const TITLE$1 = /^#\s+Review — (?<target>.*\S)\s*$/u;
-const ANY_TITLE = /^#\s+.*\S\s*$/u;
-const SUBHEADING = /^####\s+(?<title>.*\S)\s*$/u;
-const FENCE$2 = /^\s*(?<marker>`{3,}|~{3,})/u;
-const OPENER = /^\*\*Reviewed\*\*\s*$/u;
-const BULLET = /^- (?<text>.*)$/u;
-const BLANK$1 = /^[ \t]*$/u;
-const SUBSECTIONS = ["Description", "Updates"];
-const SUBSECTION_RULE = "a finding holds '#### Description', then '#### Updates', once each";
-const ROUND = /^Round (\d+)\b/u;
-const REVISION = /^Round \d+ — `([^`]+)`/u;
-const BASE = /\bbase\s+(?:`([^`]+)`|none\s+—\s+reviewed\s+as\s+it\s+stands)/u;
-const UPDATE = new RegExp(`^(${STAMP}) — (?:Round (\\d+): )?`, "u");
-const isBlank$2 = (line) => BLANK$1.test(line);
-function fail(source, index, what, expected) {
-	throw new Error(`cannot read ${source.path}, line ${index + 1}: ${what} — ${expected}`);
-}
-function named(match) {
-	return match?.groups ?? {};
-}
+const same = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
 function insideFences(lines) {
 	let open;
-	return lines.map((line) => {
-		const { marker } = named(FENCE$2.exec(line));
+	const inside = lines.map((line) => {
+		const marker = FENCE$2.exec(line)?.groups?.marker;
 		if (open === void 0) {
 			open = marker;
 			return false;
@@ -1636,58 +1352,122 @@ function insideFences(lines) {
 		if (marker !== void 0 && marker[0] === open[0] && marker.length >= open.length) open = void 0;
 		return true;
 	});
+	if (open !== void 0) throw new Error("a code fence is never closed");
+	return inside;
 }
-function sourceOf(report) {
+function checkHeader({ state, severity, id }, previous) {
+	if (!STATES.some((known) => known.marker === state) || !SEVERITIES.includes(severity)) throw new Error(`${id} has a state or severity outside the scales`);
+	const number = Number(ID.exec(id)?.groups?.number);
+	if (!(number > previous)) throw new Error(`finding ID ${id} is not F<n>, or does not rise above the one before`);
+	return number;
+}
+function parseReport(text, path) {
+	const lines = text.split("\n");
+	const inside = insideFences(lines);
+	const titles = [];
+	const sections = [];
+	const blocks = [];
+	let previous = -1;
+	let open;
+	lines.forEach((line, index) => {
+		const heading = inside[index] ? null : HEADING$1.exec(line);
+		if (!heading) return;
+		const { hashes, title } = groups(heading);
+		if (hashes.length > 1 && open) {
+			open.end = index;
+			open = void 0;
+		}
+		const inFindings = sections.at(-1)?.title === "Findings";
+		if (hashes.length === 1) titles.push({
+			title,
+			line: index
+		});
+		else if (hashes.length === 2) sections.push({
+			title,
+			line: index
+		});
+		else if (hashes.length === 3) {
+			const header = FINDING$1.exec(title);
+			if (header && !inFindings) throw new Error(`finding header outside '## Findings': ${title}`);
+			if (!inFindings) return;
+			if (!header) throw new Error(`malformed finding header: ${title}`);
+			const fields = groups(header);
+			previous = checkHeader(fields, previous);
+			blocks.push({ finding: {
+				...fields,
+				headerLine: index,
+				anchor: slug$1(title)
+			} });
+		} else {
+			const block = blocks.at(-1);
+			if (inFindings && block && title === "Description" && !block.description) {
+				block.description = {
+					start: index + 1,
+					end: lines.length
+				};
+				open = block.description;
+			}
+		}
+	});
+	const [first] = titles;
+	const match = titles.length === 1 && first?.line === 0 ? TITLE$1.exec(first.title) : null;
+	if (!match) throw new Error("the report does not open with exactly one '# Review — <target>' title");
+	if (!same(sections.map(({ title }) => title), SECTIONS)) throw new Error(`the sections are not ${SECTIONS.map((title) => `'## ${title}'`).join(", ")}, once each, in that order`);
+	const findings = blocks.map(({ finding, description }) => {
+		if (!description) throw new Error(`${finding.id} has no '#### Description'`);
+		return {
+			...finding,
+			description
+		};
+	});
 	return {
-		path: report.path,
-		lines: report.lines,
-		inside: insideFences(report.lines)
+		path,
+		lines,
+		inside,
+		target: groups(match).target,
+		findings,
+		sections
 	};
 }
-function checkLineBreaks(source) {
-	const at = source.lines.findIndex((line) => line.includes("\r"));
-	if (at >= 0) fail(source, at, "a carriage return", "only LF ends a line");
-}
-function strayText(source, index) {
-	fail(source, index, `'${(source.lines[index] ?? "").trim()}' is text outside a bullet list`, "only bullets, with their continuation lines, belong here");
-}
-function startBlock(line, index, opener) {
-	if (opener && OPENER.test(line)) return {
-		line: index,
-		text: null
-	};
-	const item = BULLET.exec(line);
-	return item ? {
-		line: index,
-		text: named(item).text ?? ""
-	} : void 0;
-}
-function extend(source, index, last, lines) {
-	if (last?.text == null) strayText(source, index);
-	last.text += lines.map((line) => `\n${line}`).join("");
-}
-function scanBlocks(source, from, to, opener) {
+//#endregion
+//#region src/review-read.ts
+const STAMP = String.raw`\d{4}-\d{2}-\d{2} \d{2}:\d{2}`;
+const OPENER = /^\*\*Reviewed\*\*\s*$/u;
+const BULLET = /^- (?<text>.*)$/u;
+const BLANK$1 = /^[ \t]*$/u;
+const SUBHEADING = /^####\s+(?<title>.*\S)\s*$/u;
+const ROUND = /^Round (\d+)\b/u;
+const REVISION = /^Round \d+ — `([^`]+)`/u;
+const BASE = /\bbase\s+(?:`([^`]+)`|none\s+—\s+reviewed\s+as\s+it\s+stands)/u;
+const UPDATE = new RegExp(`^(${STAMP}) — (?:Round (\\d+): )?`, "u");
+function scanBlocks(report, from, to, opener) {
 	const blocks = [];
 	let blanks = [];
-	for (let index = from; index < to; index++) {
-		const line = source.lines[index] ?? "";
+	const extend = (lines) => {
 		const last = blocks.at(-1);
-		if (source.inside[index]) extend(source, index, last, [line]);
-		else if (isBlank$2(line)) blanks.push(line);
+		if (last === void 0 || last.label) throw new Error("text outside a bullet list");
+		last.text += lines.map((line) => `\n${line}`).join("");
+	};
+	for (let index = from; index < to; index++) {
+		const line = report.lines[index] ?? "";
+		if (report.inside[index]) extend([line]);
+		else if (BLANK$1.test(line)) blanks.push(line);
 		else {
-			const block = startBlock(line, index, opener);
-			if (block) blocks.push(block);
-			else if (blanks.length === 0 || /^\s/u.test(line)) extend(source, index, last, [...blanks, line]);
-			else strayText(source, index);
+			const bullet = BULLET.exec(line);
+			if (opener && OPENER.test(line)) blocks.push({
+				label: true,
+				text: ""
+			});
+			else if (bullet) blocks.push({
+				label: false,
+				text: bullet.groups?.text ?? ""
+			});
+			else if (blanks.length === 0 || /^\s/u.test(line)) extend([...blanks, line]);
+			else throw new Error("text outside a bullet list");
 			blanks = [];
 		}
 	}
 	return blocks;
-}
-function rejectText(source, from, to, where) {
-	const index = source.lines.findIndex((line, at) => at >= from && at < to && !isBlank$2(line));
-	const text = (source.lines[index] ?? "").trim();
-	if (index >= 0) fail(source, index, `'${text}' stands ${where}`, "the report holds nothing there");
 }
 function reviewedItem(text) {
 	const item = { text };
@@ -1706,73 +1486,52 @@ function updateItem(text) {
 	if (match?.[2]) item.round = Number(match[2]);
 	return item;
 }
-function readIntro(source, from, to) {
-	const texts = [];
-	let labelled = false;
-	for (const block of scanBlocks(source, from, to, true)) if (block.text === null) {
-		if (labelled) fail(source, block.line, "**Reviewed** appears twice in the intro", "the entry stands once");
-		labelled = true;
-	} else if (labelled) texts.push(block.text);
-	else fail(source, block.line, "a bullet before **Reviewed**", "bullets belong under the label");
-	return { reviewed: { items: texts.map(reviewedItem) } };
-}
-function readTitle(source, introLine) {
-	const isTitle = (line, index) => index < introLine && !source.inside[index] && ANY_TITLE.test(line);
-	const at = source.lines.findIndex(isTitle);
-	rejectText(source, 0, at, "above the title");
-	rejectText(source, at + 1, introLine, "between the title and ## Intro");
-	return named(TITLE$1.exec(source.lines[at] ?? "")).target ?? "";
-}
-function subsections(source, header, end) {
-	const marks = [];
-	for (let index = header.headerLine + 1; index < end; index++) {
-		const { title } = named(SUBHEADING.exec(source.lines[index] ?? ""));
-		if (title !== void 0 && !source.inside[index]) marks.push({
-			title,
-			line: index
-		});
-	}
-	const wrong = marks.findIndex((mark, at) => mark.title !== SUBSECTIONS[at]);
-	const mark = marks[wrong];
-	if (mark) {
-		const belongs = SUBSECTIONS[wrong] ? `where '#### ${SUBSECTIONS[wrong]}' belongs` : "after '#### Updates'";
-		fail(source, mark.line, `'#### ${mark.title}' ${belongs}`, SUBSECTION_RULE);
-	}
-	return marks.map((entry) => entry.line);
+function readIntro(report, from, to) {
+	const [label, ...items] = scanBlocks(report, from, to, true);
+	if (!label?.label || items.some((item) => item.label)) throw new Error("the intro is not **Reviewed** once, then its bullets");
+	return { reviewed: { items: items.map(({ text }) => reviewedItem(text)) } };
 }
 function trimmed$1(lines) {
-	const from = lines.findIndex((line) => !isBlank$2(line));
-	const to = lines.findLastIndex((line) => !isBlank$2(line)) + 1;
+	const from = lines.findIndex((line) => !BLANK$1.test(line));
+	const to = lines.findLastIndex((line) => !BLANK$1.test(line)) + 1;
 	return from < 0 ? [] : lines.slice(from, to);
 }
-function readFinding(source, header, end) {
-	const [description = 0, updates = 0] = subsections(source, header, end);
-	rejectText(source, header.headerLine + 1, description, "between the finding header and '#### Description'");
-	const { id, state, severity, title } = header;
-	return {
-		id,
-		state,
-		severity,
-		title,
-		description: trimmed$1(source.lines.slice(description + 1, updates)).join("\n"),
-		updates: scanBlocks(source, updates + 1, end, false).map((block) => updateItem(block.text ?? ""))
-	};
+function subsections(report, id, from, to) {
+	const marks = [];
+	for (let line = from; line < to; line++) {
+		const title = report.inside[line] ? void 0 : SUBHEADING.exec(report.lines[line] ?? "")?.groups?.title;
+		if (title !== void 0) marks.push({
+			title,
+			line
+		});
+	}
+	const [description, updates] = marks;
+	if (marks.length !== 2 || description?.title !== "Description" || updates?.title !== "Updates") throw new Error(`${id} does not hold '#### Description', then '#### Updates', once each`);
+	return [description.line, updates.line];
 }
-function readFindings(source, report, section) {
-	const headers = report.findings;
-	const total = source.lines.length;
-	rejectText(source, section + 1, headers[0]?.headerLine ?? total, "below ## Findings, before the first finding");
-	return headers.map((header, index) => readFinding(source, header, headers[index + 1]?.headerLine ?? total));
+function readFindings(report) {
+	const { lines, findings } = report;
+	return findings.map(({ id, state, severity, title, headerLine }, index) => {
+		const end = findings[index + 1]?.headerLine ?? lines.length;
+		const [description, updates] = subsections(report, id, headerLine + 1, end);
+		return {
+			id,
+			state,
+			severity,
+			title,
+			description: trimmed$1(lines.slice(description + 1, updates)).join("\n"),
+			updates: scanBlocks(report, updates + 1, end, false).map((block) => updateItem(block.text))
+		};
+	});
 }
 function readReport(text, path) {
+	if (text.includes("\r")) throw new Error("the report holds a carriage return; only LF ends a line");
 	const report = parseReport(text, path);
-	const source = sourceOf(report);
-	checkLineBreaks(source);
-	const [intro, dashboard, findings] = report.sections.map((section) => section.line);
+	const [intro, dashboard] = report.sections.map((section) => section.line);
 	return {
-		target: readTitle(source, intro),
-		intro: readIntro(source, intro + 1, dashboard),
-		findings: readFindings(source, report, findings)
+		target: report.target,
+		intro: readIntro(report, intro + 1, dashboard),
+		findings: readFindings(report)
 	};
 }
 //#endregion
@@ -2286,7 +2045,7 @@ function dumpReview$1(data, extra = {}) {
 }
 //#endregion
 //#region src/report-dashboard.ts
-const GENERATED = "<!-- generated by update-dashboard.ts — do not edit by hand -->";
+const GENERATED = "<!-- generated by pr-comments — do not edit by hand -->";
 function buildDashboard(findings) {
 	const block = [
 		"## Dashboard",
@@ -2921,12 +2680,6 @@ function setMeta(db, key, value) {
 	db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
 }
 //#endregion
-//#region src/version.ts
-const VERSION = "0.1.0";
-function versionText() {
-	return `pr-comments ${VERSION}+08cb82c`;
-}
-//#endregion
 //#region src/review-files.ts
 const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "latin1");
 const exists = (path) => access(path).then(() => true, () => false);
@@ -2938,7 +2691,7 @@ async function readExisting(path) {
 		throw error;
 	}
 }
-function samePath$1(a, b) {
+function samePath(a, b) {
 	const [x, y] = [resolve(a), resolve(b)];
 	return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
 }
@@ -2958,7 +2711,7 @@ async function isDatabaseFile(path) {
 	}
 }
 async function refuseDatabase(target, db) {
-	if (samePath$1(target, db)) throw new Error(`refusing to write the report over the database ${db}`);
+	if (samePath(target, db)) throw new Error(`refusing to write the report over the database ${db}`);
 	if (await isDatabaseFile(target)) throw new Error(`refusing to overwrite the SQLite database ${target} with a report`);
 	if (/\.sqlite(?::[^\\/]*)?$/iu.test(target)) throw new Error("--out must be a report file, not a database");
 }
@@ -2986,21 +2739,21 @@ async function publish(temp, target) {
 	await rename(temp, target);
 	return true;
 }
-function buildDatabase(path, data, values) {
+function buildDatabase(path, data, pullRequest) {
 	const db = openReviewDb(path, "create");
 	try {
 		inTransaction(db, () => {
 			saveReview(db, data);
-			for (const [key, value] of Object.entries(values)) setMeta(db, key, value);
+			if (pullRequest !== void 0) setMeta(db, PULL_REQUEST, pullRequest);
 		});
 	} finally {
 		db.close();
 	}
 }
-async function createDatabase(path, data, values) {
+async function createDatabase(path, data, pullRequest) {
 	const temp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
 	try {
-		buildDatabase(temp, data, values);
+		buildDatabase(temp, data, pullRequest);
 		return await publish(temp, path);
 	} finally {
 		await rm(temp, {
@@ -3043,10 +2796,7 @@ async function initReviewFile(name, options = {}) {
 	const dbPath = options.db ?? paths.db;
 	if (await exists(dbPath)) throw existingDatabase(dbPath);
 	assertRenders(data, paths.report);
-	if (!await createDatabase(dbPath, data, {
-		tool_version: VERSION,
-		...pullRequest === void 0 ? {} : { [PULL_REQUEST]: pullRequest }
-	})) throw existingDatabase(dbPath);
+	if (!await createDatabase(dbPath, data, pullRequest)) throw existingDatabase(dbPath);
 	return {
 		db: dbPath,
 		report: paths.report
@@ -3452,97 +3202,6 @@ function pendingJson(items) {
 	return JSON.parse(JSON.stringify(items));
 }
 //#endregion
-//#region src/comment-file.ts
-const KEYS = [
-	"path",
-	"lines",
-	"commit"
-];
-const isFence = (line) => /^---\s*$/.test(line);
-const unquote = (value) => /^(["'])(.*)\1$/.exec(value)?.[2] ?? value;
-function findHeader(lines) {
-	const open = lines.findIndex((line) => line.trim() !== "");
-	if (!isFence(lines[open] ?? "")) return void 0;
-	const close = lines.findIndex((line, index) => index > open && isFence(line));
-	if (close < 0) throw new Error("the header block opened by \"---\" is never closed by a second \"---\" line. A comment text that itself starts with \"---\" needs an empty header block (\"---\" then \"---\") before it");
-	return {
-		open,
-		close
-	};
-}
-function splitHeader(text) {
-	const lines = text.replace(/^\uFEFF/, "").replaceAll(/\r\n?/g, "\n").split("\n");
-	const header = findHeader(lines);
-	if (!header) return {
-		headerLines: [],
-		body: lines.join("\n").trim()
-	};
-	return {
-		headerLines: lines.slice(header.open + 1, header.close),
-		body: lines.slice(header.close + 1).join("\n").trim()
-	};
-}
-function readFields(headerLines) {
-	const fields = /* @__PURE__ */ new Map();
-	for (const raw of headerLines) {
-		const line = raw.trim();
-		if (!line || line.startsWith("#")) continue;
-		const colon = line.indexOf(":");
-		if (colon < 0) throw new Error(`header line "${line}" has no colon (expected "key: value")`);
-		const key = line.slice(0, colon).trim();
-		if (!KEYS.includes(key)) throw new Error(`unknown header key "${key}" (allowed: ${KEYS.join(", ")})`);
-		if (fields.has(key)) throw new Error(`duplicate header key "${key}"`);
-		fields.set(key, unquote(line.slice(colon + 1).trim()));
-	}
-	return fields;
-}
-function parsePath(value) {
-	const path = value.replaceAll("\\", "/").replace(/^(\.\/)+/, "");
-	if (!path) throw new Error("path must not be empty");
-	if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) throw new Error(`path "${value}" must be relative to the repository root`);
-	if (path.split("/").includes("..")) throw new Error(`path "${value}" must not contain ".." segments`);
-	return path;
-}
-function parseLines(value) {
-	const match = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(value);
-	if (!match) throw new Error(`lines "${value}" must be N or N-M`);
-	const start = Number(match[1]);
-	const end = match[2] === void 0 ? start : Number(match[2]);
-	if (start < 1 || end < start) throw new Error(`lines "${value}" must start at 1 or later and not run backwards`);
-	return {
-		start,
-		end
-	};
-}
-function parseCommit(value) {
-	if (!/^[0-9a-fA-F]{7,40}$/.test(value)) throw new Error(`commit "${value}" must be 7-40 hex digits`);
-	return value.toLowerCase();
-}
-function parse(text) {
-	if (text.includes("\0") || text.includes("�")) throw new Error("contains NUL or replacement characters; save the file as UTF-8 (a UTF-16 file from Windows PowerShell 5.1 looks like this)");
-	const { headerLines, body } = splitHeader(text);
-	const fields = readFields(headerLines);
-	const path = fields.get("path");
-	const lines = fields.get("lines");
-	const commit = fields.get("commit");
-	if (lines !== void 0 && path === void 0) throw new Error("\"lines\" needs a \"path\": a line range belongs to a file");
-	const result = {
-		path: path === void 0 ? void 0 : parsePath(path),
-		lines: lines === void 0 ? void 0 : parseLines(lines),
-		commit: commit === void 0 ? void 0 : parseCommit(commit),
-		body
-	};
-	if (!body) throw new Error("has no comment text");
-	return result;
-}
-function parseCommentFile(text, fileName) {
-	try {
-		return parse(text);
-	} catch (error) {
-		throw new Error(`${fileName.replace(/^.*[\\/]/, "")}: ${error.message}`);
-	}
-}
-//#endregion
 //#region src/report-extract.ts
 const FENCE = /^\s*(`{3,}|~{3,})/;
 const ANCHOR = /^\s*`([^`\s]+):(\d+)(?:-(\d+))?`\s*$/;
@@ -3564,6 +3223,22 @@ function findFinding(report, id) {
 }
 function checkCommit(commit) {
 	if (!/^[0-9a-fA-F]{7,40}$/.test(commit)) throw new Error(`commit "${commit}" must be 7-40 hex digits`);
+}
+const cannotExtract = (id, reason) => /* @__PURE__ */ new Error(`cannot extract ${id}: ${reason}`);
+function commentPath(id, path) {
+	const normalized = path.replaceAll("\\", "/").replace(/^(\.\/)+/, "");
+	if (!normalized) throw cannotExtract(id, "path must not be empty");
+	if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) throw cannotExtract(id, `path "${path}" must be relative to the repository root`);
+	if (normalized.split("/").includes("..")) throw cannotExtract(id, `path "${path}" must not contain ".." segments`);
+	return normalized;
+}
+function commentLines(id, anchor) {
+	const { start, end } = anchor;
+	if (start < 1 || end < start) throw cannotExtract(id, `lines "${rangeText$1(anchor)}" must start at 1 or later and not run backwards`);
+	return {
+		start,
+		end
+	};
 }
 function fenceMask(lines) {
 	let open;
@@ -3767,37 +3442,21 @@ function cleanDescription(description, stem) {
 	}
 	return cleaned;
 }
-function headerLines(chosen, commit) {
-	return [...chosen ? [`path: ${chosen.path}`, `lines: ${rangeText$1(chosen)}`] : [], ...commit === void 0 ? [] : [`commit: ${commit}`]];
-}
-function headerBlock(header, firstLine) {
-	if (header.length > 0) return [
-		"---",
-		...header,
-		"---",
-		""
-	];
-	return /^---\s*$/.test(firstLine) ? [
-		"---",
-		"---",
-		""
-	] : [];
-}
-function composeContent(finding, header, body, withTitle) {
-	const text = withTitle ? [
+function buildComment(finding, chosen, commit, description) {
+	const place = chosen ? {
+		path: commentPath(finding.id, chosen.path),
+		lines: commentLines(finding.id, chosen)
+	} : {};
+	const body = [
 		`${finding.severity} **${finding.id} — ${finding.title}**`,
 		"",
-		...body
-	] : body;
-	return [...headerBlock(header, text[0] ?? ""), ...text].join("\n") + "\n";
-}
-function checkWritten(content, id) {
-	const name = `${id}.md`;
-	try {
-		parseCommentFile(content, name);
-	} catch (error) {
-		throw new Error(`cannot extract ${id}: ${error.message.replace(`${name}: `, "")}`);
-	}
+		...description
+	].join("\n").trim();
+	return {
+		...place,
+		...commit === void 0 ? {} : { commit: commit.toLowerCase() },
+		body
+	};
 }
 const reportStem = (path) => path.replace(/^.*[\\/]/, "").replace(/\.md$/i, "");
 function extractComment(report, findingId, options = {}) {
@@ -3808,36 +3467,22 @@ function extractComment(report, findingId, options = {}) {
 	const chosen = chooseAnchor(finding.id, anchors, options.anchor);
 	const cleaned = cleanDescription(description, reportStem(report.path));
 	if (cleaned.lines.length === 0) throw new Error(`${finding.id} has an empty Description; nothing to extract`);
-	const content = composeContent(finding, headerLines(chosen, options.commit), cleaned.lines, options.title !== false);
-	checkWritten(content, finding.id);
+	const comment = buildComment(finding, chosen, options.commit, cleaned.lines);
 	const general = `${finding.id} has no path:lines anchor; it becomes a general comment (posting it needs --now)`;
 	const warnings = [...chosen ? [] : [general], ...cleaned.warnings];
 	return {
 		id: finding.id,
 		anchors,
 		chosen,
-		content,
+		comment,
 		warnings,
 		unlinked: cleaned.unlinked
 	};
 }
 //#endregion
 //#region src/review-post.ts
-const COMMENT_LINE_ADVICE = /[:;] remove the "comment:" line to post (a new one|it again)$/;
-const NOT_YOURS = /only your own comments can be updated$/;
-const NO_DIFF = /^(GitHub gives no diff for .+ \(binary or too large\)); omit "lines" for a file-level comment$/;
-function withLinkAdvice(message, ref, db) {
-	const remove = `remove the link with "pr-comments link remove --db ${db} ${ref}" and post again`;
-	const file = COMMENT_LINE_ADVICE.exec(message);
-	if (file) {
-		const stays = file[1] === "a new one" ? `; ${ref} stays on GitHub until you delete it` : "";
-		return `${message.slice(0, file.index).replace(", the file says ", ", the finding says ")}; ${remove} (that creates a new comment${stays})`;
-	}
-	return NOT_YOURS.test(message) ? `${message}; ${remove} (that creates a new comment)` : message;
-}
-function forFinding(message, linked, db) {
-	const plain = message.replace(NO_DIFF, "$1, so a finding anchored in that file cannot be posted as an inline comment");
-	return linked === void 0 ? plain : withLinkAdvice(plain, linked, db);
+function linkAdvice(reason, ref, db) {
+	return `remove the link with "pr-comments link remove --db ${db} ${ref}" and post again (that creates a new comment${reason === "moved" ? `; ${ref} stays on GitHub until you delete it` : ""})`;
 }
 async function postFinding(arg, findingId, options, deps) {
 	const { data, links, pullRequest, paths } = await loadReviewFile(arg);
@@ -3849,19 +3494,19 @@ async function postFinding(arg, findingId, options, deps) {
 	});
 	const { id } = extracted;
 	const own = linksOf(links, id).find((link) => link.role === "own");
-	const file = parseCommentFile(extracted.content, `${id}.md`);
-	const comment = own === void 0 ? file : {
-		...file,
+	const comment = own === void 0 ? extracted.comment : {
+		...extracted.comment,
 		commentRef: own.ref
 	};
 	const body = composeBody(comment.body, options.byAgent);
-	const hooks = { onResult: async (input, result) => {
+	const hooks = { onResult: async (result) => {
 		if (result.action === "error") {
-			if (result.message === void 0) return result;
-			const message = forFinding(result.message, input.comment.commentRef, paths.db);
-			return message === result.message ? result : {
-				...result,
-				message
+			const { reason, ...plain } = result;
+			const ref = comment.commentRef;
+			if (reason === void 0 || ref === void 0 || plain.message === void 0) return plain;
+			return {
+				...plain,
+				message: `${plain.message}; ${linkAdvice(reason, ref, paths.db)}`
 			};
 		}
 		const posted = result.comment;
@@ -3896,17 +3541,13 @@ async function postFinding(arg, findingId, options, deps) {
 		}
 	} };
 	const { byAgent, now, dryRun } = options;
-	const [result] = await deps.publish(ref, [{
-		file: id,
-		comment
-	}], {
-		byAgent,
-		now,
-		dryRun
-	}, hooks);
 	return {
 		finding: id,
-		result,
+		result: await deps.publish(ref, comment, {
+			byAgent,
+			now,
+			dryRun
+		}, hooks),
 		anchors: extracted.anchors,
 		chosen: extracted.chosen,
 		warnings: extracted.warnings,
@@ -3987,6 +3628,12 @@ async function replyToDuplicate(arg, ref, options, deps) {
 	}
 }
 //#endregion
+//#region src/version.ts
+const VERSION = "0.1.0";
+function versionText() {
+	return `pr-comments ${VERSION}+0d9401b`;
+}
+//#endregion
 //#region src/cli.ts
 const ACTION_WIDTH = 9;
 async function readProcessStdin() {
@@ -3996,7 +3643,7 @@ async function readProcessStdin() {
 }
 const defaultEnvironment = {
 	getPullRequest: (ref) => downloadPullRequest(ref),
-	publish: (ref, inputs, options, hooks) => withWorkingToken(ref, (context) => publishComments(context, ref, inputs, options, hooks), { purpose: "write" }),
+	publish: (ref, comment, options, hooks) => withWorkingToken(ref, (context) => publishComment(context, ref, comment, options, hooks), { purpose: "write" }),
 	reply: (ref, request, options) => withWorkingToken(ref, (context) => replyToComment(context, ref, request, options), { purpose: "write" }),
 	resolveRevision: (revision) => resolveRevision(revision, process.cwd()),
 	print: (text) => process.stdout.write(text),
@@ -4121,10 +3768,6 @@ async function snapshotOf(db) {
 	const data = await loadSnapshot(db);
 	if (data === void 0) throw new Error(NO_SNAPSHOT);
 	return data;
-}
-function samePath(a, b) {
-	const [x, y] = [resolve(a), resolve(b)];
-	return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
 }
 function reportMatchesDatabase({ report, db }) {
 	if (report === void 0 || db === void 0 || samePath(reviewPaths(report).db, db)) return;
