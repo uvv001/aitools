@@ -99,7 +99,7 @@ included) step 7, a fix request the paragraph under States.
    pass is a result: render the report and tell the user.
    **Ready when:** every finding carries severity, evidence, and a suggested
    fix in its description, `finding list` shows each of them, the review is
-   checkpointed (see Guardrails), and the user has the report's path.
+   [checkpointed](#checkpoint), and the user has the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
@@ -230,11 +230,10 @@ it, and settling it is the user's call. This holds hardest where a wrong
 assumption carries serious consequences: an unproven concern raised is a
 finding; the same concern dropped silently is a defect of the review.
 
-## Guardrails
+## Checkpoint
 
-- **Checkpoint: commit what the review produced, nothing else.** A checkpoint
-  is `report render`, then one commit of the database, the report and the
-  round's folder to the current branch, which the user prepares for the
-  review: the commits are a backup that stays out of the main branch. Only
-  the database and the report together are a complete state.
-- **The review is the deliverable.** A decision that never reaches it is lost.
+Commit what the review produced, nothing else. A checkpoint is
+`report render`, then one commit of the database, the report and the round's
+folder to the current branch, which the user prepares for the review: the
+commits are a backup that stays out of the main branch. Only the database
+and the report together are a complete state.
