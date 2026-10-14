@@ -27,6 +27,9 @@ the expected outcome.
 
 - Options and examples live in `pr-comments <command> --help`; read it before
   a command's first use.
+- Descriptions go in as UTF-8 files and text arguments in single quotes:
+  PowerShell rewrites backticks and `$` inside double quotes, and non-ASCII
+  text piped to `--description-file -` can arrive as `?`.
 - `report render` overwrites the report each time: change the review with
   commands, since an edit made in the report is lost.
 - The orchestrator alone runs commands that change the review.
