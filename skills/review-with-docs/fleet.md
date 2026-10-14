@@ -17,8 +17,10 @@ severity scale of [SKILL.md](SKILL.md), and its output: one file per
 finding — the description exactly as `finding add` takes it — and a
 **coverage file** naming the rule, the paths checked, and the outcome,
 `no findings` included. The orchestrator alone runs commands that change the
-review, so the agent writes files only and replies with one line per
-finding — file, severity, title, anchor — or `no findings`.
+review, so the agent writes files only — its own, in the round's folder — and
+reads the code with `git show <rev>:<path>` and `git diff <base> <rev>`,
+leaving the working tree, the index and HEAD as they stand. It replies with
+one line per finding — file, severity, title, anchor — or `no findings`.
 
 ## Later rounds
 
