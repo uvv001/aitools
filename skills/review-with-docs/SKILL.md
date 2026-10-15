@@ -139,14 +139,13 @@ included) step 7, a fix request the paragraph under States.
    instruction files changed, and any narrowing — then every open finding
    (⏳ ❓ ✅) and every fixed one, since a fix regresses, is re-checked, and
    the changeset is searched afresh for what nobody has raised yet. A closed
-   finding (❌ 📌 🔀) is re-checked where the code it points at changed, or
-   the bundle for a tool-side one: only changed ground overturns the user's
-   ruling, and a concern that returns with better evidence is a new finding
-   naming the old one, whose state stands until the user rules. Each outcome
-   is an Updates entry carrying `--round <n>` — `finding update`, or
-   `set-state` where the state moves, `fixed` per [States](#states). Comparing
-   revisions serves one purpose: telling where the code the findings point at
-   changed.
+   finding (❌ 📌 🔀) is re-checked where the code it points at changed: only
+   changed ground overturns the user's ruling, and a concern that returns
+   with better evidence is a new finding naming the old one, whose state
+   stands until the user rules. Each outcome is an Updates entry carrying
+   `--round <n>` — `finding update`, or `set-state` where the state moves,
+   `fixed` per [States](#states). Comparing revisions serves one purpose:
+   telling where the code the findings point at changed.
    The user may narrow a round to some findings or paths; the re-check covers
    that subset.
    **Ready when:** the round stands in the database with its revision, its
