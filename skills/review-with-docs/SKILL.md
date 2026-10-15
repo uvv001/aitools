@@ -21,7 +21,7 @@ and act on the answer.
 ## The tool
 
 `pr-comments` below is `node <skill-dir>/pr-comments.mjs`, one file that
-needs Node 24 or newer. Check `node --version` before the first command;
+needs Node 24.2 or newer. Check `node --version` before the first command;
 where Node is missing or older, it is the user's call — installing Node is
 the expected outcome.
 
