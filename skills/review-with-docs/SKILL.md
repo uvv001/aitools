@@ -236,4 +236,6 @@ Commit what the review produced, nothing else. A checkpoint is
 `report render`, then one commit of the database, the report and the round's
 folder to the current branch, which the user prepares for the review: the
 commits are a backup that stays out of the main branch. Only the database
-and the report together are a complete state.
+and the report together are a complete state. Every commit the agent makes,
+a fix commit included, names its paths (`git commit -m <message> -- <paths>`)
+so that staged work stays out.
