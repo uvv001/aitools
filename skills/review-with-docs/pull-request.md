@@ -55,11 +55,12 @@ says otherwise.
    the comments wait for their submit in the web UI. Any other post goes
    straight here: the post checks the place before it writes, and the comment
    stays unseen until that submit.
-4. A comment that duplicates a finding is answered with `link reply <ref>
-   --by-agent`, with a dry run first before a `--now` reply. The reply goes
-   into the same pending review. A conversation comment (`c…`) can only be
-   answered at once, and its answer links to a comment that others cannot open
-   before the submit: answer it after the user has submitted the review.
+4. A comment that duplicates a finding is answered only on the user's request,
+   with `link reply <ref> --by-agent` and a dry run first before a `--now`
+   reply. The reply goes into the same pending review. A conversation comment
+   (`c…`) can only be answered at once, and its answer links to a comment that
+   others cannot open before the submit: answer it after the user has
+   submitted the review.
 
 `--by-agent` goes on every post and reply, dry runs included, so the preview
 is the exact text. `--now` publishes at once, and a conversation comment (`c…`)
