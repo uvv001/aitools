@@ -45,13 +45,14 @@ included) step 7, a fix request the paragraph under States.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions and the review is committed — so where
-   the target is not in a repository, it is the user's call;
-   `git init` is the expected outcome. Pin the reviewed revision and the base
-   it is read against: the first parent for a single commit, the endpoints
-   for a range, the merge-base with the target branch for a PR, HEAD plus a
-   dirty-tree note for an uncommitted tree, none for files reviewed as they
-   stand. One attempt to resolve an ambiguous target or base, then the
-   user's call — a wrong base silently changes the changeset under review.
+   the target is not in a repository, it is the user's call; `git init` and a
+   first commit of the target are the expected outcome. Pin the reviewed
+   revision and the base it is read against: the first parent for a single
+   commit, the endpoints for a range, the merge-base with the target branch
+   for a PR, HEAD plus a dirty-tree note for an uncommitted tree, none for
+   files reviewed as they stand. One attempt to resolve an ambiguous target
+   or base, then the user's call — a wrong base silently changes the changeset
+   under review.
    Where several review databases live in the repository, take the one whose
    title or `pr show` matches the target and pass `--db` on every command.
    With none, create one. Git must track the database and the report: before
