@@ -26,7 +26,7 @@ with a link:
 |---|---|
 | a comment the user wrote by hand saying what a finding says | `link own <F> <ref>` |
 | the same issue as a finding | `link duplicate <F> <ref>` |
-| no finding | `link note <ref> "<reason>"` |
+| no finding | `link note <ref> '<reason>'` |
 | a new issue | `finding add`, then `link duplicate <F> <ref>` |
 | a check annotation, always | `link duplicate <F> <ref>` |
 
