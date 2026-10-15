@@ -154,10 +154,7 @@ included) step 7, a fix request the paragraph under States.
    carries a `Round <n>:` entry; on a pull request target, `link pending`
    prints nothing; and the review is checkpointed.
 
-Steps 5 to 7 are a loop: each round's findings are triaged, approved ones
-published on request, and each change in the reviewed area opens the next
-round. The review ends when the user ends it; the last commit is its closing
-state.
+Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 
 ## States
 
