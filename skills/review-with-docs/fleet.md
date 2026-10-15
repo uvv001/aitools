@@ -25,7 +25,7 @@ one line per finding — file, severity, title, anchor — or `no findings`.
 ## Later rounds
 
 From round 2 on, each brief also lists the findings the review carries — id,
-state, title, and the file or report entry holding its description — and
+state, title, and the report entry holding its description — and
 asks for what none of them covers, so an agent hands back only what is new.
 One more agent, `recheck`, re-checks every finding step 7 of
 [SKILL.md](SKILL.md) puts in the round's scope and replies one line per
