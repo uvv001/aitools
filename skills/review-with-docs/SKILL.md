@@ -72,10 +72,11 @@ included) step 7, a fix request the paragraph under States.
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
    A review question the user raises opens a discussion; the check it settles
-   on joins the rule set, is named in the round note in a few words, and
-   carries into later rounds only where the user says so. A scope that is
-   genuinely unclear is the user's call. The database stores no rules: the
-   pairing travels in the briefs of a fleet ([fleet.md](fleet.md)). Then
+   on joins the rule set, is named in the note of the round that first applies
+   it, in a few words, and carries into later rounds only where the user says
+   so. A scope that is genuinely unclear is the user's call. The database
+   stores no rules: the pairing travels in the briefs of a fleet
+   ([fleet.md](fleet.md)). Then
    `round open --revision <pinned> (--base <rev> | --no-base) --note <text>`
    records round 1. The note cannot be amended, so it carries the dirty-tree
    remark, the scope with its exclusions, and the rule sources in one line —
@@ -137,16 +138,17 @@ included) step 7, a fix request the paragraph under States.
    diff between revisions, because authors amend and force-push and
    per-commit attribution misleads. `round open --revision --base --note`
    records it — the note carries the scope, the rule sources where the
-   instruction files changed, and any narrowing — then every open finding
-   (⏳ ❓ ✅) and every fixed one, since a fix regresses, is re-checked, and
-   the changeset is searched afresh for what nobody has raised yet. A closed
-   finding (❌ 📌 🔀) is re-checked where the code it points at changed: only
-   changed ground overturns the user's ruling, and a concern that returns
-   with better evidence is a new finding naming the old one, whose state
-   stands until the user rules. Each outcome is an Updates entry carrying
-   `--round <n>` — `finding update`, or `set-state` where the state moves,
-   `fixed` per [States](#states). Comparing revisions serves one purpose:
-   telling where the code the findings point at changed.
+   instruction files changed, the agreed checks the round applies, and any
+   narrowing — then every open finding (⏳ ❓ ✅) and every fixed one, since a
+   fix regresses, is re-checked, and the changeset is searched afresh for what
+   nobody has raised yet. A closed finding (❌ 📌 🔀) is re-checked where
+   the code it points at changed: only changed ground overturns the user's
+   ruling, and a concern that returns with better evidence is a new finding
+   naming the old one, whose state stands until the user rules. Each outcome
+   is an Updates entry carrying `--round <n>` — `finding update`, or
+   `set-state` where the state moves, `fixed` per [States](#states). Comparing
+   revisions serves one purpose: telling where the code the findings point at
+   changed.
    The user may narrow a round to some findings or paths; the re-check covers
    that subset.
    **Ready when:** the round stands in the database with its revision, its
