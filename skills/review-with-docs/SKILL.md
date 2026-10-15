@@ -94,9 +94,10 @@ included) step 7, a fix request the paragraph under States.
    rule, plus purpose fit and best practices.
 4. **Record.** `finding add --severity --title --description-file` records
    each finding in the open round, with `--unverified` where its evidence
-   stayed unsettled; the description follows [Evidence](#evidence). With a
-   fleet, findings on a shared anchor merge per [fleet.md](fleet.md). An empty
-   pass is a result: render the report and tell the user.
+   stayed unsettled — a fleet's reply line marks it ❓; the description follows
+   [Evidence](#evidence). With a fleet, findings on a shared anchor merge per
+   [fleet.md](fleet.md). An empty pass is a result: render the report and tell
+   the user.
    **Ready when:** every finding carries severity, evidence, and a suggested
    fix in its description, `finding list` shows each of them, the review is
    [checkpointed](#checkpoint), and the user has the report's path.
@@ -165,7 +166,7 @@ in the finding's own history.
 | Marker | State | Meaning |
 |---|---|---|
 | ⏳ | `awaiting` | raised, no verdict yet |
-| ❓ | `unverified` | evidence tried and unsettled — the user's call |
+| ❓ | `unverified` | reasonable, neither shown nor refuted — the user's call |
 | ✅ | `approved` | the user agreed it is a finding; the findings to publish |
 | 🔧 | `fixed` | the changeset now addresses it; `--revision` names where |
 | ❌ | `discarded` | not a finding; the note holds the rationale |
@@ -223,12 +224,14 @@ more. It is laid out as:
   relative link points into the review, which the PR's author cannot open.
 
 Verify before claiming: run the test, trace the call path, measure the value.
-An assumption reaches the review along one of two paths — verified or
-falsified — and either settles it. Where both attempts fail, the assumption
-opens as a ❓ unverified finding stating what was tried and what would settle
-it, and settling it is the user's call. This holds hardest where a wrong
-assumption carries serious consequences: an unproven concern raised is a
-finding; the same concern dropped silently is a defect of the review.
+An assumption reaches the review along one of two paths — verified (a case
+that shows the problem) or falsified (a case that shows there is none) — and
+either settles it. An assumption that is reasonable, its mechanism stated,
+yet can be neither shown nor refuted because both attempts are blocked, is the
+user's call: it opens as a ❓ unverified finding that states the mechanism,
+what was tried to prove it and to refute it and why each failed, and what
+would settle it. Its severity is its impact if it holds. An unproven concern
+dropped silently is a defect of the review.
 
 ## Checkpoint
 
