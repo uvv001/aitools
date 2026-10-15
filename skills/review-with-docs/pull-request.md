@@ -73,8 +73,9 @@ comment: re-posting is the user's call too.
 A comment lands on the PR's latest revision, and the reviewed checkout may
 have diverged from it. A refusal is the signal, and the user's call: the
 message, the finding, and the commentable ranges the message lists go to the
-user, and the agent acts on the answer. Re-anchoring, `--commit`, or a
-rewritten description are the ways past it; the user picks.
+user, and the agent acts on the answer. Re-anchoring, a rewritten
+description, or `--commit` (only before the user has a pending review) are
+the ways past it; the user picks.
 
 The other refusals — a missing token, a pending review that blocks `--now`, a
 gone own comment — carry their fix in the message; follow it, and whatever it
