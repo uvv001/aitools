@@ -78,6 +78,6 @@ user, and the agent acts on the answer. Re-anchoring, a rewritten
 description, or `--commit` (only before the user has a pending review) are
 the ways past it; the user picks.
 
-The other refusals — a missing token, a pending review that blocks `--now`, a
-gone own comment — carry their fix in the message; follow it, and whatever it
-asks that changes GitHub is the user's call.
+The other refusals — a pending review that blocks `--now`, a gone own
+comment — carry their fix in the message; follow it, and whatever it asks that
+changes GitHub is the user's call.
