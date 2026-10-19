@@ -14,10 +14,10 @@ agent's findings checkable.
 Every brief carries the rule verbatim, the paths in its scope, the pinned
 revision, its base (or none) and the dirty-tree remark, the changeset's
 purpose as its author states it, the Evidence section and the Validation
-severity scale of [SKILL.md](SKILL.md), and its output: one file per
-finding — the description exactly as `finding add` takes it — and a
-**coverage file** naming the rule, the paths checked, the assumptions it set
-aside with the reason, and the outcome, `no findings` included. The
+rule-collision and severity rules of [SKILL.md](SKILL.md), and its output:
+one file per finding — the description exactly as `finding add` takes it —
+and a **coverage file** naming the rule, the paths checked, the assumptions
+it set aside with the reason, and the outcome, `no findings` included. The
 orchestrator alone runs commands that change the review, so the agent writes
 files only — its own, in the round's folder — and leaves the working tree, the
 index and HEAD as they stand. It reads the code with `git show <rev>:<path>`
