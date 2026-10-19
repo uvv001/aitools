@@ -27,9 +27,11 @@ the expected outcome.
 
 - Options and examples live in `pr-comments <command> --help`; read it before
   a command's first use.
-- Descriptions go in as UTF-8 files and text arguments in single quotes:
-  PowerShell rewrites backticks and `$` inside double quotes, and non-ASCII
-  text piped to `--description-file -` can arrive as `?`.
+- Every title, description, update, and `--note` renders as Markdown in the
+  report, so keep `<...>` tokens inside backticks or code fences. Pass
+  descriptions as UTF-8 files and text arguments in single quotes: PowerShell
+  rewrites backticks and `$` inside double quotes, and non-ASCII text piped to
+  `--description-file -` can arrive as `?`.
 - `report render` overwrites the report each time: change the review with
   commands, since an edit made in the report is lost.
 - The orchestrator alone runs commands that change the review.
@@ -60,9 +62,10 @@ included) step 7, a fix request the paragraph under States.
    it reports one, it is the user's call. Then `init <name>` — the report's
    title, derived from the review context (PR number, PR author, feature
    name) — with `--pr <url>` where the target is a pull request. That first
-   pass reads the changeset without the PR's existing comments, so they
-   cannot frame it; once the report is compiled, the user asks for the sync,
-   and the comments enrich the report ([pull-request.md](pull-request.md)).
+   pass — fleet briefs included — reads the changeset without the PR's
+   existing comments, so they cannot frame it; the user asks for the sync, and
+   even when requested up front, the comments enrich the report only after the
+   pass ([pull-request.md](pull-request.md)).
    **Ready when:** the database exists, and git ignores neither its path nor
    its report's (the `.md` it renders to, beside it by default); the reviewed
    revision and its base (or none) are pinned; on a pull request target,
@@ -190,7 +193,10 @@ in `set-state <F> fixed --revision <rev> --note <how verified>`, with
 - A **rule** is one enforceable statement — a single bullet of an instruction
   file, or one check agreed with the user.
 - Iterate every changed line: does it serve the change's purpose, and does it
-  meet the rules covering its path and the ecosystem's best practices?
+  meet the rules covering its path and the ecosystem's best practices? Where a
+  rule collides with purpose or best practices — forcing a workaround that
+  degrades the code — raise the conflict as a finding naming the rule, so the
+  user decides in triage which yields.
 - Files nobody wrote by hand stay out of the line-by-line pass: the review's
   own files, and generated or vendored files, recognized by
   `linguist-generated` or `linguist-vendored` in `.gitattributes` or by a

@@ -25,14 +25,17 @@ record it with a link:
 | The comment or annotation | Command |
 |---|---|
 | a comment the user wrote by hand saying what a finding says | `link own <F> <ref>` |
-| the same issue as a finding | `link duplicate <F> <ref>` |
-| no finding | `link note <ref> '<reason>'` |
-| a new issue | `finding add`, then `link duplicate <F> <ref>` |
+| the same concern as a finding | `link duplicate <F> <ref>` |
+| chatter or a status comment that raises no concern | `link note <ref> '<reason>'` |
+| a concern no finding covers yet | `finding add`, then `link duplicate <F> <ref>` |
 | a check annotation, always | `link duplicate <F> <ref>` |
 
-Links are records in the database; nothing reaches GitHub. A doubtful
-classification is the user's call ([SKILL.md](SKILL.md)); `link remove <ref>`
-undoes a link.
+Links are records in the database; nothing reaches GitHub. A note attaches to
+no finding and leaves no trace in the report, so every comment that raises a
+concern on the changeset — even one the agent refutes or that collides with a
+rule — goes to a finding (with the counter-evidence recorded there) for the
+user to triage. A doubtful classification is the user's call
+([SKILL.md](SKILL.md)); `link remove <ref>` undoes a link.
 
 `report comments [--author <login>]...` prints the PR as markdown for reading
 — description, conversation, threads with code, annotations. `--out <file>`
