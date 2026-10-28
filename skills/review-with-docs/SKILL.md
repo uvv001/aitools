@@ -36,41 +36,41 @@ the expected outcome.
   commands, since an edit made in the report is lost.
 - The orchestrator alone runs commands that change the review.
 - Run every command in the reviewed repository: revisions resolve with git in
-  the working directory.
+  the working directory; pass `--db <path>` on every command, since default
+  discovery skips `.ai/`.
 
 ## Protocol
 
-A review database already in the repository means the request continues it:
-read `finding list`, then start at the step the request calls for — a verdict
-is step 5, a publish or sync request step 6, new changes (a moved PR head
+A review database already in `.ai/` (or restored from the session's `files/`
+folder per [Checkpoint](#checkpoint)) means the request continues it: where
+several exist, take the one whose title or `pr show` matches the target, read
+`finding list`, then start at the step the request calls for — a verdict is
+step 5, a publish or sync request step 6, new changes (a moved PR head
 included) step 7, a fix request the paragraph under States.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
-   required — the rounds pin revisions and the review is committed — so where
-   the target is not in a repository, it is the user's call; `git init` and a
-   first commit of the target are the expected outcome. Pin the reviewed
-   revision and the base it is read against: the first parent for a single
-   commit, the endpoints for a range, the merge-base with the target branch
-   for a PR, HEAD plus a dirty-tree note for an uncommitted tree, none for
-   files reviewed as they stand. One attempt to resolve an ambiguous target
-   or base, then the user's call — a wrong base silently changes the changeset
-   under review.
-   Where several review databases live in the repository, take the one whose
-   title or `pr show` matches the target and pass `--db` on every command.
-   With none, create one. Git must track the database and the report: before
-   `init`, `git check-ignore` on the intended paths reports nothing — where
-   it reports one, it is the user's call. Then `init <name>` — the report's
-   title, derived from the review context (PR number, PR author, feature
-   name) — with `--pr <url>` where the target is a pull request. That first
-   pass — fleet briefs included — reads the changeset without the PR's
+   required — the rounds pin revisions — so where the target is not in a
+   repository, it is the user's call; `git init` and a first commit of the
+   target are the expected outcome. Pin the reviewed revision and the base it
+   is read against: the first parent for a single commit, the endpoints for a
+   range, the merge-base with the target branch for a PR, HEAD plus a
+   dirty-tree note for an uncommitted tree, none for files reviewed as they
+   stand. One attempt to resolve an ambiguous target or base, then the user's
+   call — a wrong base silently changes the changeset under review.
+   Ensure git ignores `.ai/` before creating the database: if
+   `git check-ignore -q .ai/` fails, add `/.ai/` to the local exclude file
+   (`git rev-parse --git-path info/exclude`) and re-check. Then
+   `init <name> --db .ai/<yyyy-mm-dd>_<slug>_review.sqlite` — `<name>` the
+   report's title, derived from the review context (PR number, PR author,
+   feature name) — with `--pr <url>` where the target is a pull request. That
+   first pass — fleet briefs included — reads the changeset without the PR's
    existing comments, so they cannot frame it; the user asks for the sync, and
    even when requested up front, the comments enrich the report only after the
    pass ([pull-request.md](pull-request.md)).
-   **Ready when:** the database exists, and git ignores neither its path nor
-   its report's (the `.md` it renders to, beside it by default); the reviewed
-   revision and its base (or none) are pinned; on a pull request target,
-   `pr show` names that pull request; and the user's target and base were
-   confirmed or unambiguous.
+   **Ready when:** the database exists under `.ai/`, `git check-ignore`
+   matches its path, the reviewed revision and its base (or none) are pinned,
+   on a pull request target `pr show` names that pull request, and the user's
+   target and base were confirmed or unambiguous.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
@@ -181,11 +181,13 @@ in the finding's own history.
 **Fixed** is reached two ways. When the PR moves, the user's sync opens a
 round (step 7), and the agent decides, finding by finding, from the code at
 the new revision: wide, the findings step 7 re-checks unless the round note
-narrows it. When the user asks for a fix, the agent implements it, commits it
-apart from the review files, and verifies it the way the finding was verified
-— the same test, trace or measurement now comes out clean: narrow, the finding
-named, and the next round's re-check at the pushed head confirms it. Both end
-in `set-state <F> fixed --revision <rev> --note <how verified>`, with
+narrows it. When the user asks for a fix, the agent implements it, stages and
+commits its paths by name (`git add -- <paths>` and
+`git commit -m <message> -- <paths>`) so unrelated work stays out, and verifies
+it the way the finding was verified — the same test, trace or measurement now
+comes out clean: narrow, the finding named, and the next round's re-check at
+the pushed head confirms it. Both end in
+`set-state <F> fixed --revision <rev> --note <how verified>`, with
 `--round <n>` for the first only, and the review is checkpointed.
 
 ## Validation
@@ -243,11 +245,15 @@ dropped silently is a defect of the review.
 
 ## Checkpoint
 
-Commit what the review produced, nothing else. A checkpoint is
-`report render`, then one commit of the database, the report and the round's
-folder to the current branch, which the user prepares for the review: the
-commits are a backup that stays out of the main branch. Only the database
-and the report together are a complete state. Every commit the agent makes,
-a fix commit included, adds its paths by name (`git add -- <paths>`) and
-commits them by name (`git commit -m <message> -- <paths>`), so that new
-files go in and staged work stays out.
+A checkpoint is `report render`, then mirroring the review's files between
+`.ai/` and the session folder's `files/` directory (when the host provides
+one) at the same paths relative to `.ai/`: `<stem>_review.sqlite`,
+`<stem>_review.md`, and every file under `<stem>_review/round-<n>/`. Create the
+matching folders first and hard-link each file (directories cannot be
+hard-linked; replace the destination if an edit detached its inode, or copy —
+overwriting on each checkpoint — when `.ai/` and the session folder sit on
+different volumes). When `.ai/` was cleaned, linking those paths from `files/`
+back into `.ai/` restores the review. The hard links keep the review alive in
+the session store when `.ai/` or the worktree is cleaned up, while `.ai/`
+keeps it out of git history. Only the database and the report together are a
+complete state.

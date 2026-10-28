@@ -38,9 +38,8 @@ user to triage. A doubtful classification is the user's call
 ([SKILL.md](SKILL.md)); `link remove <ref>` undoes a link.
 
 `report comments [--author <login>]...` prints the PR as markdown for reading
-— description, conversation, threads with code, annotations. `--out <file>`
-writes it to a file, which stays out of the review's commit unless the user
-says otherwise.
+— description, conversation, threads with code, annotations — or writes it to
+`--out <file>`.
 
 ## Publish
 

@@ -47,11 +47,11 @@ per the States paragraph of [SKILL.md](SKILL.md).
 The files persist beside the report, in the round's folder —
 `<report-stem>/round-<n>/<rule>.md` for the coverage file and
 `<report-stem>/round-<n>/<rule>/<slug>.md` for each finding — where
-`<report-stem>` is the report's file name without `.md` and `<rule>` a short
+`<report-stem>` is the report's path without `.md` and `<rule>` a short
 slug of the rule — `purpose-fit` and `best-practices` for the two agents no
 rule covers, `recheck` for the re-check of a later round — e.g.
-`2026-09-16_pr157_review/round-1/agents-self-sufficiency.md`; create the
-folders as needed. They are committed with the report and hold the text as
+`.ai/2026-09-16_pr157_review/round-1/agents-self-sufficiency.md`; create the
+folders as needed. They are checkpointed with the report and hold the text as
 raised; the database holds its current version.
 
 ## Hold the index, not the findings
