@@ -3,9 +3,10 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { ParseArgsOptionsConfig } from 'node:util';
+import { isLinkRef } from './comment-ref.ts';
 import { downloadPullRequest, withWorkingToken } from './download.ts';
 import { resolveRevision } from './git-revision.ts';
-import { findUnknownAuthors, renderMarkdown } from './markdown.ts';
+import { findUnknownAuthors, findUnknownRefs, renderMarkdown } from './markdown.ts';
 import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl, type PullRequestRef } from './pr-url.ts';
 import { publishComment } from './publish.ts';
@@ -112,8 +113,11 @@ interface Values {
   db?: string;
   report?: string;
   pr?: string;
+  'session-dir'?: string;
   out?: string;
   author?: string[];
+  ref?: string[];
+  pending?: boolean;
   'by-agent'?: boolean;
   now?: boolean;
   'dry-run'?: boolean;
@@ -279,6 +283,7 @@ async function initReview({ env, args: [name = ''], values }: Context): Promise<
     report: values.report,
     db: values.db,
     pr: values.pr,
+    sessionDir: optional('--session-dir', values['session-dir']),
     now: env.now(),
     cwd: env.cwd(),
   });
@@ -539,22 +544,41 @@ async function replyToLinked({ env, args: [ref = ''], values }: Context, db: str
 }
 
 async function renderReview({ env, values }: Context, db: string): Promise<number> {
-  const { report, action } = await renderReportFile(db, { out: values.out });
+  const { report, action } = await renderReportFile(db, {
+    out: values.out,
+    sessionDir: optional('--session-dir', values['session-dir']),
+    cwd: env.cwd(),
+  });
   env.print(`${action.padEnd(ACTION_WIDTH)} ${report}\n`);
   return 0;
 }
 
 async function renderComments({ env, values }: Context, db: string): Promise<number> {
-  // pnpm on Windows turns "a,b" into "a b", and logins never contain whitespace.
+  // pnpm on Windows turns "a,b" into "a b", and logins/refs never contain whitespace.
   const authors = values.author?.flatMap((value) => value.split(/[\s,]+/)).filter(Boolean);
   if (authors?.length === 0) throw new Error('--author needs at least one login');
+  const rawRefs = values.ref?.flatMap((value) => value.split(/[\s,]+/)).filter(Boolean);
+  if (rawRefs?.length === 0) throw new Error('--ref needs at least one ref');
+  const refs = rawRefs?.map((ref) => {
+    const normalized = ref.toLowerCase();
+    if (!isLinkRef(normalized)) {
+      throw new Error(`"${ref}" is not a comment or check annotation id; expected r544830, c623843 or a3f9c2d1e`);
+    }
+    return normalized;
+  });
   // Before anything is read or written: the markdown must never replace a database, under whatever name it is reached.
   if (values.out) await refuseDatabase(values.out, db);
   const data = await snapshotOf(db);
+  const pendingRefs = values.pending
+    ? new Set(pendingItems({ links: (await loadReviewFile(db)).links, data }).map((item) => item.ref))
+    : undefined;
   for (const login of findUnknownAuthors(data, authors ?? [])) {
     env.warn(`Warning: no comments, reviews or check annotations by ${login} in this pull request\n`);
   }
-  const markdown = renderMarkdown(data, { authors });
+  for (const ref of findUnknownRefs(data, refs ?? [])) {
+    env.warn(`Warning: no comment or check annotation ${ref} in this pull request\n`);
+  }
+  const markdown = renderMarkdown(data, { authors, refs, pendingRefs });
   if (values.out) {
     await mkdir(dirname(values.out), { recursive: true });
     await writeFile(values.out, markdown, 'utf8');
@@ -663,7 +687,8 @@ const DEFINITIONS: Command[] = [
     args: [{ name: '<name>', description: 'what is under review; the title of the report (a slug of it names the files by default)' }],
     options: [
       { name: 'pr', value: '<url>', description: 'connect the review to this pull request' },
-      { name: 'report', value: '<file.md>', description: 'the report (.md) or the database (.sqlite) to create (default: docs/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)' },
+      { name: 'session-dir', value: '<dir>', description: 'store the primary review files in this session folder and hard-link them into .ai/' },
+      { name: 'report', value: '<file.md>', description: 'the report (.md) or the database (.sqlite) to create (default: .ai/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)' },
       { name: 'db', value: '<file.sqlite>', description: 'the database to create (default: next to the report)' },
     ],
     database: 'none',
@@ -914,7 +939,10 @@ const DEFINITIONS: Command[] = [
       'left unchanged. It writes the report only, never the database, and never over a SQLite file.',
     ],
     args: [],
-    options: [{ name: 'out', value: '<file.md>', description: 'the report file (default: next to the database, <stem>.md)' }],
+    options: [
+      { name: 'out', value: '<file.md>', description: 'the report file (default: next to the database, <stem>.md)' },
+      { name: 'session-dir', value: '<dir>', description: 'store the primary review files in this session folder and hard-link them into .ai/' },
+    ],
     database: 'readonly',
     example: 'pr-comments report render',
     run: renderReview,
@@ -933,6 +961,16 @@ const DEFINITIONS: Command[] = [
         value: '<login>',
         description: 'only comments and reviews by this user (several logins comma-separated); a check annotation counts for its app',
         repeatable: true,
+      },
+      {
+        name: 'ref',
+        value: '<ref>',
+        description: 'only these comments or check annotations (several refs comma-separated); a review comment includes its thread',
+        repeatable: true,
+      },
+      {
+        name: 'pending',
+        description: 'only comments and check annotations that no link names yet',
       },
       { name: 'out', value: '<file.md>', description: 'write the markdown to this file' },
     ],
@@ -1200,7 +1238,7 @@ async function execute(command: Command, argv: string[], env: CliEnvironment): P
   const context = { env, args, values };
   if (command.database === 'none') return command.run(context);
 
-  const db = values.db ?? (await discoverReview(env.cwd()));
+  const db = values.db ?? (await discoverReview(env.cwd(), optional('--session-dir', values['session-dir'])));
   const outcome = await command.run(context, db);
   const code = outcome === 'unchanged' ? 0 : outcome;
   if (outcome === 0 && command.database === 'change' && !values['dry-run']) env.warn(`Review database: ${shownPath(db, env.cwd())}\n`);

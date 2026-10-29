@@ -3,6 +3,8 @@ import type { CheckAnnotation, CheckRun, Comment, PullRequestData, Review, Revie
 
 export interface RenderOptions {
   authors?: string[];
+  refs?: string[];
+  pendingRefs?: Set<string>;
 }
 
 const REVIEW_STATE_LABELS: Record<string, string> = {
@@ -179,10 +181,28 @@ export function findUnknownAuthors(data: PullRequestData, logins: string[]): str
   return logins.filter((login) => !known.has(normalizeLogin(login)));
 }
 
+// Requested comment or annotation refs that do not exist in the pull request.
+export function findUnknownRefs(data: PullRequestData, refs: string[]): string[] {
+  const known = new Set<string>();
+  for (const comment of data.comments) {
+    const ref = commentRefFromUrl(comment.url);
+    if (ref !== undefined) known.add(ref);
+  }
+  for (const run of data.checkRuns ?? []) {
+    for (const annotation of run.annotations) known.add(annotation.ref);
+  }
+  return refs.filter((ref) => !known.has(ref.toLowerCase()));
+}
+
 export function renderMarkdown(data: PullRequestData, options: RenderOptions = {}): string {
   const { pullRequest: pr } = data;
   const wanted = options.authors?.map(normalizeLogin);
   const matches = (author: string) => wanted === undefined || wanted.includes(normalizeLogin(author));
+  const wantedRefs = options.refs ? new Set(options.refs.map((r) => r.toLowerCase())) : undefined;
+  const pending = options.pendingRefs;
+  const matchesRef = (ref: string | undefined) =>
+    (wantedRefs === undefined || (ref !== undefined && wantedRefs.has(ref))) &&
+    (pending === undefined || (ref !== undefined && pending.has(ref)));
 
   const out: string[] = [`# ${pr.title}`];
   const meta = [
@@ -195,16 +215,20 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
     `- Synced: ${pr.fetchedAt}`,
   ];
   if (options.authors) meta.push(`- Filter: only comments by ${options.authors.map((a) => `@${a}`).join(', ')}`);
+  if (options.refs) meta.push(`- Filter: only refs ${options.refs.map((r) => `\`${r.toLowerCase()}\``).join(', ')}`);
+  if (options.pendingRefs) meta.push('- Filter: only pending comments and check annotations');
   out.push(meta.join('\n'));
 
   const conversation: ConversationItem[] = [
     ...data.comments
-      .filter((c) => c.kind === 'issue' && matches(c.author))
+      .filter((c) => c.kind === 'issue' && matches(c.author) && matchesRef(commentRefFromUrl(c.url)))
       .map((comment): ConversationItem => ({ at: comment.createdAt, kind: 'comment', comment })),
     // A COMMENTED review without text only wraps inline comments, which appear under "Review threads".
-    ...data.reviews
-      .filter((r) => matches(r.author) && (r.state !== 'COMMENTED' || r.body.trim() !== ''))
-      .map((review): ConversationItem => ({ at: review.submittedAt ?? '', kind: 'review', review })),
+    ...(wantedRefs === undefined && pending === undefined
+      ? data.reviews
+          .filter((r) => matches(r.author) && (r.state !== 'COMMENTED' || r.body.trim() !== ''))
+          .map((review): ConversationItem => ({ at: review.submittedAt ?? '', kind: 'review', review }))
+      : []),
   ].sort((a, b) => a.at.localeCompare(b.at));
 
   const threadComments = (thread: ReviewThread) =>
@@ -214,7 +238,20 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
 
   const threads = data.threads
     .map((thread) => ({ thread, comments: threadComments(thread) }))
-    .filter((t) => t.comments.some((c) => matches(c.author)))
+    .filter((t) => {
+      if (!t.comments.some((c) => matches(c.author))) return false;
+      if (wantedRefs !== undefined && !t.comments.some((c) => {
+        const ref = commentRefFromUrl(c.url);
+        return ref !== undefined && wantedRefs.has(ref);
+      })) {
+        return false;
+      }
+      if (pending !== undefined) {
+        const rootRef = t.comments[0] ? commentRefFromUrl(t.comments[0].url) : undefined;
+        if (rootRef === undefined || !pending.has(rootRef)) return false;
+      }
+      return true;
+    })
     .sort(
       (a, b) =>
         a.thread.path.localeCompare(b.thread.path) ||
@@ -225,6 +262,12 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
   // A check run belongs to its app the way a comment belongs to its author.
   const checkRuns = (data.checkRuns ?? [])
     .filter((run) => matches(run.app))
+    .map((run) =>
+      wantedRefs === undefined && pending === undefined
+        ? run
+        : { ...run, annotations: run.annotations.filter((a) => matchesRef(a.ref)) },
+    )
+    .filter((run) => (wantedRefs === undefined && pending === undefined) || run.annotations.length > 0)
     .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
 
   if (conversation.length > 0) {
@@ -232,8 +275,15 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
   }
 
   if (threads.length > 0) {
-    // With an author filter, the other people's messages of a matching thread stay as context.
-    const isContext = (comment: Comment) => wanted !== undefined && !matches(comment.author);
+    // With an author or ref filter, the other people's messages of a matching thread stay as context.
+    const isContext = (comment: Comment) => {
+      if (wanted !== undefined && !matches(comment.author)) return true;
+      if (wantedRefs !== undefined) {
+        const ref = commentRefFromUrl(comment.url);
+        if (ref === undefined || !wantedRefs.has(ref)) return true;
+      }
+      return false;
+    };
     out.push('## Review threads');
     let currentPath: string | undefined;
     for (const { thread, comments } of threads) {

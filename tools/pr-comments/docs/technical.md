@@ -38,19 +38,20 @@ Every module that changes a review is pure: it takes the review (and links) and 
 ### 2.1 The file
 
 - One SQLite file holds one review: the findings, the rounds, the links, and the downloaded pull request.
-- Its name ends in `.sqlite`. The default is `<yyyy-mm-dd>_<slug>_review.sqlite` in `docs/` at the git root, next to the report `….md`. `--db` must end in `.sqlite`.
+- Its name ends in `.sqlite`. The default is `<yyyy-mm-dd>_<slug>_review.sqlite` in `.ai/` at the git root, next to the report `….md`, and `.ai/` is added to `.git/info/exclude` when not already ignored. `--db` must end in `.sqlite`.
+- When `--session-dir <dir>` is given on `init` (or `report render`), the primary file lives in `<dir>` and is hard-linked (or copied across volumes) with the report and `<stem>/round-<n>/**` folders into `.ai/` on every database change and `report render`.
 - Only `init` creates it. It creates the file with an exclusive flag, builds it under a temporary name (`<path>.<8 hex digits>.tmp`), and publishes it with an exclusive hard link (a rename where the file system has no hard links). A crash leaves at most a `.tmp` file, never half a database.
 - Every other command opens an existing file. A missing file is `<path> does not exist`. Nothing is created as a side effect.
 - The file uses a rollback journal (`journal_mode = DELETE`). There is no `-wal` or `-shm` file. A `-journal` file exists only while a command writes.
 - `foreign_keys = ON` on every connection. The review tables are `STRICT`.
 - `PRAGMA user_version` holds the schema version, now 5 (`REVIEW_SCHEMA_VERSION`). There is no migration. An older database (version 4 included) is refused with `<path> was written by an older pr-comments (schema <n>); start again with "pr-comments init"`. A newer one is refused with `… was written by a newer pr-comments (schema <n>); update the tool`. A SQLite file without the review tables is `<path> is not a review database`.
-- Meta key: `pull_request` (the connected pull request, canonical URL), present once the review is connected.
+- Meta keys: `pull_request` (the connected pull request, canonical URL), `session_dir` (the primary session directory), and `workspace_dir` (the `.ai/` directory in the working tree).
 
 ### 2.2 Finding the database
 
 Without `--db`, the search root is the git repository that contains the working directory (found by looking for `.git` up the tree; no git process). Outside a repository it is the working directory.
 
-The search goes down every folder except `.git`, `node_modules` and folders that start with `.`. It does not follow symbolic links. A file counts when its name ends in `review.sqlite` (any case) and it really has the review tables (opened read-only, so nothing is written to a file that only looks like a review). Exactly one must be found. None or several is an error that says to use `init` or `--db`; several are listed.
+The search goes down `.ai/` and every folder except `.git`, `node_modules` and other folders that start with `.` (falling back to `--session-dir` when none is found in the working tree). It does not follow symbolic links. A file counts when its name ends in `review.sqlite` (any case) and it really has the review tables (opened read-only, so nothing is written to a file that only looks like a review). Exactly one must be found. None or several is an error that says to use `init` or `--db`; several are listed.
 
 ### 2.3 Tables
 
@@ -431,8 +432,8 @@ The revision of a round is checked as one word (no spaces, no backticks) because
 
 Build:
 
-- `pnpm build` runs `scripts/build.ts`. It bundles `src/cli.ts` and everything it imports into one ES module with rolldown (`platform: 'node'`): `dist/pr-comments.mjs`, with a shebang and a notice that it is generated. `--out <file>` writes it elsewhere.
-- Only `node:` built-ins stay as imports. The file needs Node 24 and nothing else.
+- `pnpm build` runs `scripts/build.ts`. It bundles `src/cli.ts` and everything it imports into one ES module with rolldown (`platform: 'node'`): `../../skills/review-with-docs/pr-comments.mjs`, with a shebang and a notice that it is generated. `--out <file>` writes it elsewhere.
+- Only `node:` built-ins stay as imports. The file needs Node 24.2 and nothing else.
 - `pr-comments --version` prints the version of `package.json`. The bundle adds the build id that the build script sets (`__BUILD__`): `pr-comments 0.1.0+75c05c9` (the short commit, with `-dirty` when tracked files have uncommitted changes, and nothing without git). A copy of the bundle that fell behind can be recognised by it.
 - `bin` in `package.json` points to `./src/cli.ts`. A global install must link the project (`pnpm add -g .`). Node refuses to run TypeScript files under `node_modules`, so a copy from a tarball or registry would fail with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.
 

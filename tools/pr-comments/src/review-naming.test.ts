@@ -151,10 +151,10 @@ describe('findRepoRoot and defaultReportPath', () => {
   describe('defaultReportPath', () => {
     const now = new Date(2026, 9, 8, 9, 5);
 
-    it('is docs/<date>_<slug>_review.md at the root of the repository, from any folder below it', () => {
+    it('is .ai/<date>_<slug>_review.md at the root of the repository, from any folder below it', () => {
       const repo = folder(scratch(), 'repo');
       folder(repo, '.git');
-      const expected = join(repo, 'docs', '2026-10-08_pr-173-members-section_review.md');
+      const expected = join(repo, '.ai', '2026-10-08_pr-173-members-section_review.md');
       expect(defaultReportPath('PR 173 — members section', now, repo)).toBe(expected);
       expect(defaultReportPath('PR 173 — members section', now, folder(repo, 'src', 'deep'))).toBe(expected);
     });
@@ -164,19 +164,19 @@ describe('findRepoRoot and defaultReportPath', () => {
       folder(repo, '.git');
       const path = defaultReportPath('Review', now, join(repo, 'a', '..'));
       expect(isAbsolute(path)).toBe(true);
-      expect(path.split(sep)).toEqual([...repo.split(sep), 'docs', '2026-10-08_review_review.md']);
+      expect(path.split(sep)).toEqual([...repo.split(sep), '.ai', '2026-10-08_review_review.md']);
     });
 
     it('uses the root of a worktree', () => {
       const tree = folder(scratch(), 'tree');
       writeFileSync(join(tree, '.git'), 'gitdir: /somewhere/else\n');
-      expect(defaultReportPath('x', now, folder(tree, 'src'))).toBe(join(tree, 'docs', '2026-10-08_x_review.md'));
+      expect(defaultReportPath('x', now, folder(tree, 'src'))).toBe(join(tree, '.ai', '2026-10-08_x_review.md'));
     });
 
     it('writes the local date of `now`, zero-padded', () => {
       const repo = folder(scratch(), 'repo');
       folder(repo, '.git');
-      const name = (date: Date): string => defaultReportPath('x', date, repo).slice(join(repo, 'docs').length + 1);
+      const name = (date: Date): string => defaultReportPath('x', date, repo).slice(join(repo, '.ai').length + 1);
       expect(name(new Date(2026, 0, 5, 23, 59, 59, 999))).toBe('2026-01-05_x_review.md');
       expect(name(new Date(2026, 11, 31, 0, 0, 0, 0))).toBe('2026-12-31_x_review.md');
       expect(name(new Date(2026, 1, 9, 12))).toBe('2026-02-09_x_review.md');
@@ -190,8 +190,8 @@ describe('findRepoRoot and defaultReportPath', () => {
 
     it.skipIf(insideRepository)('is under the current folder outside a repository', () => {
       const plain = folder(scratch(), 'plain');
-      expect(defaultReportPath('Café', now, plain)).toBe(join(plain, 'docs', '2026-10-08_cafe_review.md'));
-      expect(defaultReportPath('Café', now, join(plain, 'nested', '..'))).toBe(join(plain, 'docs', '2026-10-08_cafe_review.md'));
+      expect(defaultReportPath('Café', now, plain)).toBe(join(plain, '.ai', '2026-10-08_cafe_review.md'));
+      expect(defaultReportPath('Café', now, join(plain, 'nested', '..'))).toBe(join(plain, '.ai', '2026-10-08_cafe_review.md'));
     });
   });
 });

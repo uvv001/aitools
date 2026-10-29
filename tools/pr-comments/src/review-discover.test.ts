@@ -191,7 +191,7 @@ describe('findReviews', () => {
   });
 
   describe('where it looks', () => {
-    it('skips .git, node_modules and hidden folders, wherever they are', async () => {
+    it('searches .ai and skips .git, node_modules and other hidden folders, wherever they are', async () => {
       const repo = repository();
       review(join(repo, '.git', 'a_review.sqlite'));
       review(join(repo, 'node_modules', 'b_review.sqlite'));
@@ -199,8 +199,26 @@ describe('findReviews', () => {
       review(join(repo, 'src', 'node_modules', 'pkg', 'd_review.sqlite'));
       review(join(repo, 'docs', '.cache', 'e_review.sqlite'));
       review(join(repo, '.hidden', 'docs', 'f_review.sqlite'));
+      const inAi = review(join(repo, '.ai', 'ai_review.sqlite'));
       const kept = review(join(repo, 'docs', 'kept_review.sqlite'));
-      await expect(findReviews(repo)).resolves.toEqual([kept]);
+      await expect(findReviews(repo)).resolves.toEqual([inAi, kept]);
+    });
+
+    it('falls back to sessionDir when no review database exists in the repository, and deduplicates hard links to the same database', async () => {
+      const repo = repository();
+      const session = folder(scratch(), 'session', 'files');
+      const sessionDb = review(join(session, '2026-10-08_pr-1_review.sqlite'));
+      await expect(discoverReview(repo, session)).resolves.toBe(sessionDb);
+
+      // A hard link inside the repository to the same database counts once, preferring .ai/.
+      const inAi = join(repo, '.ai', '2026-10-08_pr-1_review.sqlite');
+      mkdirSync(dirname(inAi), { recursive: true });
+      const inSub = join(repo, 'session', '2026-10-08_pr-1_review.sqlite');
+      mkdirSync(dirname(inSub), { recursive: true });
+      const { linkSync } = await import('node:fs');
+      linkSync(sessionDb, inAi);
+      linkSync(sessionDb, inSub);
+      await expect(discoverReview(repo, join(repo, 'session'))).resolves.toBe(inAi);
     });
 
     it('searches folders that only look like the skipped ones', async () => {

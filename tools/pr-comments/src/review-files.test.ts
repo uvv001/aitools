@@ -625,7 +625,7 @@ describe('initReviewFile', () => {
     // repository lives; `cwd` is a folder inside it.
     let repo: string;
     let cwd: string;
-    const docs = (file: string): string => join(repo, 'docs', file);
+    const ai = (file: string): string => join(repo, '.ai', file);
 
     beforeEach(async () => {
       repo = join(dir, 'repo');
@@ -634,11 +634,12 @@ describe('initReviewFile', () => {
       await mkdir(cwd, { recursive: true });
     });
 
-    it('creates the review in docs/ of the repository, named from the date and the name, and creates docs/', async () => {
-      expect(existsSync(join(repo, 'docs'))).toBe(false);
+    it('creates the review in .ai/ of the repository, named from the date and the name, creates .ai/, and excludes it in .git/info/exclude', async () => {
+      expect(existsSync(join(repo, '.ai'))).toBe(false);
       const result = await initReviewFile('PR 42', { cwd, now: NOW });
-      expect(result).toEqual({ db: docs('2026-10-09_pr-42_review.sqlite'), report: docs('2026-10-09_pr-42_review.md') });
-      expect(readdirSync(join(repo, 'docs'))).toEqual(['2026-10-09_pr-42_review.sqlite']);
+      expect(result).toEqual({ db: ai('2026-10-09_pr-42_review.sqlite'), report: ai('2026-10-09_pr-42_review.md') });
+      expect(readdirSync(join(repo, '.ai'))).toEqual(['2026-10-09_pr-42_review.sqlite']);
+      expect(await readFile(join(repo, '.git', 'info', 'exclude'), 'utf8')).toBe('/.ai/\n');
       expect(readdirSync(cwd)).toEqual([]);
       const loaded = await loadReviewFile(result.report);
       expect(loaded.data).toStrictEqual(NEW_REVIEW);
@@ -647,21 +648,21 @@ describe('initReviewFile', () => {
 
     it('makes the file name of a name with markup and punctuation', async () => {
       const result = await initReviewFile('PR 42 — Tenant Registry (v2)', { cwd, now: NOW });
-      expect(result.report).toBe(docs('2026-10-09_pr-42-tenant-registry-v2_review.md'));
+      expect(result.report).toBe(ai('2026-10-09_pr-42-tenant-registry-v2_review.md'));
       expect((await loadReviewFile(result.db)).data.target).toBe('PR 42 — Tenant Registry (v2)');
     });
 
     it('takes the date of the clock it is given, the current one unless it is given any', async () => {
       const result = await initReviewFile('PR 42', { cwd, now: new Date(2020, 0, 2, 23, 59) });
-      expect(result.report).toBe(docs('2020-01-02_pr-42_review.md'));
+      expect(result.report).toBe(ai('2020-01-02_pr-42_review.md'));
       expect((await initReviewFile('PR 42', { cwd })).report).toMatch(/[\\/]\d{4}-\d\d-\d\d_pr-42_review\.md$/u);
     });
 
     it('keeps the database of the db option and derives only the report from the default place', async () => {
       const named = join(dir, 'elsewhere', 'named.sqlite');
       const result = await initReviewFile('PR 42', { cwd, now: NOW, db: named });
-      expect(result).toEqual({ db: named, report: docs('2026-10-09_pr-42_review.md') });
-      expect(existsSync(join(repo, 'docs'))).toBe(false);
+      expect(result).toEqual({ db: named, report: ai('2026-10-09_pr-42_review.md') });
+      expect(existsSync(join(repo, '.ai'))).toBe(false);
       expect(existsSync(named)).toBe(true);
     });
 
@@ -673,22 +674,52 @@ describe('initReviewFile', () => {
     it('ignores the repository when it is told where the report goes', async () => {
       const report = join(dir, 'elsewhere', 'r.md');
       expect(await initReviewFile('PR 42', { report, cwd, now: NOW })).toEqual({ db: join(dir, 'elsewhere', 'r.sqlite'), report });
-      expect(existsSync(join(repo, 'docs'))).toBe(false);
+      expect(existsSync(join(repo, '.ai'))).toBe(false);
     });
 
     it('refuses a second review of the same name and day, and says to use another name or --report', async () => {
       await initReviewFile('PR 42', { cwd, now: NOW });
-      const before = await readFile(docs('2026-10-09_pr-42_review.sqlite'));
+      const before = await readFile(ai('2026-10-09_pr-42_review.sqlite'));
       await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(/already exists.*source of truth.*another name or location with --report/u);
-      expect((await readFile(docs('2026-10-09_pr-42_review.sqlite'))).equals(before)).toBe(true);
-      expect(readdirSync(join(repo, 'docs'))).toEqual(['2026-10-09_pr-42_review.sqlite']);
+      expect((await readFile(ai('2026-10-09_pr-42_review.sqlite'))).equals(before)).toBe(true);
+      expect(readdirSync(join(repo, '.ai'))).toEqual(['2026-10-09_pr-42_review.sqlite']);
     });
 
     it('creates nothing for a name that no file name can be made of, a blank one, or a bad pull request', async () => {
       await expect(initReviewFile('—', { cwd, now: NOW })).rejects.toThrow('nothing a file name can be made of');
       await expect(initReviewFile('  ', { cwd, now: NOW })).rejects.toThrow('target is empty');
       await expect(initReviewFile('PR 42', { cwd, now: NOW, pr: 'nope' })).rejects.toThrow('Not a valid URL');
-      expect(existsSync(join(repo, 'docs'))).toBe(false);
+      expect(existsSync(join(repo, '.ai'))).toBe(false);
+    });
+
+    it('creates the primary database in sessionDir, hard-links .ai/ and round folders on every DB write and render, and restores .ai/ after cleanup', async () => {
+      const sessionDir = join(dir, 'session', 'files');
+      const { db, report } = await initReviewFile('PR 42', { cwd, now: NOW, sessionDir });
+      const sessionDb = join(sessionDir, '2026-10-09_pr-42_review.sqlite');
+      const sessionReport = join(sessionDir, '2026-10-09_pr-42_review.md');
+      expect(existsSync(sessionDb)).toBe(true);
+      expect(existsSync(db)).toBe(true);
+
+      // Write a round file in .ai/ and mutate the DB without rendering: both .sqlite and the round file sync to sessionDir.
+      const wsRoundFile = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
+      await mkdir(join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1'), { recursive: true });
+      await writeFile(wsRoundFile, 'coverage\n', 'utf8');
+      await rm(sessionDb);
+      await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 updated' }, result: null }));
+      expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 updated');
+      expect(await readFile(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
+
+      // Render report: .md is linked in sessionDir too.
+      await renderReportFile(db, { cwd });
+      expect(await readFile(sessionReport, 'utf8')).toContain('# Review — PR 42 updated');
+
+      // Clean up .ai/ completely and mutate or render from sessionDb: .ai/ is restored with DB, report, and round files.
+      await rm(join(repo, '.ai'), { recursive: true, force: true });
+      expect(existsSync(join(repo, '.ai'))).toBe(false);
+      await mutateReviewFile(sessionDb, (data) => ({ data: { ...data, target: 'PR 42 restored' }, result: null }));
+      expect((await loadReviewFile(db)).data.target).toBe('PR 42 restored');
+      expect(existsSync(report)).toBe(true);
+      expect(await readFile(wsRoundFile, 'utf8')).toBe('coverage\n');
     });
   });
 

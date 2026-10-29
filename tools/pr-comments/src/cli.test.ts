@@ -313,10 +313,10 @@ describe('cli', () => {
       }
     });
 
-    it('declares only --author as repeatable, only the finding texts as required, and the base of a round as one of two', () => {
+    it('declares only --author and --ref as repeatable, only the finding texts as required, and the base of a round as one of two', () => {
       const flagged = (key: 'repeatable' | 'required') =>
         COMMANDS.flatMap(({ words, options }) => options.filter((option) => option[key]).map(({ name }) => `${words} --${name}`));
-      expect(flagged('repeatable')).toEqual(['report comments --author']);
+      expect(flagged('repeatable')).toEqual(['report comments --author', 'report comments --ref']);
       expect(flagged('required')).toEqual([
         'finding add --severity',
         'finding add --title',
@@ -338,7 +338,9 @@ describe('cli', () => {
     });
 
     it('writes the usage line of a command from its table entry', () => {
-      expect(synopsis(command('init'))).toBe('pr-comments init <name> [--pr <url>] [--report <file.md>] [--db <file.sqlite>]');
+      expect(synopsis(command('init'))).toBe(
+        'pr-comments init <name> [--pr <url>] [--session-dir <dir>] [--report <file.md>] [--db <file.sqlite>]',
+      );
       expect(synopsis(command('round open'))).toBe(
         'pr-comments round open [--revision <rev>] (--base <rev> | --no-base) [--note <text>] [--db <file.sqlite>]',
       );
@@ -351,7 +353,9 @@ describe('cli', () => {
       expect(synopsis(command('finding post'))).toBe(
         'pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] [--json] [--db <file.sqlite>]',
       );
-      expect(synopsis(command('report comments'))).toBe('pr-comments report comments [--author <login>]... [--out <file.md>] [--db <file.sqlite>]');
+      expect(synopsis(command('report comments'))).toBe(
+        'pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] [--db <file.sqlite>]',
+      );
     });
 
     it('takes the revisions from git in the default environment, and has every member the commands use', () => {
@@ -421,7 +425,7 @@ describe('cli', () => {
     it('says the default of init in the words of what it does: a slug of the name', async () => {
       await step('init', '--help');
 
-      expect(printed).toContain('(default: docs/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)');
+      expect(printed).toContain('(default: .ai/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)');
       expect(printed).toContain('the title of the report (a slug of it names the files by default)');
       expect(printed).toContain('--report and --db may both be given only if they agree');
       for (const { words, args, options, summary, description } of COMMANDS) {
@@ -816,7 +820,7 @@ describe('cli', () => {
 
         expect(await step('init', 'PR 44')).toBe(0);
 
-        expect(await exists(join(repo, 'docs', '2026-10-09_pr-44_review.sqlite'))).toBe(true);
+        expect(await exists(join(repo, '.ai', '2026-10-09_pr-44_review.sqlite'))).toBe(true);
         expect(warned).toBe('');
       });
     });
@@ -976,14 +980,14 @@ describe('cli', () => {
       expect((await loadReviewFile(named)).pullRequest).toBe(prUrl);
     });
 
-    it('creates docs/<yyyy-mm-dd>_<slug>_review.sqlite at the git root without --report, shown relative to the working directory', async () => {
+    it('creates .ai/<yyyy-mm-dd>_<slug>_review.sqlite at the git root without --report, shown relative to the working directory', async () => {
       const repo = join(work, 'repo');
       await mkdir(join(repo, '.git'), { recursive: true });
       env.cwd = () => repo;
 
       expect(await step('init', 'PR 42 — tenant registry')).toBe(0);
 
-      const db = join(repo, 'docs', '2026-10-09_pr-42-tenant-registry_review.sqlite');
+      const db = join(repo, '.ai', '2026-10-09_pr-42-tenant-registry_review.sqlite');
       const below = relative(repo, db);
       expect(printed).toBe(`Created ${below}\nRender the report with "pr-comments report render --db ${below}"\n`);
       expect(await exists(db)).toBe(true);
@@ -1841,6 +1845,25 @@ describe('cli', () => {
 
       it('refuses an author option without any login', async () => {
         await expect(step('report', 'comments', '--author', ' , ')).rejects.toThrow('--author needs at least one login');
+      });
+
+      it('filters by --ref and --pending, and validates ref format', async () => {
+        await step('link', 'note', 'r1001', 'handled');
+        await step('report', 'comments', '--pending');
+        expect(printed).toContain('- Filter: only pending comments and check annotations');
+        expect(printed).toContain('`r1004`');
+        expect(printed).not.toContain('`r1001`');
+
+        await step('report', 'comments', '--ref', `r1001,${COMPLEXITY_REF}`);
+        expect(printed).toContain(`- Filter: only refs \`r1001\`, \`${COMPLEXITY_REF}\``);
+        expect(printed).toContain('`r1001`');
+        expect(printed).toContain(`\`${COMPLEXITY_REF}\``);
+        expect(printed).not.toContain('`r1004`');
+
+        await expect(step('report', 'comments', '--ref', ' , ')).rejects.toThrow('--ref needs at least one ref');
+        await expect(step('report', 'comments', '--ref', 'bogus')).rejects.toThrow(
+          '"bogus" is not a comment or check annotation id; expected r544830, c623843 or a3f9c2d1e',
+        );
       });
 
       it('writes the markdown to a file, creating the folder, and says so', async () => {

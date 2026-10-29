@@ -10,7 +10,7 @@ Technical details (schema, ids, GitHub behaviours, tokens) are in [docs/technica
 
 ## Install
 
-You need Node 24 or newer, and pnpm.
+You need Node 24.2 or newer, and pnpm.
 
 ```
 pnpm install
@@ -22,12 +22,12 @@ pnpm add -g .
 For a place without the repository, build one file:
 
 ```
-pnpm build                                      # writes dist/pr-comments.mjs
+pnpm build                                      # writes ../../skills/review-with-docs/pr-comments.mjs
 pnpm build --out <folder>/pr-comments.mjs       # writes it elsewhere
 node <folder>/pr-comments.mjs --version
 ```
 
-The bundle needs only Node 24: no `node_modules`, no installation. It behaves exactly like the global command. `--version` shows the version and, for a bundle, the commit it was built from (`pr-comments 0.1.0+75c05c9`, with `-dirty` when the sources had uncommitted changes).
+The bundle needs only Node 24.2: no `node_modules`, no installation. It behaves exactly like the global command. `--version` shows the version and, for a bundle, the commit it was built from (`pr-comments 0.1.0+75c05c9`, with `-dirty` when the sources had uncommitted changes).
 
 ### Token
 
@@ -51,13 +51,13 @@ This is one complete review of a pull request, in order. The example reviews pul
 **1. Start the review.** `init` creates the database. The name is the title of the report.
 
 ```
-pr-comments init "PR 42 tenant registry" --report docs/pr-42_review.md --pr https://github.com/acme/widgets/pull/42
-Created docs/pr-42_review.sqlite
+pr-comments init "PR 42 tenant registry" --session-dir <session-folder>/files --pr https://github.com/acme/widgets/pull/42
+Created .ai/2026-10-29_pr-42-tenant-registry_review.sqlite
 Pull request: https://github.com/acme/widgets/pull/42
-Render the report with "pr-comments report render --db docs/pr-42_review.sqlite"
+Render the report with "pr-comments report render --db .ai/2026-10-29_pr-42-tenant-registry_review.sqlite"
 ```
 
-Only the database is created. The report is written later, by `report render`. Without `--report`, the files go to `docs/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root. If the pull request does not exist yet, leave out `--pr`, and connect it later:
+Only the database is created. The report is written later, by `report render`. Without `--report`, the files go to `.ai/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root, and `.ai/` is added to `.git/info/exclude` when not already ignored. With `--session-dir <dir>`, the primary files live in `<dir>` and are hard-linked into `.ai/` on every database change and `report render`. If the pull request does not exist yet, leave out `--pr`, and connect it later:
 
 ```
 pr-comments pr connect https://github.com/acme/widgets/pull/42
@@ -210,11 +210,12 @@ Every command also has `pr-comments <command> --help` (or `pr-comments help <com
 **`init`**: creates the review database. It never replaces an existing one.
 
 ```
-pr-comments init <name> [--pr <url>] [--report <file.md>] [--db <file.sqlite>]
+pr-comments init <name> [--pr <url>] [--session-dir <dir>] [--report <file.md>] [--db <file.sqlite>]
 pr-comments init "PR 42 tenant registry" --pr https://github.com/acme/widgets/pull/42
 ```
 
 - `--pr <url>` connects the review to a pull request.
+- `--session-dir <dir>` stores the primary review files in `<dir>` and hard-links them into `.ai/`.
 - `--report <file.md>` names the report. The database is created next to it, with the same name and `.sqlite`. A `.sqlite` path works too.
 - `--db <file.sqlite>` puts the database somewhere else.
 
@@ -381,20 +382,20 @@ pr-comments link reply c623843 --dry-run
 **`report render`**: writes the markdown report of the review, made from the database. It prints `created`, `updated` or `unchanged` and the path. It overwrites the report each time: change the review with the commands, never in the markdown. It never writes over a SQLite file.
 
 ```
-pr-comments report render [--out <file.md>] [--db <file.sqlite>]
+pr-comments report render [--out <file.md>] [--session-dir <dir>] [--db <file.sqlite>]
 pr-comments report render
 ```
 
-The default file is next to the database (`<name>.md`). `--out` writes it elsewhere.
+The default file is next to the database (`<name>.md`). `--out` writes it elsewhere. `--session-dir <dir>` connects or updates the session directory and hard-links the database, report and round folders between `<dir>` and `.ai/`.
 
 **`report comments`**: writes the downloaded pull request as markdown: the description, the conversation, the review threads with code, and the check annotations. It goes to the screen unless `--out` is given. Run `pr sync` first.
 
 ```
-pr-comments report comments [--author <login>]... [--out <file.md>] [--db <file.sqlite>]
+pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] [--db <file.sqlite>]
 pr-comments report comments --author alice --out pr-42.md
 ```
 
-`--author` keeps the comments and reviews of that user and the check runs of that app. It may be repeated, or take a comma-separated list. A thread that has a comment of that user is shown whole. On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.
+`--author` keeps the comments and reviews of that user and the check runs of that app. `--ref` keeps only the listed comments (with their thread) and check annotations. `--pending` keeps only comments and check annotations that no link names yet. On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.
 
 **`report dump`**: prints the review as text, for `git diff` (see [Git](#git)). It lists the findings, the rounds, the links and the pull request URL, not the downloaded comments.
 
