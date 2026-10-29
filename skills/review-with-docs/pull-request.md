@@ -37,9 +37,12 @@ rule — goes to a finding (with the counter-evidence recorded there) for the
 user to triage. A doubtful classification is the user's call
 ([SKILL.md](SKILL.md)); `link remove <ref>` undoes a link.
 
-`report comments [--author <login>]...` prints the PR as markdown for reading
-— description, conversation, threads with code, annotations — or writes it to
-`--out <file>`.
+`report comments [--pending] [--ref <ref>]... [--author <login>]...` prints
+the PR as markdown for reading — description, conversation, threads with
+code, annotations — or writes it to `--out <file>`. Past a handful of pending
+items, slice the refs across parallel agents (`report comments --ref <slice>`)
+to evaluate concerns against the code and existing findings, then record the
+resulting findings and links from the orchestrator.
 
 ## Publish
 

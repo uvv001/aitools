@@ -36,17 +36,16 @@ the expected outcome.
   commands, since an edit made in the report is lost.
 - The orchestrator alone runs commands that change the review.
 - Run every command in the reviewed repository: revisions resolve with git in
-  the working directory; pass `--db <path>` on every command, since default
-  discovery skips `.ai/`.
+  the working directory.
 
 ## Protocol
 
-A review database already in `.ai/` (or restored from the session's `files/`
-folder per [Checkpoint](#checkpoint)) means the request continues it: where
-several exist, take the one whose title or `pr show` matches the target, read
-`finding list`, then start at the step the request calls for — a verdict is
-step 5, a publish or sync request step 6, new changes (a moved PR head
-included) step 7, a fix request the paragraph under States.
+A review database already in `.ai/` (or in the session's `files/` folder if
+`.ai/` was cleaned, restored into `.ai/` by `report render --session-dir
+<session-folder>/files`) means the request continues it: read `finding list`,
+then start at the step the request calls for — a verdict is step 5, a publish
+or sync request step 6, new changes (a moved PR head included) step 7, a fix
+request the paragraph under States.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions — so where the target is not in a
@@ -57,20 +56,21 @@ included) step 7, a fix request the paragraph under States.
    dirty-tree note for an uncommitted tree, none for files reviewed as they
    stand. One attempt to resolve an ambiguous target or base, then the user's
    call — a wrong base silently changes the changeset under review.
-   Ensure git ignores `.ai/` before creating the database: if
-   `git check-ignore -q .ai/` fails, add `/.ai/` to the local exclude file
-   (`git rev-parse --git-path info/exclude`) and re-check. Then
-   `init <name> --db .ai/<yyyy-mm-dd>_<slug>_review.sqlite` — `<name>` the
-   report's title, derived from the review context (PR number, PR author,
-   feature name) — with `--pr <url>` where the target is a pull request. That
-   first pass — fleet briefs included — reads the changeset without the PR's
+   Where several review databases exist, take the one whose title or
+   `pr show` matches the target and pass `--db` on every command. With none,
+   `init <name>` creates one — `<name>` the report's title, derived from the
+   review context (PR number, PR author, feature name) — with
+   `--session-dir <session-folder>/files` when the host provides a session
+   folder and `--pr <url>` where the target is a pull request. That first
+   pass — fleet briefs included — reads the changeset without the PR's
    existing comments, so they cannot frame it; the user asks for the sync, and
    even when requested up front, the comments enrich the report only after the
    pass ([pull-request.md](pull-request.md)).
-   **Ready when:** the database exists under `.ai/`, `git check-ignore`
-   matches its path, the reviewed revision and its base (or none) are pinned,
-   on a pull request target `pr show` names that pull request, and the user's
-   target and base were confirmed or unambiguous.
+   **Ready when:** the database exists in `.ai/` (which git ignores) and in
+   the session's `files/` folder when the host provides one, the reviewed
+   revision and its base (or none) are pinned, on a pull request target
+   `pr show` names that pull request, and the user's target and base were
+   confirmed or unambiguous.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
@@ -245,15 +245,9 @@ dropped silently is a defect of the review.
 
 ## Checkpoint
 
-A checkpoint is `report render`, then mirroring the review's files between
-`.ai/` and the session folder's `files/` directory (when the host provides
-one) at the same paths relative to `.ai/`: `<stem>_review.sqlite`,
-`<stem>_review.md`, and every file under `<stem>_review/round-<n>/`. Create the
-matching folders first and hard-link each file (directories cannot be
-hard-linked; replace the destination if an edit detached its inode, or copy —
-overwriting on each checkpoint — when `.ai/` and the session folder sit on
-different volumes). When `.ai/` was cleaned, linking those paths from `files/`
-back into `.ai/` restores the review. The hard links keep the review alive in
-the session store when `.ai/` or the worktree is cleaned up, while `.ai/`
-keeps it out of git history. Only the database and the report together are a
-complete state.
+A checkpoint is `report render` (with `--session-dir <session-folder>/files`
+when continuing in a new session): the tool renders the report and keeps the
+database, the report, and the round folders hard-linked (or copied across
+volumes) between the session's `files/` folder and `.ai/` on every database
+change and render. Only the database and the report together are a complete
+state.
