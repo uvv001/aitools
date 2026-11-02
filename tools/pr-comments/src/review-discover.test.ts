@@ -1,11 +1,17 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { discoverReview, findReviews } from './review-discover.ts';
 import { newReview } from './review-ops.ts';
 import { openReviewDb, saveReview } from './review-store.ts';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, stat: vi.fn(actual.stat) };
+});
 
 const roots: string[] = [];
 
@@ -220,6 +226,31 @@ describe('findReviews', () => {
       linkSync(sessionDb, inAi);
       linkSync(sessionDb, inSub);
       await expect(discoverReview(repo, join(repo, 'session'))).resolves.toBe(inAi);
+
+      // Two distinct review databases whose 64-bit NTFS ino values differ only above 2^53 (17169973581500551n vs
+      // 17169973581500552n) are not conflated as hard links.
+      const repo2 = repository();
+      const dbA = review(join(repo2, '.ai', 'a_review.sqlite'));
+      const dbB = review(join(repo2, '.ai', 'b_review.sqlite'));
+      const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+      const inoByPath = new Map<string, bigint>([
+        [dbA, 17169973581500551n],
+        [dbB, 17169973581500552n],
+      ]);
+      vi.mocked(stat).mockImplementation((async (targetPath, options) => {
+        const fakeIno = inoByPath.get(String(targetPath));
+        if (options?.bigint) {
+          const info = await actualFs.stat(targetPath, { bigint: true });
+          return fakeIno === undefined ? info : Object.assign(info, { dev: 1n, ino: fakeIno });
+        }
+        const info = await actualFs.stat(targetPath);
+        return fakeIno === undefined ? info : Object.assign(info, { dev: 1, ino: Number(fakeIno) });
+      }) as typeof stat);
+      try {
+        await expect(findReviews(repo2)).resolves.toEqual([dbA, dbB]);
+      } finally {
+        vi.mocked(stat).mockImplementation(actualFs.stat);
+      }
     });
 
     it('searches folders that only look like the skipped ones', async () => {

@@ -234,8 +234,8 @@ export async function ensureAiGitExcluded(repoRoot: string): Promise<void> {
 
 async function sameInode(a: string, b: string): Promise<boolean> {
   try {
-    const [sa, sb] = await Promise.all([stat(a), stat(b)]);
-    return sa.dev === sb.dev && sa.ino === sb.ino && sa.ino !== 0;
+    const [sa, sb] = await Promise.all([stat(a, { bigint: true }), stat(b, { bigint: true })]);
+    return sa.dev === sb.dev && sa.ino === sb.ino && sa.ino !== 0n;
   } catch {
     return false;
   }

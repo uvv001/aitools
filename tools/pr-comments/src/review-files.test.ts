@@ -1,7 +1,7 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, linkSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
-import { link, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -44,7 +44,7 @@ vi.mock('./review-store.ts', async (importOriginal) => {
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...actual, link: vi.fn(actual.link), rename: vi.fn(actual.rename) };
+  return { ...actual, link: vi.fn(actual.link), rename: vi.fn(actual.rename), stat: vi.fn(actual.stat) };
 });
 
 let dir: string;
@@ -758,6 +758,34 @@ describe('initReviewFile', () => {
       await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 active wins' }, result: null }));
       expect((await loadReviewFile(newWsDb)).data.target).toBe('PR 42 active wins');
       expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 active wins');
+
+      // Two detached files whose 64-bit NTFS ino values differ only above 2^53 (17169973581500551n vs 17169973581500552n,
+      // which collide as Number) are not mistaken for the same inode by sameInode.
+      const newWsRoundFile = join(newRepo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
+      await rm(newWsRoundFile);
+      await writeFile(newWsRoundFile, 'fresh workspace coverage\n', 'utf8');
+      const newerStill = new Date(Date.now() + 20_000);
+      await utimes(newWsRoundFile, newerStill, newerStill);
+      const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+      const inoByPath = new Map<string, bigint>([
+        [newWsRoundFile, 17169973581500551n],
+        [sessRoundFile, 17169973581500552n],
+      ]);
+      vi.mocked(stat).mockImplementation((async (targetPath, options) => {
+        const fakeIno = inoByPath.get(String(targetPath));
+        if (options?.bigint) {
+          const info = await actualFs.stat(targetPath, { bigint: true });
+          return fakeIno === undefined ? info : Object.assign(info, { dev: 1n, ino: fakeIno });
+        }
+        const info = await actualFs.stat(targetPath);
+        return fakeIno === undefined ? info : Object.assign(info, { dev: 1, ino: Number(fakeIno) });
+      }) as typeof stat);
+      try {
+        await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 bigint ino' }, result: null }));
+      } finally {
+        vi.mocked(stat).mockImplementation(actualFs.stat);
+      }
+      expect(await readFile(sessRoundFile, 'utf8')).toBe('fresh workspace coverage\n');
     });
   });
 

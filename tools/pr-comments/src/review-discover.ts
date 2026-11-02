@@ -67,8 +67,8 @@ async function collectUnique(folder: string): Promise<string[]> {
   const kept = new Set<string>();
   for (const path of ordered) {
     try {
-      const info = await stat(path);
-      if (info.ino !== 0) {
+      const info = await stat(path, { bigint: true });
+      if (info.ino !== 0n) {
         const key = `${info.dev}:${info.ino}`;
         if (seenInodes.has(key)) continue;
         seenInodes.add(key);
