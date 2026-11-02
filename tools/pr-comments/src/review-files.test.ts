@@ -730,6 +730,18 @@ describe('initReviewFile', () => {
       await utimes(sessRoundFile, future, future);
       await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
       expect(await readFile(wsRoundFile, 'utf8')).toBe('newer session coverage\n');
+
+      // Removing the old worktree and running renderReportFile with sessionDir in a new worktree updates workspace_dir.
+      await rm(repo, { recursive: true, force: true });
+      const newRepo = join(dir, 'new-worktree');
+      await mkdir(join(newRepo, '.git'), { recursive: true });
+      await renderReportFile(sessionDb, { sessionDir, cwd: newRepo });
+      expect(existsSync(repo)).toBe(false);
+      expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);
+      expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.md'))).toBe(true);
+      expect(await readFile(join(newRepo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe(
+        'newer session coverage\n',
+      );
     });
   });
 

@@ -449,22 +449,23 @@ export async function renderReportFile(
   }
   const cwd = options.cwd ?? process.cwd();
   const resolvedSessionDir = options.sessionDir === undefined ? undefined : resolve(cwd, options.sessionDir);
-  if (resolvedSessionDir !== undefined && resolvedSessionDir !== metaSessionDir) {
-    const rw = openReviewDb(paths.db, 'existing');
-    try {
-      inTransaction(rw, () => {
-        setMeta(rw, SESSION_DIR, resolvedSessionDir);
-        if (metaWorkspaceDir === undefined) {
-          const activeDir = dirname(resolve(cwd, paths.db));
-          const repoRoot = findRepoRoot(cwd);
-          const ws = samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir;
-          setMeta(rw, WORKSPACE_DIR, ws);
-          metaWorkspaceDir = ws;
-        }
-      });
-      metaSessionDir = resolvedSessionDir;
-    } finally {
-      rw.close();
+  if (resolvedSessionDir !== undefined) {
+    const activeDir = dirname(resolve(cwd, paths.db));
+    const repoRoot = findRepoRoot(cwd);
+    const resolvedWorkspaceDir =
+      samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir;
+    if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
+      const rw = openReviewDb(paths.db, 'existing');
+      try {
+        inTransaction(rw, () => {
+          setMeta(rw, SESSION_DIR, resolvedSessionDir);
+          setMeta(rw, WORKSPACE_DIR, resolvedWorkspaceDir);
+        });
+        metaSessionDir = resolvedSessionDir;
+        metaWorkspaceDir = resolvedWorkspaceDir;
+      } finally {
+        rw.close();
+      }
     }
   }
   const current = await readExisting(target);
