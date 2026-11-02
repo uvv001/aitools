@@ -660,12 +660,13 @@ describe('initReviewFile', () => {
       expect((await initReviewFile('PR 42', { cwd })).report).toMatch(/[\\/]\d{4}-\d\d-\d\d_pr-42_review\.md$/u);
     });
 
-    it('keeps the database of the db option and derives only the report from the default place', async () => {
+    it('keeps the database of the db option and derives the report beside it', async () => {
       const named = join(dir, 'elsewhere', 'named.sqlite');
       const result = await initReviewFile('PR 42', { cwd, now: NOW, db: named });
-      expect(result).toEqual({ db: named, report: ai('2026-10-09_pr-42_review.md') });
+      expect(result).toEqual({ db: named, report: join(dir, 'elsewhere', 'named.md') });
       expect(existsSync(join(repo, '.ai'))).toBe(false);
       expect(existsSync(named)).toBe(true);
+      expect(existsSync(join(dir, 'elsewhere', 'named.md'))).toBe(true);
     });
 
     it('connects the pull request there as well', async () => {

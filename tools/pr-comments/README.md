@@ -57,7 +57,7 @@ Pull request: https://github.com/acme/widgets/pull/42
 Render the report with "pr-comments report render --db .ai/2026-10-29_pr-42-tenant-registry_review.sqlite"
 ```
 
-Only the database is created. The report is written later, by `report render`. Without `--report`, the files go to `.ai/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root, and `.ai/` is added to `.git/info/exclude` when not already ignored. With `--session-dir <dir>`, the primary files live in `<dir>` and are hard-linked into `.ai/` on every database change and `report render`. If the pull request does not exist yet, leave out `--pr`, and connect it later:
+Both the database and the report are created, and every change updates the report. Without `--report`, the files go to `.ai/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root, and `.ai/` is added to `.git/info/exclude` when not already ignored. With `--session-dir <dir>`, the primary files live in `<dir>` and are hard-linked into `.ai/` on every database change and `report render`. If the pull request does not exist yet, leave out `--pr`, and connect it later:
 
 ```
 pr-comments pr connect https://github.com/acme/widgets/pull/42
@@ -481,7 +481,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 
 ## Git
 
-By default, reviews live in `.ai/` (excluded via `.git/info/exclude`) and `--session-dir` hard-links them into the session folder, so they stay out of Git commits. When `--report` places a review in a tracked folder instead, commit the database next to the report and run `report render` first so the report matches.
+By default, reviews live in `.ai/` (excluded via `.git/info/exclude`) and `--session-dir` hard-links them into the session folder, so they stay out of Git commits. When `--report` places a review in a tracked folder instead, commit the database next to the report.
 
 The database is a binary file, so `git diff` cannot show what changed in it. `report dump` turns it into text. Tell git to use it:
 

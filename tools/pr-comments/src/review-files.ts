@@ -180,7 +180,7 @@ function assertRenders(data: ReviewData, report: string): string {
 
 export interface InitResult {
   db: string;
-  // The report the review renders to; nothing is written there yet.
+  // The report the review renders to, written alongside the database.
   report: string;
 }
 
@@ -348,9 +348,9 @@ async function syncMirrorFiles(options: {
 // lives at `options.report` (a report or a database path) or, without one, at the default place of a review of that
 // name (`.ai/` of the repository of `cwd`); `options.db` names another file, which must end in `.sqlite`. When
 // `options.sessionDir` is given, the primary file is created in `sessionDir` and hard-linked into the workspace folder.
-// `options.pr` connects it to a pull request, validated before anything is created and stored in the same file. No
-// markdown is written, since nothing was rendered; the first `render` creates the report. Refuses an existing
-// database, and publishes the new one atomically.
+// `options.pr` connects it to a pull request, validated before anything is created and stored in the same file. The
+// report is rendered and written next to the database. Refuses an existing database, and publishes the new one
+// atomically.
 export async function initReviewFile(
   name: string,
   options: { report?: string; db?: string; pr?: string; sessionDir?: string; now?: Date; cwd?: string } = {},
@@ -371,7 +371,7 @@ export async function initReviewFile(
   if (dualHomed && (await exists(primaryDb))) throw existingDatabase(primaryDb);
   const reportTarget = options.report !== undefined || options.db === undefined ? paths.report : reviewPaths(dbPath).report;
   await refuseDatabase(reportTarget, dbPath);
-  const rendered = assertRenders(data, paths.report);
+  const rendered = assertRenders(data, reportTarget);
 
   const created = await createDatabase(
     primaryDb,
@@ -395,7 +395,7 @@ export async function initReviewFile(
       preferredReport: reportTarget,
     });
   }
-  return { db: dbPath, report: paths.report };
+  return { db: dbPath, report: reportTarget };
 }
 
 export interface LoadedReview extends ReviewState {
@@ -528,7 +528,8 @@ export interface StateChange<T> {
 // gets (`known` included) already holds its comments, and a link to one of them is allowed; if the change fails,
 // the snapshot is rolled back with it. The transaction takes the write lock before it loads, so writers in several
 // processes run one after the other, each on what the one before saved; a writer waits for the lock (up to the busy
-// timeout) instead of working on stale data. The report is never rendered or touched; `render` does that, when asked.
+// timeout) instead of working on stale data. When the review changes, the report is rendered and written after the
+// transaction commits.
 export async function changeReviewState<T>(
   arg: string,
   change: (state: ReviewState) => StateChange<T> | Promise<StateChange<T>>,

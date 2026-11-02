@@ -948,7 +948,7 @@ describe('cli', () => {
   describe('init', () => {
     const created = (path: string) => `Created ${shown(path)}\nRender the report with "pr-comments report render --db ${shown(path)}"\n`;
 
-    it('creates the database only, next to the report or where --db says, and names no database on stderr', async () => {
+    it('creates the database and report, next to the report or where --db says, and names no database on stderr', async () => {
       const report = join(docs, 'chain_review.md');
 
       expect(await step('init', 'PR 42', '--report', report)).toBe(0);

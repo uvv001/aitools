@@ -689,7 +689,7 @@ const DEFINITIONS: Command[] = [
     summary: 'creates the review database',
     description: [
       'Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.',
-      'It never replaces an existing database. The report (markdown) is made from the database by "pr-comments report render".',
+      'It never replaces an existing database. The report (markdown) is written next to the database and updated on every change.',
       'The report is always next to the database with the same name, so --report and --db may both be given only if they agree.',
     ],
     args: [{ name: '<name>', description: 'what is under review; the title of the report (a slug of it names the files by default)' }],

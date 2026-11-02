@@ -424,9 +424,9 @@ describe('the comment handed to the engine', () => {
     expect(existsSync(report)).toBe(true);
 
     await writeFile(report, 'edited by hand, not a report', 'utf8');
-    const again = await post(db, 'F1', created('r3'));
+    const again = await post(db, 'F1', (comment, options) => answer(comment, options, 'updated', 'r2'));
     expect(again.posted.body).toBe(F1_TEXT);
-    expect(await readFile(report, 'utf8')).toBe('edited by hand, not a report');
+    expect(await readFile(report, 'utf8')).toContain(`updated PR comment ${R2}`);
   });
 });
 
