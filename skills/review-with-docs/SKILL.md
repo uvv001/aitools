@@ -40,12 +40,15 @@ the expected outcome.
 
 ## Protocol
 
-A review database already in `.ai/` (or in the session's `files/` folder if
-`.ai/` was cleaned, restored into `.ai/` by `report render --session-dir
-<session-folder>/files`) means the request continues it: read `finding list`,
-then start at the step the request calls for — a verdict is step 5, a publish
-or sync request step 6, new changes (a moved PR head included) step 7, a fix
-request the paragraph under States.
+A review database already in `.ai/` or in the session's `files/` folder means
+the request continues it: where several exist, take the one whose title or
+`pr show` matches the target and pass `--db` on every command; when continuing
+in a new session or when `.ai/` was cleaned, run
+`report render --session-dir <session-folder>/files` first to bind the session
+folder and restore `.ai/`; then read `finding list` and start at the step the
+request calls for — a verdict is step 5, a publish or sync request step 6, new
+changes (a moved PR head included) step 7, a fix request the paragraph under
+States.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions — so where the target is not in a
@@ -56,10 +59,8 @@ request the paragraph under States.
    dirty-tree note for an uncommitted tree, none for files reviewed as they
    stand. One attempt to resolve an ambiguous target or base, then the user's
    call — a wrong base silently changes the changeset under review.
-   Where several review databases exist, take the one whose title or
-   `pr show` matches the target and pass `--db` on every command. With none,
-   `init <name>` creates one — `<name>` the report's title, derived from the
-   review context (PR number, PR author, feature name) — with
+   `init <name>` creates the database — `<name>` the report's title, derived
+   from the review context (PR number, PR author, feature name) — with
    `--session-dir <session-folder>/files` when the host provides a session
    folder and `--pr <url>` where the target is a pull request. That first
    pass — fleet briefs included — reads the changeset without the PR's
@@ -245,8 +246,7 @@ dropped silently is a defect of the review.
 
 ## Checkpoint
 
-A checkpoint is `report render` (with `--session-dir <session-folder>/files`
-when continuing in a new session): the tool renders the report and keeps the
+A checkpoint is `report render`: the tool renders the report and keeps the
 database, the report, and the round folders hard-linked (or copied across
 volumes) between the session's `files/` folder and `.ai/` on every database
 change and render. Only the database and the report together are a complete
