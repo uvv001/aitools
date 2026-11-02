@@ -311,12 +311,13 @@ async function syncMirrorFiles(options: {
   const sessionDb = join(sessionDir, dbFileName);
   const workspaceDb = join(workspaceDir, dbFileName);
 
-  if (samePath(activeDb, sessionDb) || samePath(activeDb, workspaceDb)) {
-    await ensureLinkedFile(sessionDb, workspaceDb);
-    await ensureLinkedFile(workspaceDb, sessionDb);
+  if (samePath(activeDb, sessionDb)) {
+    await ensureLinkedFile(sessionDb, workspaceDb, false);
+  } else if (samePath(activeDb, workspaceDb)) {
+    await ensureLinkedFile(workspaceDb, sessionDb, false);
   } else {
-    await ensureLinkedFile(activeDb, sessionDb);
-    await ensureLinkedFile(sessionDb, workspaceDb);
+    await ensureLinkedFile(activeDb, sessionDb, false);
+    await ensureLinkedFile(sessionDb, workspaceDb, false);
   }
 
   const sessionReport = join(sessionDir, `${stem}.md`);

@@ -740,11 +740,21 @@ describe('initReviewFile', () => {
         action: 'created',
       });
       expect(existsSync(repo)).toBe(false);
-      expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);
+      const newWsDb = join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite');
+      expect(existsSync(newWsDb)).toBe(true);
       expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.md'))).toBe(true);
       expect(await readFile(join(newRepo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe(
         'newer session coverage\n',
       );
+
+      // Even if sessionDb is detached with a newer mtime, mutating newWsDb (activeDb) overwrites sessionDb rather than reverting newWsDb.
+      const detachedBytes = await readFile(sessionDb);
+      await rm(sessionDb);
+      await writeFile(sessionDb, detachedBytes);
+      await utimes(sessionDb, future, future);
+      await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 active wins' }, result: null }));
+      expect((await loadReviewFile(newWsDb)).data.target).toBe('PR 42 active wins');
+      expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 active wins');
     });
   });
 
