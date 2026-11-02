@@ -735,7 +735,10 @@ describe('initReviewFile', () => {
       await rm(repo, { recursive: true, force: true });
       const newRepo = join(dir, 'new-worktree');
       await mkdir(join(newRepo, '.git'), { recursive: true });
-      await renderReportFile(sessionDb, { sessionDir, cwd: newRepo });
+      expect(await renderReportFile(sessionDb, { sessionDir, cwd: newRepo })).toEqual({
+        report: join(newRepo, '.ai', '2026-10-09_pr-42_review.md'),
+        action: 'created',
+      });
       expect(existsSync(repo)).toBe(false);
       expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);
       expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.md'))).toBe(true);

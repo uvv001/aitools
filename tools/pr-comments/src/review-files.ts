@@ -434,8 +434,7 @@ export async function renderReportFile(
   options: { out?: string; sessionDir?: string; cwd?: string } = {},
 ): Promise<RenderResult> {
   const paths = reviewPaths(arg);
-  const target = options.out ?? paths.report;
-  await refuseDatabase(target, paths.db);
+  await refuseDatabase(options.out ?? paths.report, paths.db);
   const db = openReviewDb(paths.db, 'readonly');
   let text: string;
   let metaSessionDir: string | undefined;
@@ -468,6 +467,14 @@ export async function renderReportFile(
       }
     }
   }
+  const target =
+    options.out ??
+    (metaSessionDir !== undefined &&
+    metaWorkspaceDir !== undefined &&
+    samePath(dirname(resolve(cwd, paths.db)), metaSessionDir)
+      ? join(metaWorkspaceDir, basename(paths.report))
+      : paths.report);
+  if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
   const current = await readExisting(target);
   const action: RenderResult['action'] = current === text ? 'unchanged' : current === undefined ? 'created' : 'updated';
   if (action !== 'unchanged') {
