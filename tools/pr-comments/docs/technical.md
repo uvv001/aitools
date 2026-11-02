@@ -18,7 +18,7 @@ Contents:
 
 ## 1. Overview
 
-Node 24, TypeScript run directly by Node (type stripping), the built-in `node:sqlite`. No runtime dependencies. The only dev dependencies are `typescript`, `vitest`, `rolldown` and `@types/node`.
+Node 24.2, TypeScript run directly by Node (type stripping), the built-in `node:sqlite`. No runtime dependencies. The only dev dependencies are `typescript`, `vitest`, `rolldown` and `@types/node`.
 
 | Area | Files |
 | --- | --- |
@@ -121,7 +121,7 @@ The rules in these tables:
 | Mode | Commands |
 | --- | --- |
 | Creates the database | `init` |
-| Opens it read-only | `finding list`, `finding show`, `link pending`, `pr show`, `report render` (writes only the report file), `report comments` (writes only `--out`), `report dump`. Also the discovery, and the loading step of `finding post` and `link reply` |
+| Opens it read-only | `finding list`, `finding show`, `link pending`, `pr show`, `report render` (writes only the report file, unless `--session-dir` updates the session directory), `report comments` (writes only `--out`), `report dump`. Also the discovery, and the loading step of `finding post` and `link reply` |
 | Writes it | `pr connect`, `pr sync`, `round open`, `finding add`, `finding set-state|set-severity|set-title|set-description`, `finding update`, `finding post`, `link own|duplicate|note|remove`, `link reply`. `finding post` and `link reply` write nothing in a dry run |
 
 A read command must not change the committed file. A read-only connection (`new DatabaseSync(path, { readOnly: true })`) issues no write at all: no journal mode pragma, no lock file, not one byte. A manual check of all the read commands left the hash and the modification time of the file as they were. A read takes one read transaction, so it sees one state of the file even when another process commits meanwhile.

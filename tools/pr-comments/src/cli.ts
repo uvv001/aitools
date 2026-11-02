@@ -936,7 +936,7 @@ const DEFINITIONS: Command[] = [
     summary: 'writes the review report',
     description: [
       'Writes the markdown report of the review, made from the database, and says whether the file was created, updated or',
-      'left unchanged. It writes the report only, never the database, and never over a SQLite file.',
+      'left unchanged. It writes the report (updating the database only when --session-dir changes the session directory), and never over a SQLite file.',
     ],
     args: [],
     options: [
