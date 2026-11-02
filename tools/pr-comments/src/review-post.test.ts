@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { commentRefFromUrl } from './comment-ref.ts';
@@ -414,14 +414,14 @@ describe('the comment handed to the engine', () => {
     );
   });
 
-  it('never reads the report file', async () => {
+  it('never reads the report file, and updates it from the database', async () => {
     const db = await startReview();
     const report = reportPath();
-    expect(existsSync(report)).toBe(false);
+    await rm(report, { force: true });
 
     const { posted } = await post(db, 'F1', created());
     expect(posted.body).toBe(F1_TEXT);
-    expect(existsSync(report)).toBe(false);
+    expect(existsSync(report)).toBe(true);
 
     await writeFile(report, 'edited by hand, not a report', 'utf8');
     const again = await post(db, 'F1', created('r3'));

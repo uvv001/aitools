@@ -162,17 +162,20 @@ function firstDifference(a: unknown, b: unknown, path: string): string {
 // unchanged from its own rendering (`readReport(renderReport(x))` equals `x`, which is what lets the database and
 // the report stand for each other), is a bug of the operations, not of the user: it is reported as such, before
 // anything is written.
-function assertRenders(data: ReviewData, report: string): void {
+function assertRenders(data: ReviewData, report: string): string {
   const fail = (reason: string): never => {
     throw new Error(`internal error: the changed review ${reason}; nothing was written`);
   };
+  let rendered: string;
   let read: ReviewData;
   try {
-    read = readReport(renderReport(data), report);
+    rendered = renderReport(data);
+    read = readReport(rendered, report);
   } catch (error) {
     return fail(`does not render to a valid report (${error instanceof Error ? error.message : String(error)})`);
   }
   if (!isDeepStrictEqual(read, data)) fail(`does not come back from its rendering (it differs at ${firstDifference(read, data, 'review')})`);
+  return rendered;
 }
 
 export interface InitResult {
@@ -366,7 +369,9 @@ export async function initReviewFile(
 
   if (await exists(dbPath)) throw existingDatabase(dbPath);
   if (dualHomed && (await exists(primaryDb))) throw existingDatabase(primaryDb);
-  assertRenders(data, paths.report);
+  const reportTarget = options.report !== undefined || options.db === undefined ? paths.report : reviewPaths(dbPath).report;
+  await refuseDatabase(reportTarget, dbPath);
+  const rendered = assertRenders(data, paths.report);
 
   const created = await createDatabase(
     primaryDb,
@@ -379,8 +384,16 @@ export async function initReviewFile(
   if (repoRoot !== undefined && samePath(workspaceDir, join(repoRoot, REVIEW_FOLDER))) {
     await ensureAiGitExcluded(repoRoot);
   }
+  await mkdir(dirname(reportTarget), { recursive: true });
+  await writeFile(reportTarget, rendered, 'utf8');
   if (dualHomed) {
-    await ensureLinkedFile(primaryDb, dbPath);
+    await syncMirrorFiles({
+      activeDb: primaryDb,
+      sessionDir,
+      workspaceDir,
+      cwd,
+      preferredReport: reportTarget,
+    });
   }
   return { db: dbPath, report: paths.report };
 }
@@ -525,6 +538,8 @@ export async function changeReviewState<T>(
   const db = openReviewDb(paths.db, 'existing');
   let sessionDir: string | undefined;
   let workspaceDir: string | undefined;
+  let rendered: string | undefined;
+  let reportTarget = paths.report;
   let committed = false;
   try {
     const changed = await inTransactionAsync(
@@ -536,7 +551,7 @@ export async function changeReviewState<T>(
         const { state } = result;
         if (state !== before) {
           if (state.data !== before.data) {
-            assertRenders(state.data, paths.report);
+            rendered = assertRenders(state.data, paths.report);
             saveReview(db, state.data);
           }
           if (!isDeepStrictEqual(state.links, before.links)) saveLinks(db, state.links);
@@ -550,6 +565,15 @@ export async function changeReviewState<T>(
         }
         sessionDir = getMeta(db, SESSION_DIR);
         workspaceDir = getMeta(db, WORKSPACE_DIR);
+        if (rendered !== undefined) {
+          reportTarget =
+            sessionDir !== undefined &&
+            workspaceDir !== undefined &&
+            samePath(dirname(resolve(paths.db)), sessionDir)
+              ? join(workspaceDir, basename(paths.report))
+              : paths.report;
+          await refuseDatabase(reportTarget, paths.db);
+        }
         return result;
       },
       { immediate: true },
@@ -558,8 +582,19 @@ export async function changeReviewState<T>(
     return changed;
   } finally {
     db.close();
-    if (committed && sessionDir !== undefined) {
-      await syncMirrorFiles({ activeDb: paths.db, sessionDir, workspaceDir });
+    if (committed) {
+      if (rendered !== undefined) {
+        await mkdir(dirname(reportTarget), { recursive: true });
+        await writeFile(reportTarget, rendered, 'utf8');
+      }
+      if (sessionDir !== undefined) {
+        await syncMirrorFiles({
+          activeDb: paths.db,
+          sessionDir,
+          workspaceDir,
+          preferredReport: rendered !== undefined ? reportTarget : undefined,
+        });
+      }
     }
   }
 }

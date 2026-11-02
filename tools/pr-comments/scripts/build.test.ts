@@ -259,7 +259,7 @@ describe('bundle', () => {
     expect((await bundled(add, elsewhere)).stdout).toBe('Added F1\n');
 
     const rendered = await bundled(['report', 'render', '--db', db], elsewhere);
-    expect(rendered.stdout).toBe(`created   ${report}\n`);
+    expect(rendered.stdout).toBe(`unchanged ${report}\n`);
     const text = await readFile(report, 'utf8');
     expect(text).toContain('### ⏳ 🔴 F1 — Demo finding');
     expect(text).toContain(`Round 1 — \`${head}\`, base none`);

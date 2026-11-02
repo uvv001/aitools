@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { commentRefFromUrl, commentUrl } from './comment-ref.ts';
@@ -329,18 +329,18 @@ describe('the request handed to the engine', () => {
     expect(dry.replied.text).toBe(`Duplicate of ${OWN_OF_F1}.`);
   });
 
-  it('never reads the report file', async () => {
+  it('never reads the report file, and updates it from the database', async () => {
     const db = await startReview();
     const report = reportPath();
-    expect(existsSync(report)).toBe(false);
+    await rm(report, { force: true });
 
     await reply(db, 'r2', created());
-    expect(existsSync(report)).toBe(false);
+    expect(existsSync(report)).toBe(true);
 
     await writeFile(report, 'edited by hand, not a report', 'utf8');
     const again = await reply(db, 'c3', created('c20'), { now: true });
     expect(again.replied.text).toBe(`Duplicate of ${OWN_OF_F1}.`);
-    expect(await readFile(report, 'utf8')).toBe('edited by hand, not a report');
+    expect(await readFile(report, 'utf8')).toContain('replied to duplicate');
   });
 
   it('passes an error of the engine on when it throws, and writes nothing', async () => {

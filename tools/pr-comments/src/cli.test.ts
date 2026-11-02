@@ -754,7 +754,7 @@ describe('cli', () => {
         await step('report', 'dump');
         expect(printed).toBe(await dumpReviewFile(found));
         await step('report', 'render');
-        expect(printed).toBe(`created   ${join(repo, 'docs', 'chain_review.md')}\n`);
+        expect(printed).toBe(`unchanged ${join(repo, 'docs', 'chain_review.md')}\n`);
         const { data } = await loadReviewFile(found);
         expect(data.findings.find(({ id }) => id === 'F3')?.updates.at(-1)?.text).toBe(`${STAMP} — a note`);
       });
@@ -952,7 +952,7 @@ describe('cli', () => {
 
       expect(printed).toBe(created(join(docs, 'chain_review.sqlite')));
       expect(warned).toBe('');
-      expect(await tree(docs)).toEqual(['chain_review.sqlite', 'demo_review.sqlite']);
+      expect(await tree(docs)).toEqual(['chain_review.md', 'chain_review.sqlite', 'demo_review.sqlite']);
       expect((await loadReviewFile(join(docs, 'chain_review.sqlite'))).data).toMatchObject({ target: 'PR 42', findings: [] });
 
       const named = join(docs, 'named.sqlite');
@@ -1013,7 +1013,7 @@ describe('cli', () => {
       await step('init', 'X', '--report', join(docs, 'd.sqlite'), '--db', join(docs, 'd.sqlite'));
       await step('init', 'X', '--report', `${docs}/./e.md`, '--db', join(docs, 'e.sqlite'));
       await step('init', 'X', '--report', relative(process.cwd(), join(docs, 'f.md')), '--db', join(docs, 'f.sqlite'));
-      expect(await tree(docs)).toEqual([...before, 'c.sqlite', 'd.sqlite', 'e.sqlite', 'f.sqlite'].sort());
+      expect(await tree(docs)).toEqual([...before, 'c.md', 'c.sqlite', 'd.md', 'd.sqlite', 'e.md', 'e.sqlite', 'f.md', 'f.sqlite'].sort());
     });
 
     it('compares the names the way the paths are derived: without regard to case where the file system has none', async () => {
@@ -1739,9 +1739,9 @@ describe('cli', () => {
         expect(printed).toBe(`unchanged ${report()}\n`);
 
         await step('finding', 'set-state', 'F3', 'approved');
-        await step('report', 'render');
-        expect(printed).toBe(`updated   ${report()}\n`);
         expect(await readFile(report(), 'utf8')).toContain('### ✅ ⚪ F3 — Waiting');
+        await step('report', 'render');
+        expect(printed).toBe(`unchanged ${report()}\n`);
       });
 
       it('replaces a report that was edited by hand, with no hand-edit guard and no --force', async () => {

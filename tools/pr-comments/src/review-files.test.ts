@@ -226,11 +226,12 @@ describe('renderReportFile', () => {
 
   it('says created, updated and unchanged: a new file, a file that differs, a file that is what it would write', async () => {
     const { db, report } = await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW });
+    await rm(report);
     expect(await renderReportFile(db)).toEqual({ report, action: 'created' });
     expect(await renderReportFile(db)).toEqual({ report, action: 'unchanged' });
-    await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Changed' }, result: null }));
+    await writeFile(report, '# Review — Old\n', 'utf8');
     expect(await renderReportFile(db)).toEqual({ report, action: 'updated' });
-    expect((await readFile(report, 'utf8')).startsWith('# Review — Changed\n')).toBe(true);
+    expect((await readFile(report, 'utf8')).startsWith('# Review — PR 42\n')).toBe(true);
     expect(await renderReportFile(db)).toEqual({ report, action: 'unchanged' });
   });
 
@@ -270,6 +271,7 @@ describe('renderReportFile', () => {
   it('renders to another file and creates its folders, and leaves the report alone', async () => {
     const report = await sampleReview();
     await mutateReviewFile(join(dir, 'r.sqlite'), (data) => ({ data: { ...data, target: 'Changed' }, result: null }));
+    await writeFile(report, sampleReport(), 'utf8');
     const out = join(dir, 'copies', 'copy.md');
 
     expect(await renderReportFile(report, { out })).toEqual({ report: out, action: 'created' });
@@ -488,7 +490,7 @@ describe('dumpReviewFile', () => {
     await dumpReviewFile(db);
     expect(modes()).toEqual(['readonly']);
     expect((await readFile(db)).equals(before)).toBe(true);
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 });
 
@@ -498,10 +500,10 @@ const failure = (code: string): Error => Object.assign(new Error(`failed: ${code
 describe('initReviewFile', () => {
   const NEW_REVIEW = newReview('PR 42');
 
-  it('creates the database of a new review next to the report, and writes no markdown', async () => {
+  it('creates the database of a new review and renders the report next to it', async () => {
     const report = join(dir, 'r.md');
     expect(await initReviewFile('PR 42', { report, now: NOW })).toEqual({ db: join(dir, 'r.sqlite'), report });
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
     expect((await loadReviewFile(report)).data).toStrictEqual(NEW_REVIEW);
   });
 
@@ -531,12 +533,12 @@ describe('initReviewFile', () => {
   it('accepts a database path in upper case', async () => {
     const db = join(dir, 'NAMED.SQLITE');
     expect((await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW, db })).db).toBe(db);
-    expect(listing()).toEqual(['NAMED.SQLITE']);
+    expect(listing()).toEqual(['NAMED.SQLITE', 'r.md']);
   });
 
-  it('is rendered by the first render into a report that parses', async () => {
+  it('is rendered into a report that parses', async () => {
     const { report } = await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW });
-    expect(await renderReportFile(report)).toEqual({ report, action: 'created' });
+    expect(await renderReportFile(report)).toEqual({ report, action: 'unchanged' });
     const text = await readFile(report, 'utf8');
     expect(text).toBe(renderReport(NEW_REVIEW));
     expect(text.startsWith('# Review — PR 42\n')).toBe(true);
@@ -598,7 +600,7 @@ describe('initReviewFile', () => {
       });
       const { db } = await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW, pr: 'https://github.com/o/r/pull/7' });
       expect(published).toBe('https://github.com/o/r/pull/7');
-      expect(listing()).toEqual(['r.sqlite']);
+      expect(listing()).toEqual(['r.md', 'r.sqlite']);
       expect(meta(db, 'pull_request')).toBe('https://github.com/o/r/pull/7');
     });
 
@@ -638,7 +640,7 @@ describe('initReviewFile', () => {
       expect(existsSync(join(repo, '.ai'))).toBe(false);
       const result = await initReviewFile('PR 42', { cwd, now: NOW });
       expect(result).toEqual({ db: ai('2026-10-09_pr-42_review.sqlite'), report: ai('2026-10-09_pr-42_review.md') });
-      expect(readdirSync(join(repo, '.ai'))).toEqual(['2026-10-09_pr-42_review.sqlite']);
+      expect(readdirSync(join(repo, '.ai'))).toEqual(['2026-10-09_pr-42_review.md', '2026-10-09_pr-42_review.sqlite']);
       expect(await readFile(join(repo, '.git', 'info', 'exclude'), 'utf8')).toBe('/.ai/\n');
       expect(readdirSync(cwd)).toEqual([]);
       const loaded = await loadReviewFile(result.report);
@@ -682,7 +684,7 @@ describe('initReviewFile', () => {
       const before = await readFile(ai('2026-10-09_pr-42_review.sqlite'));
       await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(/already exists.*source of truth.*another name or location with --report/u);
       expect((await readFile(ai('2026-10-09_pr-42_review.sqlite'))).equals(before)).toBe(true);
-      expect(readdirSync(join(repo, '.ai'))).toEqual(['2026-10-09_pr-42_review.sqlite']);
+      expect(readdirSync(join(repo, '.ai'))).toEqual(['2026-10-09_pr-42_review.md', '2026-10-09_pr-42_review.sqlite']);
     });
 
     it('creates nothing for a name that no file name can be made of, a blank one, or a bad pull request', async () => {
@@ -789,7 +791,7 @@ describe('initReviewFile', () => {
     it('publishes with a rename where the file system has no hard links', async () => {
       vi.mocked(link).mockRejectedValueOnce(failure('EPERM'));
       const { db } = await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW });
-      expect(listing()).toEqual(['r.sqlite']);
+      expect(listing()).toEqual(['r.md', 'r.sqlite']);
       expect((await loadReviewFile(db)).data).toStrictEqual(NEW_REVIEW);
     });
 
@@ -916,7 +918,7 @@ describe('mutateReviewFile', () => {
     );
     expect((await bytes()).equals(before)).toBe(true);
     expect(saveReview).not.toHaveBeenCalled();
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
   it('refuses a result that renders but does not read back from its rendering, and says where it differs', async () => {
@@ -961,15 +963,13 @@ describe('mutateReviewFile', () => {
     expect((await loadReviewFile(db)).data.target).toBe('Async');
   });
 
-  it('neither renders nor touches the report', async () => {
-    expect(existsSync(report)).toBe(false);
+  it('renders and updates the report when it changes the review', async () => {
+    expect(existsSync(report)).toBe(true);
     await mutateReviewFile(db, retarget('Changed'));
-    expect(existsSync(report)).toBe(false);
+    expect((await readFile(report, 'utf8')).startsWith('# Review — Changed\n')).toBe(true);
 
-    await renderReportFile(report);
-    const rendered = await readFile(report);
     await mutateReviewFile(db, retarget('Changed again'));
-    expect((await readFile(report)).equals(rendered)).toBe(true);
+    expect((await readFile(report, 'utf8')).startsWith('# Review — Changed again\n')).toBe(true);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
@@ -990,7 +990,7 @@ describe('mutateReviewFile', () => {
     await expect(mutateReviewFile(lonely, retarget('x'))).rejects.toThrow(new Error(message));
     const missing = join(dir, 'missing.sqlite');
     await expect(mutateReviewFile(missing, retarget('x'))).rejects.toThrow(new Error(`${missing} does not exist`));
-    expect(listing()).toEqual(['lonely.md', 'r.sqlite']);
+    expect(listing()).toEqual(['lonely.md', 'r.md', 'r.sqlite']);
   });
 });
 
@@ -1063,7 +1063,7 @@ describe('changeReviewState', () => {
     expect(loaded.data.findings.map((each) => each.id)).toEqual(['F1', 'F2']);
     expect(loaded.pullRequest).toBe(PULL_REQUEST);
     expect(changed.state).toStrictEqual({ data: loaded.data, links: loaded.links, pullRequest: loaded.pullRequest, known: loaded.known });
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
   describe('writes only what changed', () => {
@@ -1111,7 +1111,7 @@ describe('changeReviewState', () => {
     expect(asynchronous.result).toBe(7);
     nothingSaved();
     expect((await bytes()).equals(before)).toBe(true);
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
   it('leaves the database byte-identical when the change throws or rejects', async () => {
@@ -1264,11 +1264,9 @@ describe('changeReviewState', () => {
     expect(refused).toEqual(Array.from({ length: 3 }, () => 'database is locked'));
   });
 
-  it('neither renders nor touches the report', async () => {
-    await renderReportFile(report);
-    const rendered = await readFile(report);
+  it('renders and updates the report when it changes the review', async () => {
     await changeReviewState(db, (state) => ({ state: { ...state, data: { ...state.data, target: 'Changed' }, links: [] }, result: null }));
-    expect((await readFile(report)).equals(rendered)).toBe(true);
+    expect((await readFile(report, 'utf8')).startsWith('# Review — Changed\n')).toBe(true);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
@@ -1403,7 +1401,7 @@ describe('the report of a review connected to a pull request', () => {
     await run((state) => recordReplied(state, 'r544900', 'r546201', 'pending', NOW));
     await run((state) => unlink(state, 'c623843', NOW));
 
-    expect(await renderReportFile(db)).toEqual({ report, action: 'created' });
+    expect(await renderReportFile(db)).toEqual({ report, action: 'unchanged' });
 
     const text = await readFile(report, 'utf8');
     for (const line of [
@@ -1536,7 +1534,7 @@ describe('syncReviewFile', () => {
 
     expect(await loadSnapshot(db)).toEqual(data);
     expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c2', 'a00000001', 'a00000002']));
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
   it('counts no annotations for a pull request that was read without check runs', async () => {
@@ -1684,7 +1682,7 @@ describe('syncReviewFile', () => {
     await expect(syncReviewFile(missing, snapshotOf([]))).rejects.toThrow(new Error(`${missing} does not exist`));
     const lonely = await write('lonely.md', sampleReport());
     await expect(syncReviewFile(lonely, snapshotOf([]))).rejects.toThrow(new Error(`${join(dir, 'lonely.sqlite')} does not exist`));
-    expect(listing()).toEqual(['lonely.md', 'r.sqlite']);
+    expect(listing()).toEqual(['lonely.md', 'r.md', 'r.sqlite']);
   });
 });
 
@@ -1836,7 +1834,7 @@ describe('mutateReviewFile with several processes', () => {
     expect(new Set(ids).size).toBe(writers);
     const saved = (await loadReviewFile(db)).data.findings;
     expect(saved.map((finding) => finding.id).sort()).toEqual(ids);
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }, 60_000);
 
   it('waits for a lock that another process holds instead of failing with "database is locked"', async () => {
@@ -1928,7 +1926,7 @@ describe('changeReviewState with several processes', () => {
     expect(loaded.links.map((link) => `${link.finding} ${link.ref}`).sort()).toEqual(answers.sort());
     expect(new Set(loaded.links.map((link) => link.ref)).size).toBe(writers);
     expect(userVersion(db)).toBe(REVIEW_SCHEMA_VERSION);
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }
 
   it('serialises concurrent writers: each adds its own finding and link, and nothing is lost', async () => {
@@ -1970,7 +1968,7 @@ describe('changeReviewState with several processes', () => {
     expect(loaded.known.size).toBe(1);
     expect(linkable(db).map((row) => row.gone).sort()).toEqual([0, 1, 1, 1]);
     expect((await loadSnapshot(db))?.comments).toHaveLength(1);
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }, 60_000);
 });
 
@@ -1986,7 +1984,7 @@ describe('syncReviewFile with several processes', () => {
     expect([['c4'], ['r1'], ['r1', 'r2'], ['r1', 'r2', 'r3']]).toContainEqual(known);
     expect((await loadSnapshot(db))?.comments.map((comment) => comment.id).sort()).toEqual(known.map((ref) => `id-${ref}`));
     expect(linkable(db).map((row) => row.ref)).toEqual(known);
-    expect(listing()).toEqual(['r.sqlite']);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }, 60_000);
 
   it('waits for a lock that another process holds instead of failing with "database is locked"', async () => {
