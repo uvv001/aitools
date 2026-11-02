@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { samplePullRequest } from './fixtures.ts';
-import { findUnknownAuthors, renderMarkdown } from './markdown.ts';
+import { findUnknownAuthors, findUnknownRefs, renderMarkdown } from './markdown.ts';
 import type { CheckAnnotation, CheckRun, PullRequestData } from './model.ts';
 
 const url = 'https://ghe.example.com/acme/widgets/pull/157';
@@ -507,24 +507,6 @@ describe('renderMarkdown check annotations', () => {
     expect(nobody).not.toContain('## Checks');
     expect(nobody).toContain('_No comments._');
   });
-});
-
-describe('findUnknownAuthors', () => {
-  const data = withChecks(checkRun([annotation()]));
-
-  it('knows commenters and reviewers', () => {
-    expect(findUnknownAuthors(samplePullRequest(), ['bob', 'Carol', 'dave', 'nobody'])).toEqual(['nobody']);
-  });
-
-  it('knows the app of a check run, with or without [bot] on either side', () => {
-    expect(findUnknownAuthors(data, ['sq-community-pr-decoration', '@SQ-Community-PR-Decoration[bot]', 'bob', 'nobody'])).toEqual(['nobody']);
-    expect(findUnknownAuthors(withChecks(checkRun([annotation()], { app: 'github-actions[bot]' })), ['github-actions'])).toEqual([]);
-  });
-
-  it('does not know an app without check runs', () => {
-    expect(findUnknownAuthors(samplePullRequest(), ['sq-community-pr-decoration'])).toEqual(['sq-community-pr-decoration']);
-    expect(findUnknownAuthors({ ...samplePullRequest(), checkRuns: [] }, ['sq-community-pr-decoration'])).toEqual(['sq-community-pr-decoration']);
-  });
 
   it('filters by refs and pending items', () => {
     const data = withChecks(checkRun([annotation({ ref: 'a3f9c2d1' }), annotation({ ref: 'b7c8d9e0', startLine: 10, endLine: 10 })]));
@@ -544,5 +526,35 @@ describe('findUnknownAuthors', () => {
     expect(byPending).toContain('`b7c8d9e0`');
     expect(byPending).not.toContain('`r1001`');
     expect(byPending).not.toContain('`a3f9c2d1`');
+  });
+});
+
+describe('findUnknownAuthors', () => {
+  const data = withChecks(checkRun([annotation()]));
+
+  it('knows commenters and reviewers', () => {
+    expect(findUnknownAuthors(samplePullRequest(), ['bob', 'Carol', 'dave', 'nobody'])).toEqual(['nobody']);
+  });
+
+  it('knows the app of a check run, with or without [bot] on either side', () => {
+    expect(findUnknownAuthors(data, ['sq-community-pr-decoration', '@SQ-Community-PR-Decoration[bot]', 'bob', 'nobody'])).toEqual(['nobody']);
+    expect(findUnknownAuthors(withChecks(checkRun([annotation()], { app: 'github-actions[bot]' })), ['github-actions'])).toEqual([]);
+  });
+
+  it('does not know an app without check runs', () => {
+    expect(findUnknownAuthors(samplePullRequest(), ['sq-community-pr-decoration'])).toEqual(['sq-community-pr-decoration']);
+    expect(findUnknownAuthors({ ...samplePullRequest(), checkRuns: [] }, ['sq-community-pr-decoration'])).toEqual(['sq-community-pr-decoration']);
+  });
+});
+
+describe('findUnknownRefs', () => {
+  const data = withChecks(checkRun([annotation({ ref: 'a3f9c2d1' })]));
+
+  it('knows review comments, conversation comments and check annotations, case-insensitively', () => {
+    expect(findUnknownRefs(data, ['r1001', 'R1002', 'c2001', 'A3F9C2D1', 'r9999', 'a00000000'])).toEqual(['r9999', 'a00000000']);
+  });
+
+  it('reports annotation refs as unknown when there are no check runs', () => {
+    expect(findUnknownRefs(samplePullRequest(), ['a3f9c2d1'])).toEqual(['a3f9c2d1']);
   });
 });

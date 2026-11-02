@@ -1854,8 +1854,9 @@ describe('cli', () => {
         expect(printed).toContain('`r1004`');
         expect(printed).not.toContain('`r1001`');
 
-        await step('report', 'comments', '--ref', `r1001,${COMPLEXITY_REF}`);
-        expect(printed).toContain(`- Filter: only refs \`r1001\`, \`${COMPLEXITY_REF}\``);
+        await step('report', 'comments', '--ref', `r1001,${COMPLEXITY_REF},r9999`);
+        expect(warned).toBe('Warning: no comment or check annotation r9999 in this pull request\n');
+        expect(printed).toContain(`- Filter: only refs \`r1001\`, \`${COMPLEXITY_REF}\`, \`r9999\``);
         expect(printed).toContain('`r1001`');
         expect(printed).toContain(`\`${COMPLEXITY_REF}\``);
         expect(printed).not.toContain('`r1004`');
