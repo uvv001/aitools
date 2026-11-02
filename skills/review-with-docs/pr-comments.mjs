@@ -2965,12 +2965,11 @@ async function syncMirrorFiles(options) {
 	const stem = dbFileName.slice(0, dbFileName.length - ext.length);
 	const sessionDb = join(sessionDir, dbFileName);
 	const workspaceDb = join(workspaceDir, dbFileName);
-	if (samePath(activeDb, sessionDb) || samePath(activeDb, workspaceDb)) {
-		await ensureLinkedFile(sessionDb, workspaceDb);
-		await ensureLinkedFile(workspaceDb, sessionDb);
-	} else {
-		await ensureLinkedFile(activeDb, sessionDb);
-		await ensureLinkedFile(sessionDb, workspaceDb);
+	if (samePath(activeDb, sessionDb)) await ensureLinkedFile(sessionDb, workspaceDb, false);
+	else if (samePath(activeDb, workspaceDb)) await ensureLinkedFile(workspaceDb, sessionDb, false);
+	else {
+		await ensureLinkedFile(activeDb, sessionDb, false);
+		await ensureLinkedFile(sessionDb, workspaceDb, false);
 	}
 	const sessionReport = join(sessionDir, `${stem}.md`);
 	const workspaceReport = join(workspaceDir, `${stem}.md`);
@@ -3895,7 +3894,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+03f5c42`;
+	return `pr-comments ${VERSION}+f34879d`;
 }
 //#endregion
 //#region src/cli.ts
