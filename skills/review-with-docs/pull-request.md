@@ -21,9 +21,10 @@ check annotations. Run it after every push and before every publish.
 `link pending` then lists each top-level comment and check annotation that no
 link names yet; empty output means every one is handled. Read the full pending
 threads and annotations with `report comments --pending` — or, past a handful
-of pending items, slice the refs across parallel agents that each read
-`report comments --ref <slice>` against the pinned revision, its base,
-`finding list`, and the Evidence rules of [SKILL.md](SKILL.md), write a
+of pending items, slice the refs across parallel agents (each given an
+explicit `model` across distinct model families per [fleet.md](fleet.md))
+that read `report comments --ref <slice>` against the pinned revision, its
+base, `finding list`, and the Evidence rules of [SKILL.md](SKILL.md), write a
 description file in the round's folder for each concern no finding covers yet
 (leaving the database and working tree untouched), and reply with one
 classification per ref (`own <F>`, `duplicate <F>`, `note '<reason>'`, or the

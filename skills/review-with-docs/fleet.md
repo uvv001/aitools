@@ -9,7 +9,11 @@ the files they write, and the index the orchestrator holds.
 Dispatch one agent per rule, each scoped to the paths that rule covers, plus
 two agents no instruction file covers — one for purpose fit, one for the
 ecosystem's best practices. A narrow, single-rule brief is what keeps an
-agent's findings checkable.
+agent's findings checkable. Pass an explicit `model` on each dispatch,
+selecting from the latest-generation models in the dispatch tool's schema
+and spreading agents across distinct model families: assign the strongest
+deep-reasoning models to `purpose-fit`, `best-practices`, and semantic or
+architectural rules, and fast, precise models to mechanical rules.
 
 Every brief carries the rule verbatim, the paths in its scope, the pinned
 revision, its base (or none) and the dirty-tree remark, the changeset's
@@ -33,7 +37,8 @@ state, title, and the report entry holding its description — and
 asks for what none of them covers, so an agent hands back only what is new; a
 concern a closed finding (❌ 📌 🔀) covers comes back only with better
 evidence, in a finding that names it.
-One more agent, `recheck`, re-checks every finding step 7 of
+One more agent, `recheck` — dispatched on a model family different from the
+one that authored the fixes — re-checks every finding step 7 of
 [SKILL.md](SKILL.md) puts in the round's scope and replies one line per
 finding — finding, outcome (`fixed`, `holds`, `partial`, `regressed` or
 `defective`), one phrase of evidence — plus a finding file for each new defect
