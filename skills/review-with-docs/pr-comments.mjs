@@ -1873,6 +1873,20 @@ function openRound(data, input) {
 	const item = reviewedItem(`Round ${(latestRound$1(data) ?? 0) + 1} — \`${revision}\`, ${base === null ? "base none — reviewed as it stands" : `base \`${base}\``}${note === void 0 ? "" : `; ${note}`}`);
 	return withIntro(data, { reviewed: appended(data.intro.reviewed, [item]) });
 }
+function updateRound(data, input) {
+	const note = oneLineText("text", input.text);
+	const target = input.round === void 0 ? latestRound$1(data) : openedRound(data, input.round);
+	if (target === void 0) throw new Error("no round is open yet; open a round first");
+	let matched = false;
+	const items = data.intro.reviewed.items.map((item) => {
+		if (item.round !== target) return item;
+		matched = true;
+		const [first = "", ...rest] = item.text.split("\n");
+		return reviewedItem([`${first}; ${note}`, ...rest].join("\n"));
+	});
+	if (!matched) throw new Error(`round ${target} was never opened; the latest round is ${latestRound$1(data)}`);
+	return withIntro(data, { reviewed: { items } });
+}
 function updateEntry(data, now, round, what, note) {
 	const lead = round === void 0 ? "" : `Round ${openedRound(data, round)}: `;
 	const entry = updateItem(`${formatStamp(now)} — ${lead}${what}${note === void 0 ? "" : ` — ${note}`}`);
@@ -3920,7 +3934,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+4862d26`;
+	return `pr-comments ${VERSION}+7505ec3`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4146,6 +4160,16 @@ async function openReviewRound({ env, values }, db) {
 		note
 	}));
 	env.print(`Round ${latestRound(data)} opened\n`);
+	return 0;
+}
+async function updateReviewRound({ env, args: [text = ""], values }, db) {
+	const note = need("the text", text);
+	const round = parsePositive("round", values.round);
+	const data = await edit(db, (current) => updateRound(current, {
+		text: note,
+		round
+	}));
+	env.print(`Round ${round ?? latestRound(data)} updated\n`);
 	return 0;
 }
 async function addReviewFinding({ env, values }, db) {
@@ -4550,6 +4574,23 @@ const DEFINITIONS = [
 		database: "change",
 		example: "pr-comments round open --base origin/main",
 		run: openReviewRound
+	},
+	{
+		words: "round update",
+		summary: "adds a note to a round",
+		description: ["Appends a note (such as \"no findings\" after an empty pass) to a round under Reviewed."],
+		args: [{
+			name: "<text>",
+			description: "the note, one line"
+		}],
+		options: [{
+			name: "round",
+			value: "<n>",
+			description: "the round to update (default: the latest round)"
+		}],
+		database: "change",
+		example: "pr-comments round update \"no findings\"",
+		run: updateReviewRound
 	},
 	{
 		words: "finding add",

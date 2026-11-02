@@ -81,8 +81,8 @@ States.
    stores no rules: the pairing travels in the briefs of a fleet
    ([fleet.md](fleet.md)). Then
    `round open --revision <pinned> (--base <rev> | --no-base) --note <text>`
-   records round 1. The note cannot be amended, so it carries the dirty-tree
-   remark, the scope with its exclusions, and the rule sources in one line —
+   records round 1, carrying the dirty-tree remark, the scope with its
+   exclusions, and the rule sources in one line —
    `dirty tree; scope: src/ without generated files; rules: AGENTS.md,
    src/AGENTS.md; agreed check: no network calls`.
    **Ready when:** every changed path is paired with every instruction file
@@ -101,11 +101,13 @@ States.
    each finding in the open round, with `--unverified` where its evidence
    stayed unsettled — a fleet's reply line marks it ❓; the description follows
    [Evidence](#evidence). With a fleet, findings on a shared anchor merge per
-   [fleet.md](fleet.md). An empty pass is a result: tell the user and hand
-   over the report's path.
+   [fleet.md](fleet.md). An empty pass is a result: record it with
+   `round update 'no findings'`, tell the user, and hand over the report's
+   path.
    **Ready when:** every finding carries severity, evidence, and a suggested
-   fix in its description, `finding list` shows each of them, and the user has
-   the report's path.
+   fix in its description and `finding list` shows each of them — or, on an
+   empty pass, the round records `no findings` — and the user has the report's
+   path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
@@ -149,16 +151,17 @@ States.
    ruling, and a concern that returns with better evidence is a new finding
    naming the old one, whose state stands until the user rules. Each outcome
    is an Updates entry carrying `--round <n>` — `finding update`, or
-   `set-state` where the state moves, `fixed` per [States](#states). Comparing
-   revisions serves one purpose: telling where the code the findings point at
-   changed.
+   `set-state` where the state moves, `fixed` per [States](#states); where the
+   round raises no new findings, `round update 'no new findings'` records that
+   in the round. Comparing revisions serves one purpose: telling where the
+   code the findings point at changed.
    The user may narrow a round to some findings or paths; the re-check covers
    that subset.
    **Ready when:** the round stands in the database with its revision, its
-   base, and a note carrying any narrowing; step 3's Ready-when holds for the
-   round's scope at the new revision; every finding the re-check covers
-   carries a `Round <n>:` entry; and on a pull request target, `link pending`
-   prints nothing.
+   base, and a note carrying any narrowing (and `no new findings` when none
+   were raised); step 3's Ready-when holds for the round's scope at the new
+   revision; every finding the re-check covers carries a `Round <n>:` entry;
+   and on a pull request target, `link pending` prints nothing.
 
 Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 
