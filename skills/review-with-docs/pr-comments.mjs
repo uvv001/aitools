@@ -3139,7 +3139,6 @@ async function changeReviewState(arg, change, options = {}) {
 	let workspaceDir;
 	let rendered;
 	let reportTarget = paths.report;
-	let committed = false;
 	try {
 		const changed = await inTransactionAsync(db, async () => {
 			if (options.snapshot !== void 0) savePullRequest(db, options.snapshot);
@@ -3166,22 +3165,28 @@ async function changeReviewState(arg, change, options = {}) {
 			}
 			return result;
 		}, { immediate: true });
-		committed = true;
+		if (rendered !== void 0) {
+			await mkdir(dirname(reportTarget), { recursive: true });
+			while (true) {
+				await writeFile(reportTarget, rendered, "utf8");
+				if (sessionDir !== void 0) await syncMirrorFiles({
+					activeDb: paths.db,
+					sessionDir,
+					workspaceDir,
+					preferredReport: reportTarget
+				});
+				const latest = renderReport(loadReview(db));
+				if (latest === rendered) break;
+				rendered = latest;
+			}
+		} else if (sessionDir !== void 0) await syncMirrorFiles({
+			activeDb: paths.db,
+			sessionDir,
+			workspaceDir
+		});
 		return changed;
 	} finally {
 		db.close();
-		if (committed) {
-			if (rendered !== void 0) {
-				await mkdir(dirname(reportTarget), { recursive: true });
-				await writeFile(reportTarget, rendered, "utf8");
-			}
-			if (sessionDir !== void 0) await syncMirrorFiles({
-				activeDb: paths.db,
-				sessionDir,
-				workspaceDir,
-				preferredReport: rendered !== void 0 ? reportTarget : void 0
-			});
-		}
 	}
 }
 async function mutateReviewFile(arg, mutate) {
@@ -3934,7 +3939,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+7960321`;
+	return `pr-comments ${VERSION}+83ba1b2`;
 }
 //#endregion
 //#region src/cli.ts
