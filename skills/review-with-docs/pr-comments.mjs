@@ -2015,9 +2015,9 @@ async function collect(folder, found) {
 		} else if (entry.isFile() && entry.name.toLowerCase().endsWith(SUFFIX) && isReviewDatabase(path)) found.push(path);
 	}
 }
-async function findReviews(cwd) {
+async function collectUnique(folder) {
 	const found = [];
-	await collect(searchRoot(cwd), found);
+	await collect(folder, found);
 	found.sort();
 	if (found.length <= 1) return found;
 	const ordered = [...found].sort((a, b) => {
@@ -2038,14 +2038,16 @@ async function findReviews(cwd) {
 	}
 	return found.filter((path) => kept.has(path));
 }
+async function findReviews(cwd) {
+	return collectUnique(searchRoot(cwd));
+}
 async function discoverReview(cwd, sessionDir) {
 	const root = searchRoot(cwd);
 	let found = await findReviews(cwd);
 	let base = root;
 	if (found.length === 0 && sessionDir !== void 0) {
 		base = resolve(cwd, sessionDir);
-		await collect(base, found);
-		found = found.sort();
+		found = await collectUnique(base);
 	}
 	const [first, ...others] = found;
 	if (first === void 0) throw new Error(`no review database found under ${root}; start one with "pr-comments init <name>" or name it with --db <file.sqlite>`);
@@ -3893,7 +3895,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+24ab5f1`;
+	return `pr-comments ${VERSION}+4bcf371`;
 }
 //#endregion
 //#region src/cli.ts
