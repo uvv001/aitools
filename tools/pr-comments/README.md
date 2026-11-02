@@ -253,6 +253,15 @@ pr-comments round open --base origin/main --note "scope: src/tenants only"
 - Give `--base <rev>` or `--no-base` (the code is reviewed as it stands).
 - `--note <text>` is where the scope or other context of the review is written. It goes onto the Reviewed line of the report, after a `;`.
 
+**`round update`**: adds a note (such as `no findings`) to a round under **Reviewed**.
+
+```
+pr-comments round update <text> [--round <n>] [--db <file.sqlite>]
+pr-comments round update "no findings"
+```
+
+- `--round <n>` updates that round instead of the latest one.
+
 ### Findings
 
 **`finding add`**: adds a finding. A round must be open. It prints `Added F7`, or with `--json` the object `{ "id": "F7" }`.

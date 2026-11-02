@@ -1226,6 +1226,21 @@ describe('cli', () => {
       expect((await loaded()).data.intro.reviewed.items).toHaveLength(1);
     });
 
+    it('updates the latest or a named round, and refuses invalid rounds or empty text', async () => {
+      await step('round', 'open', '--no-base', '--db', review);
+      expect(await step('round', 'update', 'no new findings', '--db', review)).toBe(0);
+      expect(printed).toBe('Round 2 updated\n');
+      expect((await loaded()).data.intro.reviewed.items[1]?.text).toContain('; no new findings');
+
+      expect(await step('round', 'update', '11 fixed', '--round', '1', '--db', review)).toBe(0);
+      expect(printed).toBe('Round 1 updated\n');
+      expect((await loaded()).data.intro.reviewed.items[0]?.text).toContain('; 11 fixed');
+
+      await fails(['round', 'update', ' ', '--db', review], 'the text must not be empty');
+      await fails(['round', 'update', 'note', '--round', '9', '--db', review], 'round 9 was never opened; the latest round is 2');
+      await fails(['round', 'update', 'note', '--round', '0', '--db', review], '--round must be a positive whole number');
+    });
+
     describe('with a real git repository', () => {
       let repo: string;
       let first: string;

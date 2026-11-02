@@ -595,6 +595,7 @@ describe('a round that was never opened', () => {
     ['setTitle', (data, round) => setTitle(data, 'F1', { title: 'Better', round }, at(5))],
     ['setDescription', (data, round) => setDescription(data, 'F1', { description: 'Revised.', round }, at(5))],
     ['addUpdate', (data, round) => addUpdate(data, 'F1', { text: 'a question', round }, at(5))],
+    ['updateRound', (data, round) => updateRound(data, { text: 'no findings', round })],
   ];
 
   it.each(changes)('%s refuses a round after the latest', (_name, run) => {
@@ -609,10 +610,17 @@ describe('a round that was never opened', () => {
 
   it.each(changes)('%s accepts the latest round and the ones before it', (_name, run) => {
     const data = inRound(3);
-    for (const round of [1, 2, 3]) expect(first(pure(data, (input) => run(input, round))).updates.at(-1)?.round).toBe(round);
+    for (const round of [1, 2, 3]) {
+      const updated = pure(data, (input) => run(input, round));
+      if (_name === 'updateRound') {
+        expect(updated.intro.reviewed.items.find((item) => item.round === round)?.text).toContain('; no findings');
+      } else {
+        expect(first(updated).updates.at(-1)?.round).toBe(round);
+      }
+    }
   });
 
-  it.each(changes)('%s accepts a round below the latest that the review skipped', (_name, run) => {
+  it.each(changes.filter(([name]) => name !== 'updateRound'))('%s accepts a round below the latest that the review skipped', (_name, run) => {
     const data = open();
     const items = [{ text: 'Round 5 — `e5`, base none — reviewed as it stands', round: 5, revision: 'e5', base: null }];
     const gap: ReviewData = { ...data, intro: { ...data.intro, reviewed: { ...data.intro.reviewed, items } }, findings: [raw('F1')] };
@@ -797,6 +805,7 @@ describe('text that would break the report', () => {
     ['setDescription description', (text) => setDescription(base, 'F1', { description: text }, at(5)), 'description'],
     ['setDescription note', (text) => setDescription(base, 'F1', { description: 'New.', note: text }, at(5)), 'note'],
     ['addUpdate text', (text) => addUpdate(base, 'F1', { text }, at(5)), 'update text'],
+    ['updateRound text', (text) => updateRound(open(), { text }), 'text'],
   ];
 
   it.each(sweeps)('%s is refused, or written so that the report reads back as the data', (_name, run) => {
@@ -876,7 +885,7 @@ describe('random walks over every operation', () => {
   const REVISIONS = ['abc1234', 'v1.2-rc.1', 'main', 'HEAD~1', 'a b'];
   const STATE_NAMES = ['approved', 'fixed', 'discarded', 'deferred', 'improvement', 'unverified', 'awaiting triage', '✅'];
   const SEVERITIES = ['high', 'medium', 'low'] as SeverityName[];
-  const OPERATIONS = 9;
+  const OPERATIONS = 10;
 
   function step(data: ReviewData, random: Random, minute: number): { operation: number; run: (input: ReviewData) => ReviewData } {
     const now = at(minute);
@@ -896,6 +905,7 @@ describe('random walks over every operation', () => {
       (input) => addUpdate(input, id, { text: text(random), round }, now),
       (input) => addUpdate(input, id, { text: text(random) }, now),
       (input) => addFinding(input, { severity: 'low', title: 'Title', description: text(random) }, now).data,
+      (input) => updateRound(input, { text: text(random, false), round }),
     ];
     return { operation, run: runs[operation] as (input: ReviewData) => ReviewData };
   }
