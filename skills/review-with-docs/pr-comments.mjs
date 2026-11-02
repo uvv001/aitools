@@ -2895,8 +2895,12 @@ async function sameInode(a, b) {
 		return false;
 	}
 }
-async function ensureLinkedFile(source, target, preferNewerOnCopy = false) {
+async function ensureLinkedFile(source, target, preferNewer = false) {
 	if (samePath(source, target) || !await exists(source) || await sameInode(source, target)) return;
+	if (preferNewer && await exists(target)) {
+		const [srcStat, dstStat] = await Promise.all([stat(source), stat(target)]);
+		if (dstStat.mtimeMs > srcStat.mtimeMs) return;
+	}
 	await mkdir(dirname(target), { recursive: true });
 	const temp = `${target}.${randomBytes(4).toString("hex")}.tmp`;
 	try {
@@ -2910,10 +2914,6 @@ async function ensureLinkedFile(source, target, preferNewerOnCopy = false) {
 				"ENOSYS"
 			].includes(error.code ?? "")) throw error;
 			if (await exists(target)) {
-				if (preferNewerOnCopy) {
-					const [srcStat, dstStat] = await Promise.all([stat(source), stat(target)]);
-					if (dstStat.mtimeMs > srcStat.mtimeMs) return;
-				}
 				const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
 				if (srcBytes.equals(dstBytes)) return;
 			}
@@ -2973,8 +2973,10 @@ async function syncMirrorFiles(options) {
 	const workspaceReport = join(workspaceDir, `${stem}.md`);
 	if (preferredReport !== void 0 && samePath(preferredReport, workspaceReport)) await ensureLinkedFile(workspaceReport, sessionReport);
 	else if (preferredReport !== void 0 && samePath(preferredReport, sessionReport)) await ensureLinkedFile(sessionReport, workspaceReport);
-	else if (await exists(sessionReport)) await ensureLinkedFile(sessionReport, workspaceReport, true);
-	else if (await exists(workspaceReport)) await ensureLinkedFile(workspaceReport, sessionReport, true);
+	else {
+		await ensureLinkedFile(sessionReport, workspaceReport, true);
+		await ensureLinkedFile(workspaceReport, sessionReport, true);
+	}
 	const sessionRounds = join(sessionDir, stem);
 	const workspaceRounds = join(workspaceDir, stem);
 	for (const rel of await walkFiles(workspaceRounds)) await ensureLinkedFile(join(workspaceRounds, rel), join(sessionRounds, rel), true);
@@ -3889,7 +3891,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+22eae5c`;
+	return `pr-comments ${VERSION}+dcdb450`;
 }
 //#endregion
 //#region src/cli.ts
