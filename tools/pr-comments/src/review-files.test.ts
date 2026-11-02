@@ -720,6 +720,16 @@ describe('initReviewFile', () => {
       expect((await loadReviewFile(db)).data.target).toBe('PR 42 restored');
       expect(existsSync(report)).toBe(true);
       expect(await readFile(wsRoundFile, 'utf8')).toBe('coverage\n');
+
+      // A newer detached round file in sessionDir is preserved and re-linked over the stale workspace peer on DB write.
+      const sessRoundFile = join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
+      const { utimes } = await import('node:fs/promises');
+      await rm(sessRoundFile);
+      await writeFile(sessRoundFile, 'newer session coverage\n', 'utf8');
+      const future = new Date(Date.now() + 10_000);
+      await utimes(sessRoundFile, future, future);
+      await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
+      expect(await readFile(wsRoundFile, 'utf8')).toBe('newer session coverage\n');
     });
   });
 

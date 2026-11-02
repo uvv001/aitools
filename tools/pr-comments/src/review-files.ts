@@ -240,8 +240,12 @@ async function sameInode(a: string, b: string): Promise<boolean> {
 
 // Ensures `target` is a hard link to `source` (or an identical copy when the file system or volume does not allow a
 // hard link). Replaces a detached link or stale copy atomically via a temporary sibling file.
-async function ensureLinkedFile(source: string, target: string, preferNewerOnCopy = false): Promise<void> {
+async function ensureLinkedFile(source: string, target: string, preferNewer = false): Promise<void> {
   if (samePath(source, target) || !(await exists(source)) || (await sameInode(source, target))) return;
+  if (preferNewer && (await exists(target))) {
+    const [srcStat, dstStat] = await Promise.all([stat(source), stat(target)]);
+    if (dstStat.mtimeMs > srcStat.mtimeMs) return;
+  }
   await mkdir(dirname(target), { recursive: true });
   const temp = `${target}.${randomBytes(4).toString('hex')}.tmp`;
   try {
@@ -250,10 +254,6 @@ async function ensureLinkedFile(source: string, target: string, preferNewerOnCop
     } catch (error) {
       if (!['EXDEV', 'EPERM', 'EACCES', 'ENOSYS'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
       if (await exists(target)) {
-        if (preferNewerOnCopy) {
-          const [srcStat, dstStat] = await Promise.all([stat(source), stat(target)]);
-          if (dstStat.mtimeMs > srcStat.mtimeMs) return;
-        }
         const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
         if (srcBytes.equals(dstBytes)) return;
       }
@@ -324,9 +324,8 @@ async function syncMirrorFiles(options: {
     await ensureLinkedFile(workspaceReport, sessionReport);
   } else if (preferredReport !== undefined && samePath(preferredReport, sessionReport)) {
     await ensureLinkedFile(sessionReport, workspaceReport);
-  } else if (await exists(sessionReport)) {
+  } else {
     await ensureLinkedFile(sessionReport, workspaceReport, true);
-  } else if (await exists(workspaceReport)) {
     await ensureLinkedFile(workspaceReport, sessionReport, true);
   }
 
