@@ -2840,13 +2840,16 @@ function assertRenders(data, report) {
 	const fail = (reason) => {
 		throw new Error(`internal error: the changed review ${reason}; nothing was written`);
 	};
+	let rendered;
 	let read;
 	try {
-		read = readReport(renderReport(data), report);
+		rendered = renderReport(data);
+		read = readReport(rendered, report);
 	} catch (error) {
 		return fail(`does not render to a valid report (${error instanceof Error ? error.message : String(error)})`);
 	}
 	if (!isDeepStrictEqual(read, data)) fail(`does not come back from its rendering (it differs at ${firstDifference(read, data, "review")})`);
+	return rendered;
 }
 const PULL_REQUEST = "pull_request";
 const SESSION_DIR = "session_dir";
@@ -2998,7 +3001,9 @@ async function initReviewFile(name, options = {}) {
 	const primaryDb = dualHomed ? join(sessionDir, basename(dbPath)) : dbPath;
 	if (await exists(dbPath)) throw existingDatabase(dbPath);
 	if (dualHomed && await exists(primaryDb)) throw existingDatabase(primaryDb);
-	assertRenders(data, paths.report);
+	const reportTarget = options.report !== void 0 || options.db === void 0 ? paths.report : reviewPaths(dbPath).report;
+	await refuseDatabase(reportTarget, dbPath);
+	const rendered = assertRenders(data, paths.report);
 	if (!await createDatabase(primaryDb, data, dualHomed ? {
 		pullRequest,
 		sessionDir,
@@ -3006,7 +3011,15 @@ async function initReviewFile(name, options = {}) {
 	} : { pullRequest })) throw existingDatabase(primaryDb);
 	const repoRoot = findRepoRoot(workspaceDir);
 	if (repoRoot !== void 0 && samePath(workspaceDir, join(repoRoot, ".ai"))) await ensureAiGitExcluded(repoRoot);
-	if (dualHomed) await ensureLinkedFile(primaryDb, dbPath);
+	await mkdir(dirname(reportTarget), { recursive: true });
+	await writeFile(reportTarget, rendered, "utf8");
+	if (dualHomed) await syncMirrorFiles({
+		activeDb: primaryDb,
+		sessionDir,
+		workspaceDir,
+		cwd,
+		preferredReport: reportTarget
+	});
 	return {
 		db: dbPath,
 		report: paths.report
@@ -3110,6 +3123,8 @@ async function changeReviewState(arg, change, options = {}) {
 	const db = openReviewDb(paths.db, "existing");
 	let sessionDir;
 	let workspaceDir;
+	let rendered;
+	let reportTarget = paths.report;
 	let committed = false;
 	try {
 		const changed = await inTransactionAsync(db, async () => {
@@ -3119,7 +3134,7 @@ async function changeReviewState(arg, change, options = {}) {
 			const { state } = result;
 			if (state !== before) {
 				if (state.data !== before.data) {
-					assertRenders(state.data, paths.report);
+					rendered = assertRenders(state.data, paths.report);
 					saveReview(db, state.data);
 				}
 				if (!isDeepStrictEqual(state.links, before.links)) saveLinks(db, state.links);
@@ -3131,17 +3146,28 @@ async function changeReviewState(arg, change, options = {}) {
 			}
 			sessionDir = getMeta(db, SESSION_DIR);
 			workspaceDir = getMeta(db, WORKSPACE_DIR);
+			if (rendered !== void 0) {
+				reportTarget = sessionDir !== void 0 && workspaceDir !== void 0 && samePath(dirname(resolve(paths.db)), sessionDir) ? join(workspaceDir, basename(paths.report)) : paths.report;
+				await refuseDatabase(reportTarget, paths.db);
+			}
 			return result;
 		}, { immediate: true });
 		committed = true;
 		return changed;
 	} finally {
 		db.close();
-		if (committed && sessionDir !== void 0) await syncMirrorFiles({
-			activeDb: paths.db,
-			sessionDir,
-			workspaceDir
-		});
+		if (committed) {
+			if (rendered !== void 0) {
+				await mkdir(dirname(reportTarget), { recursive: true });
+				await writeFile(reportTarget, rendered, "utf8");
+			}
+			if (sessionDir !== void 0) await syncMirrorFiles({
+				activeDb: paths.db,
+				sessionDir,
+				workspaceDir,
+				preferredReport: rendered !== void 0 ? reportTarget : void 0
+			});
+		}
 	}
 }
 async function mutateReviewFile(arg, mutate) {
@@ -3894,7 +3920,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+f34879d`;
+	return `pr-comments ${VERSION}+4862d26`;
 }
 //#endregion
 //#region src/cli.ts

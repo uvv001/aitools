@@ -32,8 +32,8 @@ the expected outcome.
   descriptions as UTF-8 files and text arguments in single quotes: PowerShell
   rewrites backticks and `$` inside double quotes, and non-ASCII text piped to
   `--description-file -` can arrive as `?`.
-- `report render` overwrites the report each time: change the review with
-  commands, since an edit made in the report is lost.
+- Each command that changes the review updates the report: change the review
+  with commands, since an edit made in the report is lost.
 - The orchestrator alone runs commands that change the review.
 - Run every command in the reviewed repository: revisions resolve with git in
   the working directory.
@@ -101,11 +101,11 @@ States.
    each finding in the open round, with `--unverified` where its evidence
    stayed unsettled — a fleet's reply line marks it ❓; the description follows
    [Evidence](#evidence). With a fleet, findings on a shared anchor merge per
-   [fleet.md](fleet.md). An empty pass is a result: render the report and tell
-   the user.
+   [fleet.md](fleet.md). An empty pass is a result: tell the user and hand
+   over the report's path.
    **Ready when:** every finding carries severity, evidence, and a suggested
-   fix in its description, `finding list` shows each of them, the review is
-   [checkpointed](#checkpoint), and the user has the report's path.
+   fix in its description, `finding list` shows each of them, and the user has
+   the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
@@ -120,8 +120,8 @@ States.
    user are transcribed in substance — and is filed in the round just triaged.
    The user may rule on part of the findings; the rest keep their state.
    **Ready when:** every finding the user ruled on carries its state and an
-   Updates entry saying why, every finding raised during the triage is
-   recorded, and the review is checkpointed.
+   Updates entry saying why, and every finding raised during the triage is
+   recorded.
 6. **Publish** — a pull request target, on the user's request: approved
    findings go to the PR as comments, and what others wrote is linked to the
    review. The triage batch the user just ruled on may be partial, and its
@@ -129,8 +129,8 @@ States.
    [pull-request.md](pull-request.md).
    **Ready when:** `finding list --state approved --unposted` lists only
    findings the user chose to hold back or whose refused post is the user's
-   call; `link pending` prints nothing; the user knows the pending review
-   waits for their submit; and the review is checkpointed.
+   call, `link pending` prints nothing, and the user knows the pending review
+   waits for their submit.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR;
    where in doubt, it is the user's call. A pull request target is synced
@@ -157,8 +157,8 @@ States.
    **Ready when:** the round stands in the database with its revision, its
    base, and a note carrying any narrowing; step 3's Ready-when holds for the
    round's scope at the new revision; every finding the re-check covers
-   carries a `Round <n>:` entry; on a pull request target, `link pending`
-   prints nothing; and the review is checkpointed.
+   carries a `Round <n>:` entry; and on a pull request target, `link pending`
+   prints nothing.
 
 Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 
@@ -188,7 +188,7 @@ it the way the finding was verified — the same test, trace or measurement now
 comes out clean: narrow, the finding named, and the next round's re-check at
 the pushed head confirms it. Both end in
 `set-state <F> fixed --revision <rev> --note <how verified>`, with
-`--round <n>` for the first only, and the review is checkpointed.
+`--round <n>` for the first only.
 
 ## Validation
 
@@ -242,7 +242,3 @@ user's call: it opens as a ❓ unverified finding that states the mechanism,
 what was tried to prove it and to refute it and why each failed, and what
 would settle it. Its severity is its impact if it holds. An unproven concern
 dropped silently is a defect of the review.
-
-## Checkpoint
-
-A checkpoint is `report render`.
