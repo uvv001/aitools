@@ -3895,7 +3895,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+70e7a88`;
+	return `pr-comments ${VERSION}+03f5c42`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4777,7 +4777,7 @@ const DEFINITIONS = [
 	{
 		words: "report render",
 		summary: "writes the review report",
-		description: ["Writes the markdown report of the review, made from the database, and says whether the file was created, updated or", "left unchanged. It writes the report only, never the database, and never over a SQLite file."],
+		description: ["Writes the markdown report of the review, made from the database, and says whether the file was created, updated or", "left unchanged. It writes the report (updating the database only when --session-dir changes the session directory), and never over a SQLite file."],
 		args: [],
 		options: [{
 			name: "out",
