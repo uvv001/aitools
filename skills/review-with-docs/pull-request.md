@@ -19,8 +19,16 @@ the user to create it.
 `pr sync` downloads the PR into the database — comments, reviews, threads,
 check annotations. Run it after every push and before every publish.
 `link pending` then lists each top-level comment and check annotation that no
-link names yet; empty output means every one is handled. Classify each line and
-record it with a link:
+link names yet; empty output means every one is handled. Read the full pending
+threads and annotations with `report comments --pending` — or, past a handful
+of pending items, slice the refs across parallel agents that each read
+`report comments --ref <slice>` against the pinned revision, its base,
+`finding list`, and the Evidence rules of [SKILL.md](SKILL.md), write a
+description file in the round's folder for each concern no finding covers yet
+(leaving the database and working tree untouched), and reply with one
+classification per ref (`own <F>`, `duplicate <F>`, `note '<reason>'`, or the
+new finding's file, severity, and title). Record each ref from the
+orchestrator:
 
 | The comment or annotation | Command |
 |---|---|
@@ -36,13 +44,6 @@ concern on the changeset — even one the agent refutes or that collides with a
 rule — goes to a finding (with the counter-evidence recorded there) for the
 user to triage. A doubtful classification is the user's call
 ([SKILL.md](SKILL.md)); `link remove <ref>` undoes a link.
-
-`report comments [--pending] [--ref <ref>]... [--author <login>]...` prints
-the PR as markdown for reading — description, conversation, threads with
-code, annotations — or writes it to `--out <file>`. Past a handful of pending
-items, slice the refs across parallel agents (`report comments --ref <slice>`)
-to evaluate concerns against the code and existing findings, then record the
-resulting findings and links from the orchestrator.
 
 ## Publish
 
