@@ -173,8 +173,8 @@ pr-comments link reply r544900
 
 ```
 pr-comments report render
-pr-comments report comments --author bob --out docs/pr-42_comments.md
-Wrote docs/pr-42_comments.md
+pr-comments report comments --author bob --out .ai/pr-42_comments.md
+Wrote .ai/pr-42_comments.md
 ```
 
 `report render` writes the review report next to the database, and prints `created`, `updated` or `unchanged` and the path. `report comments` writes the pull request as markdown (description, reviews, threads, check annotations), to the screen or to a file.
@@ -190,8 +190,6 @@ F2: ✅ → 🔧
 ```
 
 `fixed` needs the revision that fixes the finding. Repeat from step 3 for new findings.
-
-**12. Commit the database and the report** together (see [Git](#git)).
 
 ### What the tool never does
 
@@ -483,7 +481,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 
 ## Git
 
-The database is the source of truth. Commit it next to the report, and run `report render` first so the report matches.
+By default, reviews live in `.ai/` (excluded via `.git/info/exclude`) and `--session-dir` hard-links them into the session folder, so they stay out of Git commits. When `--report` places a review in a tracked folder instead, commit the database next to the report and run `report render` first so the report matches.
 
 The database is a binary file, so `git diff` cannot show what changed in it. `report dump` turns it into text. Tell git to use it:
 
@@ -500,7 +498,7 @@ git config diff.review.textconv "pr-comments report dump --db"
 `git diff`, `git log -p` and `git show` then show the dump of the old and the new database. Git adds the path of a temporary copy as the last argument, so the command that runs is `pr-comments report dump --db <copy>`.
 
 - One writer at a time. A binary file cannot be merged. After a conflict, take one side (`git checkout --theirs <file>` or `--ours`) and redo the other changes with the commands.
-- The repository that holds the databases must not git-ignore `*.sqlite`.
+- The repository that holds tracked databases must not git-ignore `*.sqlite`.
 - The database is one file. A `-journal` file exists only while a command writes.
 
 ## Development
@@ -508,7 +506,7 @@ git config diff.review.textconv "pr-comments report dump --db"
 ```
 pnpm test        # vitest, offline
 pnpm typecheck   # tsc --noEmit
-pnpm build       # dist/pr-comments.mjs
+pnpm build       # ../../skills/review-with-docs/pr-comments.mjs
 ```
 
 The schema, the ids, the GitHub behaviours learnt from live tests, the tokens, the report format, the build and the tests are described in [docs/technical.md](docs/technical.md).
