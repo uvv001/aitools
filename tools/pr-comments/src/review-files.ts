@@ -240,7 +240,7 @@ async function sameInode(a: string, b: string): Promise<boolean> {
 
 // Ensures `target` is a hard link to `source` (or an identical copy when the file system or volume does not allow a
 // hard link). Replaces a detached link or stale copy atomically via a temporary sibling file.
-async function ensureLinkedFile(source: string, target: string, preferNewer = false): Promise<void> {
+async function ensureLinkedFile(source: string, target: string, preferNewer = true): Promise<void> {
   if (samePath(source, target) || !(await exists(source)) || (await sameInode(source, target))) return;
   if (preferNewer && (await exists(target))) {
     const [srcStat, dstStat] = await Promise.all([stat(source), stat(target)]);
@@ -311,9 +311,10 @@ async function syncMirrorFiles(options: {
   const sessionDb = join(sessionDir, dbFileName);
   const workspaceDb = join(workspaceDir, dbFileName);
 
-  if (samePath(activeDb, sessionDb)) await ensureLinkedFile(sessionDb, workspaceDb);
-  else if (samePath(activeDb, workspaceDb)) await ensureLinkedFile(workspaceDb, sessionDb);
-  else {
+  if (samePath(activeDb, sessionDb) || samePath(activeDb, workspaceDb)) {
+    await ensureLinkedFile(sessionDb, workspaceDb);
+    await ensureLinkedFile(workspaceDb, sessionDb);
+  } else {
     await ensureLinkedFile(activeDb, sessionDb);
     await ensureLinkedFile(sessionDb, workspaceDb);
   }
@@ -321,21 +322,21 @@ async function syncMirrorFiles(options: {
   const sessionReport = join(sessionDir, `${stem}.md`);
   const workspaceReport = join(workspaceDir, `${stem}.md`);
   if (preferredReport !== undefined && samePath(preferredReport, workspaceReport)) {
-    await ensureLinkedFile(workspaceReport, sessionReport);
+    await ensureLinkedFile(workspaceReport, sessionReport, false);
   } else if (preferredReport !== undefined && samePath(preferredReport, sessionReport)) {
-    await ensureLinkedFile(sessionReport, workspaceReport);
+    await ensureLinkedFile(sessionReport, workspaceReport, false);
   } else {
-    await ensureLinkedFile(sessionReport, workspaceReport, true);
-    await ensureLinkedFile(workspaceReport, sessionReport, true);
+    await ensureLinkedFile(sessionReport, workspaceReport);
+    await ensureLinkedFile(workspaceReport, sessionReport);
   }
 
   const sessionRounds = join(sessionDir, stem);
   const workspaceRounds = join(workspaceDir, stem);
   for (const rel of await walkFiles(workspaceRounds)) {
-    await ensureLinkedFile(join(workspaceRounds, rel), join(sessionRounds, rel), true);
+    await ensureLinkedFile(join(workspaceRounds, rel), join(sessionRounds, rel));
   }
   for (const rel of await walkFiles(sessionRounds)) {
-    await ensureLinkedFile(join(sessionRounds, rel), join(workspaceRounds, rel), true);
+    await ensureLinkedFile(join(sessionRounds, rel), join(workspaceRounds, rel));
   }
 }
 
