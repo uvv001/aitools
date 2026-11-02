@@ -3045,8 +3045,7 @@ async function loadSnapshot(arg) {
 }
 async function renderReportFile(arg, options = {}) {
 	const paths = reviewPaths(arg);
-	const target = options.out ?? paths.report;
-	await refuseDatabase(target, paths.db);
+	await refuseDatabase(options.out ?? paths.report, paths.db);
 	const db = openReviewDb(paths.db, "readonly");
 	let text;
 	let metaSessionDir;
@@ -3078,6 +3077,8 @@ async function renderReportFile(arg, options = {}) {
 			}
 		}
 	}
+	const target = options.out ?? (metaSessionDir !== void 0 && metaWorkspaceDir !== void 0 && samePath(dirname(resolve(cwd, paths.db)), metaSessionDir) ? join(metaWorkspaceDir, basename(paths.report)) : paths.report);
+	if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
 	const current = await readExisting(target);
 	const action = current === text ? "unchanged" : current === void 0 ? "created" : "updated";
 	if (action !== "unchanged") {
@@ -3892,7 +3893,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+d0e6215`;
+	return `pr-comments ${VERSION}+24ab5f1`;
 }
 //#endregion
 //#region src/cli.ts
