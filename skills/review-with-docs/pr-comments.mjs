@@ -2895,7 +2895,7 @@ async function sameInode(a, b) {
 		return false;
 	}
 }
-async function ensureLinkedFile(source, target, preferNewer = false) {
+async function ensureLinkedFile(source, target, preferNewer = true) {
 	if (samePath(source, target) || !await exists(source) || await sameInode(source, target)) return;
 	if (preferNewer && await exists(target)) {
 		const [srcStat, dstStat] = await Promise.all([stat(source), stat(target)]);
@@ -2963,24 +2963,25 @@ async function syncMirrorFiles(options) {
 	const stem = dbFileName.slice(0, dbFileName.length - ext.length);
 	const sessionDb = join(sessionDir, dbFileName);
 	const workspaceDb = join(workspaceDir, dbFileName);
-	if (samePath(activeDb, sessionDb)) await ensureLinkedFile(sessionDb, workspaceDb);
-	else if (samePath(activeDb, workspaceDb)) await ensureLinkedFile(workspaceDb, sessionDb);
-	else {
+	if (samePath(activeDb, sessionDb) || samePath(activeDb, workspaceDb)) {
+		await ensureLinkedFile(sessionDb, workspaceDb);
+		await ensureLinkedFile(workspaceDb, sessionDb);
+	} else {
 		await ensureLinkedFile(activeDb, sessionDb);
 		await ensureLinkedFile(sessionDb, workspaceDb);
 	}
 	const sessionReport = join(sessionDir, `${stem}.md`);
 	const workspaceReport = join(workspaceDir, `${stem}.md`);
-	if (preferredReport !== void 0 && samePath(preferredReport, workspaceReport)) await ensureLinkedFile(workspaceReport, sessionReport);
-	else if (preferredReport !== void 0 && samePath(preferredReport, sessionReport)) await ensureLinkedFile(sessionReport, workspaceReport);
+	if (preferredReport !== void 0 && samePath(preferredReport, workspaceReport)) await ensureLinkedFile(workspaceReport, sessionReport, false);
+	else if (preferredReport !== void 0 && samePath(preferredReport, sessionReport)) await ensureLinkedFile(sessionReport, workspaceReport, false);
 	else {
-		await ensureLinkedFile(sessionReport, workspaceReport, true);
-		await ensureLinkedFile(workspaceReport, sessionReport, true);
+		await ensureLinkedFile(sessionReport, workspaceReport);
+		await ensureLinkedFile(workspaceReport, sessionReport);
 	}
 	const sessionRounds = join(sessionDir, stem);
 	const workspaceRounds = join(workspaceDir, stem);
-	for (const rel of await walkFiles(workspaceRounds)) await ensureLinkedFile(join(workspaceRounds, rel), join(sessionRounds, rel), true);
-	for (const rel of await walkFiles(sessionRounds)) await ensureLinkedFile(join(sessionRounds, rel), join(workspaceRounds, rel), true);
+	for (const rel of await walkFiles(workspaceRounds)) await ensureLinkedFile(join(workspaceRounds, rel), join(sessionRounds, rel));
+	for (const rel of await walkFiles(sessionRounds)) await ensureLinkedFile(join(sessionRounds, rel), join(workspaceRounds, rel));
 }
 async function initReviewFile(name, options = {}) {
 	mustBeDatabase(options.db);
@@ -3891,7 +3892,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+dcdb450`;
+	return `pr-comments ${VERSION}+4df9ff0`;
 }
 //#endregion
 //#region src/cli.ts
