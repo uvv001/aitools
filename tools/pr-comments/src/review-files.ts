@@ -541,7 +541,6 @@ export async function changeReviewState<T>(
   let workspaceDir: string | undefined;
   let rendered: string | undefined;
   let reportTarget = paths.report;
-  let committed = false;
   try {
     const changed = await inTransactionAsync(
       db,
@@ -579,24 +578,32 @@ export async function changeReviewState<T>(
       },
       { immediate: true },
     );
-    committed = true;
+    if (rendered !== undefined) {
+      await mkdir(dirname(reportTarget), { recursive: true });
+      while (true) {
+        await writeFile(reportTarget, rendered, 'utf8');
+        if (sessionDir !== undefined) {
+          await syncMirrorFiles({
+            activeDb: paths.db,
+            sessionDir,
+            workspaceDir,
+            preferredReport: reportTarget,
+          });
+        }
+        const latest = renderReport(loadReview(db));
+        if (latest === rendered) break;
+        rendered = latest;
+      }
+    } else if (sessionDir !== undefined) {
+      await syncMirrorFiles({
+        activeDb: paths.db,
+        sessionDir,
+        workspaceDir,
+      });
+    }
     return changed;
   } finally {
     db.close();
-    if (committed) {
-      if (rendered !== undefined) {
-        await mkdir(dirname(reportTarget), { recursive: true });
-        await writeFile(reportTarget, rendered, 'utf8');
-      }
-      if (sessionDir !== undefined) {
-        await syncMirrorFiles({
-          activeDb: paths.db,
-          sessionDir,
-          workspaceDir,
-          preferredReport: rendered !== undefined ? reportTarget : undefined,
-        });
-      }
-    }
   }
 }
 

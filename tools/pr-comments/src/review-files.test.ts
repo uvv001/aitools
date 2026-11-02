@@ -44,7 +44,13 @@ vi.mock('./review-store.ts', async (importOriginal) => {
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...actual, link: vi.fn(actual.link), rename: vi.fn(actual.rename), stat: vi.fn(actual.stat) };
+  return {
+    ...actual,
+    link: vi.fn(actual.link),
+    rename: vi.fn(actual.rename),
+    stat: vi.fn(actual.stat),
+    writeFile: vi.fn(actual.writeFile),
+  };
 });
 
 let dir: string;
@@ -1002,6 +1008,39 @@ describe('mutateReviewFile', () => {
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
+  it('never leaves an older report on disk when an earlier writer finishes its report write after a newer writer commits', async () => {
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    let releaseFirstWrite!: () => void;
+    const firstWritePaused = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    let firstReportWriteSeen!: () => void;
+    const reachedFirstWrite = new Promise<void>((resolve) => {
+      firstReportWriteSeen = resolve;
+    });
+    let intercepted = false;
+    vi.mocked(writeFile).mockImplementation(async (target, data, options) => {
+      if (!intercepted && String(target) === report && String(data).startsWith('# Review — First committed change\n')) {
+        intercepted = true;
+        firstReportWriteSeen();
+        await firstWritePaused;
+      }
+      return actualFs.writeFile(target, data, options);
+    });
+    try {
+      const first = mutateReviewFile(db, retarget('First committed change'));
+      await reachedFirstWrite;
+      const second = mutateReviewFile(db, retarget('Second committed change'));
+      await second;
+      releaseFirstWrite();
+      await first;
+    } finally {
+      vi.mocked(writeFile).mockImplementation(actualFs.writeFile);
+    }
+    expect((await loadReviewFile(db)).data.target).toBe('Second committed change');
+    expect((await readFile(report, 'utf8')).startsWith('# Review — Second committed change\n')).toBe(true);
+  });
+
   it('keeps the meta values of the database', async () => {
     const raw = openReviewDb(db, 'existing');
     try {
@@ -1863,6 +1902,7 @@ describe('mutateReviewFile with several processes', () => {
     expect(new Set(ids).size).toBe(writers);
     const saved = (await loadReviewFile(db)).data.findings;
     expect(saved.map((finding) => finding.id).sort()).toEqual(ids);
+    expect(readReport(await readFile(join(dir, 'r.md'), 'utf8'), join(dir, 'r.md')).findings.map((finding) => finding.id).sort()).toEqual(ids);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }, 60_000);
 
@@ -1954,6 +1994,7 @@ describe('changeReviewState with several processes', () => {
     expect(loaded.data.findings.map((each) => each.id).sort()).toEqual(answers.map((answer) => answer.split(' ')[0]).sort());
     expect(loaded.links.map((link) => `${link.finding} ${link.ref}`).sort()).toEqual(answers.sort());
     expect(new Set(loaded.links.map((link) => link.ref)).size).toBe(writers);
+    expect(readReport(await readFile(join(dir, 'r.md'), 'utf8'), join(dir, 'r.md'))).toStrictEqual(loaded.data);
     expect(userVersion(db)).toBe(REVIEW_SCHEMA_VERSION);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }
