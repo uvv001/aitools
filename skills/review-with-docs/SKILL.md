@@ -67,11 +67,10 @@ States.
    existing comments, so they cannot frame it; the user asks for the sync, and
    even when requested up front, the comments enrich the report only after the
    pass ([pull-request.md](pull-request.md)).
-   **Ready when:** the database exists in `.ai/` (which git ignores) and in
-   the session's `files/` folder when the host provides one, the reviewed
-   revision and its base (or none) are pinned, on a pull request target
-   `pr show` names that pull request, and the user's target and base were
-   confirmed or unambiguous.
+   **Ready when:** the database exists in `.ai/` and in the session's `files/`
+   folder when the host provides one, the reviewed revision and its base (or
+   none) are pinned, on a pull request target `pr show` names that pull
+   request, and the user's target and base were confirmed or unambiguous.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
@@ -246,8 +245,4 @@ dropped silently is a defect of the review.
 
 ## Checkpoint
 
-A checkpoint is `report render`: the tool renders the report and keeps the
-database, the report, and the round folders hard-linked (or copied across
-volumes) between the session's `files/` folder and `.ai/` on every database
-change and render. Only the database and the report together are a complete
-state.
+A checkpoint is `report render`.

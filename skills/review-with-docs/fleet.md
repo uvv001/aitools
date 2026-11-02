@@ -51,8 +51,8 @@ The files persist beside the report, in the round's folder —
 slug of the rule — `purpose-fit` and `best-practices` for the two agents no
 rule covers, `recheck` for the re-check of a later round — e.g.
 `.ai/2026-09-16_pr157_review/round-1/agents-self-sufficiency.md`; create the
-folders as needed. They are checkpointed with the report and hold the text as
-raised; the database holds its current version.
+folders as needed. They hold the text as raised; the database holds its
+current version.
 
 ## Hold the index, not the findings
 
