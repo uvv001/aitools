@@ -3017,7 +3017,7 @@ async function initReviewFile(name, options = {}) {
 	if (dualHomed && await exists(primaryDb)) throw existingDatabase(primaryDb);
 	const reportTarget = options.report !== void 0 || options.db === void 0 ? paths.report : reviewPaths(dbPath).report;
 	await refuseDatabase(reportTarget, dbPath);
-	const rendered = assertRenders(data, paths.report);
+	const rendered = assertRenders(data, reportTarget);
 	if (!await createDatabase(primaryDb, data, dualHomed ? {
 		pullRequest,
 		sessionDir,
@@ -3036,7 +3036,7 @@ async function initReviewFile(name, options = {}) {
 	});
 	return {
 		db: dbPath,
-		report: paths.report
+		report: reportTarget
 	};
 }
 function loadState(db) {
@@ -3934,7 +3934,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+7505ec3`;
+	return `pr-comments ${VERSION}+fb07408`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4478,7 +4478,7 @@ const DEFINITIONS = [
 		summary: "creates the review database",
 		description: [
 			"Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.",
-			"It never replaces an existing database. The report (markdown) is made from the database by \"pr-comments report render\".",
+			"It never replaces an existing database. The report (markdown) is written next to the database and updated on every change.",
 			"The report is always next to the database with the same name, so --report and --db may both be given only if they agree."
 		],
 		args: [{
