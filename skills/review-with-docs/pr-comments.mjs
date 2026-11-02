@@ -2041,8 +2041,8 @@ async function collectUnique(folder) {
 	const kept = /* @__PURE__ */ new Set();
 	for (const path of ordered) {
 		try {
-			const info = await stat(path);
-			if (info.ino !== 0) {
+			const info = await stat(path, { bigint: true });
+			if (info.ino !== 0n) {
 				const key = `${info.dev}:${info.ino}`;
 				if (seenInodes.has(key)) continue;
 				seenInodes.add(key);
@@ -2908,8 +2908,8 @@ async function ensureAiGitExcluded(repoRoot) {
 }
 async function sameInode(a, b) {
 	try {
-		const [sa, sb] = await Promise.all([stat(a), stat(b)]);
-		return sa.dev === sb.dev && sa.ino === sb.ino && sa.ino !== 0;
+		const [sa, sb] = await Promise.all([stat(a, { bigint: true }), stat(b, { bigint: true })]);
+		return sa.dev === sb.dev && sa.ino === sb.ino && sa.ino !== 0n;
 	} catch {
 		return false;
 	}
@@ -3934,7 +3934,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+fb07408`;
+	return `pr-comments ${VERSION}+7960321`;
 }
 //#endregion
 //#region src/cli.ts
