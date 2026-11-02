@@ -3060,22 +3060,22 @@ async function renderReportFile(arg, options = {}) {
 	}
 	const cwd = options.cwd ?? process.cwd();
 	const resolvedSessionDir = options.sessionDir === void 0 ? void 0 : resolve(cwd, options.sessionDir);
-	if (resolvedSessionDir !== void 0 && resolvedSessionDir !== metaSessionDir) {
-		const rw = openReviewDb(paths.db, "existing");
-		try {
-			inTransaction(rw, () => {
-				setMeta(rw, SESSION_DIR, resolvedSessionDir);
-				if (metaWorkspaceDir === void 0) {
-					const activeDir = dirname(resolve(cwd, paths.db));
-					const repoRoot = findRepoRoot(cwd);
-					const ws = samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, ".ai") : activeDir;
-					setMeta(rw, WORKSPACE_DIR, ws);
-					metaWorkspaceDir = ws;
-				}
-			});
-			metaSessionDir = resolvedSessionDir;
-		} finally {
-			rw.close();
+	if (resolvedSessionDir !== void 0) {
+		const activeDir = dirname(resolve(cwd, paths.db));
+		const repoRoot = findRepoRoot(cwd);
+		const resolvedWorkspaceDir = samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, ".ai") : activeDir;
+		if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
+			const rw = openReviewDb(paths.db, "existing");
+			try {
+				inTransaction(rw, () => {
+					setMeta(rw, SESSION_DIR, resolvedSessionDir);
+					setMeta(rw, WORKSPACE_DIR, resolvedWorkspaceDir);
+				});
+				metaSessionDir = resolvedSessionDir;
+				metaWorkspaceDir = resolvedWorkspaceDir;
+			} finally {
+				rw.close();
+			}
 		}
 	}
 	const current = await readExisting(target);
@@ -3892,7 +3892,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+4df9ff0`;
+	return `pr-comments ${VERSION}+d0e6215`;
 }
 //#endregion
 //#region src/cli.ts
