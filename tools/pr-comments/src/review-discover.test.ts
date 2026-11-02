@@ -208,6 +208,8 @@ describe('findReviews', () => {
       const repo = repository();
       const session = folder(scratch(), 'session', 'files');
       const sessionDb = review(join(session, '2026-10-08_pr-1_review.sqlite'));
+      const { linkSync } = await import('node:fs');
+      linkSync(sessionDb, join(session, 'z_alias_review.sqlite'));
       await expect(discoverReview(repo, session)).resolves.toBe(sessionDb);
 
       // A hard link inside the repository to the same database counts once, preferring .ai/.
@@ -215,7 +217,6 @@ describe('findReviews', () => {
       mkdirSync(dirname(inAi), { recursive: true });
       const inSub = join(repo, 'session', '2026-10-08_pr-1_review.sqlite');
       mkdirSync(dirname(inSub), { recursive: true });
-      const { linkSync } = await import('node:fs');
       linkSync(sessionDb, inAi);
       linkSync(sessionDb, inSub);
       await expect(discoverReview(repo, join(repo, 'session'))).resolves.toBe(inAi);

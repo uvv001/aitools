@@ -52,15 +52,9 @@ async function collect(folder: string, found: string[]): Promise<void> {
   }
 }
 
-// Every review database below the search root: a file whose name ends in "review.sqlite" (the default names are
-// `<yyyy-mm-dd>_<slug>_review.sqlite`; the match is case-insensitive) and that really is a review database (a SQLite
-// file with the review tables, opened read-only; any other file is ignored, so "preview.sqlite" or a database of
-// something else never counts). The search root is the git repository that contains `cwd` (`findRepoRoot`), or `cwd` outside
-// a repository, and the search goes down `.ai/` and every folder except `.git`, `node_modules` and other hidden folders
-// (names that start with "."); symbolic links are not followed. The result is sorted by path and holds absolute paths.
-export async function findReviews(cwd: string): Promise<string[]> {
+async function collectUnique(folder: string): Promise<string[]> {
   const found: string[] = [];
-  await collect(searchRoot(cwd), found);
+  await collect(folder, found);
   found.sort();
   if (found.length <= 1) return found;
   // Two hard links to the same inode are one review database; prefer the `.ai/` workspace entry when both lie under the root.
@@ -87,6 +81,16 @@ export async function findReviews(cwd: string): Promise<string[]> {
   return found.filter((path) => kept.has(path));
 }
 
+// Every review database below the search root: a file whose name ends in "review.sqlite" (the default names are
+// `<yyyy-mm-dd>_<slug>_review.sqlite`; the match is case-insensitive) and that really is a review database (a SQLite
+// file with the review tables, opened read-only; any other file is ignored, so "preview.sqlite" or a database of
+// something else never counts). The search root is the git repository that contains `cwd` (`findRepoRoot`), or `cwd` outside
+// a repository, and the search goes down `.ai/` and every folder except `.git`, `node_modules` and other hidden folders
+// (names that start with "."); symbolic links are not followed. The result is sorted by path and holds absolute paths.
+export async function findReviews(cwd: string): Promise<string[]> {
+  return collectUnique(searchRoot(cwd));
+}
+
 // The one review database of the working tree (or of `sessionDir` when none is in the working tree). Exactly one is
 // required: none is an error (`no review database found under <root>; start one with "pr-comments init <name>" or name
 // it with --db <file.sqlite>`); several are an error that lists them all, as paths relative to the search root with "/"
@@ -98,8 +102,7 @@ export async function discoverReview(cwd: string, sessionDir?: string): Promise<
   let base = root;
   if (found.length === 0 && sessionDir !== undefined) {
     base = resolve(cwd, sessionDir);
-    await collect(base, found);
-    found = found.sort();
+    found = await collectUnique(base);
   }
   const [first, ...others] = found;
   if (first === undefined) {
