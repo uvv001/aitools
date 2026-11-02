@@ -792,6 +792,29 @@ describe('initReviewFile', () => {
         vi.mocked(stat).mockImplementation(actualFs.stat);
       }
       expect(await readFile(sessRoundFile, 'utf8')).toBe('fresh workspace coverage\n');
+
+      // When detached copies have equal timestamps and different contents, syncMirrorFiles preserves both instead of
+      // overwriting one by call order; when equal-timestamp copies have identical contents, it re-links them.
+      await rm(newWsRoundFile);
+      await rm(sessRoundFile);
+      await writeFile(newWsRoundFile, 'workspace tie content\n', 'utf8');
+      await writeFile(sessRoundFile, 'session tie content\n', 'utf8');
+      const tiedTime = new Date(Date.now() + 30_000);
+      await utimes(newWsRoundFile, tiedTime, tiedTime);
+      await utimes(sessRoundFile, tiedTime, tiedTime);
+      await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 tied mtime' }, result: null }));
+      expect(await readFile(newWsRoundFile, 'utf8')).toBe('workspace tie content\n');
+      expect(await readFile(sessRoundFile, 'utf8')).toBe('session tie content\n');
+
+      await writeFile(sessRoundFile, 'workspace tie content\n', 'utf8');
+      await utimes(newWsRoundFile, tiedTime, tiedTime);
+      await utimes(sessRoundFile, tiedTime, tiedTime);
+      await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 tied identical' }, result: null }));
+      const [wsStatAfter, sessStatAfter] = await Promise.all([
+        actualFs.stat(newWsRoundFile, { bigint: true }),
+        actualFs.stat(sessRoundFile, { bigint: true }),
+      ]);
+      expect(wsStatAfter.ino).toBe(sessStatAfter.ino);
     });
   });
 

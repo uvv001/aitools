@@ -246,8 +246,13 @@ async function sameInode(a: string, b: string): Promise<boolean> {
 async function ensureLinkedFile(source: string, target: string, preferNewer = true): Promise<void> {
   if (samePath(source, target) || !(await exists(source)) || (await sameInode(source, target))) return;
   if (preferNewer && (await exists(target))) {
-    const [srcStat, dstStat] = await Promise.all([stat(source), stat(target)]);
-    if (dstStat.mtimeMs > srcStat.mtimeMs) return;
+    const [srcStat, dstStat] = await Promise.all([stat(source, { bigint: true }), stat(target, { bigint: true })]);
+    if (dstStat.mtimeNs > srcStat.mtimeNs) return;
+    if (dstStat.mtimeNs === srcStat.mtimeNs) {
+      if (srcStat.size !== dstStat.size) return;
+      const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
+      if (!srcBytes.equals(dstBytes)) return;
+    }
   }
   await mkdir(dirname(target), { recursive: true });
   const temp = `${target}.${randomBytes(4).toString('hex')}.tmp`;
