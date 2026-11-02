@@ -2917,8 +2917,13 @@ async function sameInode(a, b) {
 async function ensureLinkedFile(source, target, preferNewer = true) {
 	if (samePath(source, target) || !await exists(source) || await sameInode(source, target)) return;
 	if (preferNewer && await exists(target)) {
-		const [srcStat, dstStat] = await Promise.all([stat(source), stat(target)]);
-		if (dstStat.mtimeMs > srcStat.mtimeMs) return;
+		const [srcStat, dstStat] = await Promise.all([stat(source, { bigint: true }), stat(target, { bigint: true })]);
+		if (dstStat.mtimeNs > srcStat.mtimeNs) return;
+		if (dstStat.mtimeNs === srcStat.mtimeNs) {
+			if (srcStat.size !== dstStat.size) return;
+			const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
+			if (!srcBytes.equals(dstBytes)) return;
+		}
 	}
 	await mkdir(dirname(target), { recursive: true });
 	const temp = `${target}.${randomBytes(4).toString("hex")}.tmp`;
@@ -3939,7 +3944,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+83ba1b2`;
+	return `pr-comments ${VERSION}+1ee2929`;
 }
 //#endregion
 //#region src/cli.ts
