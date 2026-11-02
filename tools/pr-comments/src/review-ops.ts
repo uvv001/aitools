@@ -174,6 +174,27 @@ export function openRound(data: ReviewData, input: RoundInput): ReviewData {
   return withIntro(data, { reviewed: appended(data.intro.reviewed, [item]) });
 }
 
+export interface UpdateRoundInput {
+  text: string;
+  round?: number;
+}
+
+// Appends `; <text>` to the first line of the Reviewed item of `round` (the latest round when omitted).
+export function updateRound(data: ReviewData, input: UpdateRoundInput): ReviewData {
+  const note = oneLineText('text', input.text);
+  const target = input.round === undefined ? latestRound(data) : openedRound(data, input.round);
+  if (target === undefined) throw new Error('no round is open yet; open a round first');
+  let matched = false;
+  const items = data.intro.reviewed.items.map((item) => {
+    if (item.round !== target) return item;
+    matched = true;
+    const [first = '', ...rest] = item.text.split('\n');
+    return reviewedItem([`${first}; ${note}`, ...rest].join('\n'));
+  });
+  if (!matched) throw new Error(`round ${target} was never opened; the latest round is ${latestRound(data)}`);
+  return withIntro(data, { reviewed: { items } });
+}
+
 // A state by name (`approved`, `awaiting triage`, `awaiting`, ...) or marker (`✅`), as `finding list --state` accepts.
 export type StateInput = string;
 

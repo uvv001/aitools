@@ -11,6 +11,7 @@ import {
   setSeverity,
   setState,
   setTitle,
+  updateRound,
 } from './review-ops.ts';
 import type { AddFindingInput, SeverityName } from './review-ops.ts';
 import { readReport } from './review-read.ts';
@@ -223,6 +224,25 @@ describe('openRound', () => {
       (input) => openRound(input, { revision: 'abc1234', base: null, note: 'see\n```ts\nx' }),
       'note has an unclosed code fence (opened on line 2)',
     );
+  });
+});
+
+describe('updateRound', () => {
+  it('appends a note to the latest round by default, or to a named earlier round', () => {
+    let data = open();
+    data = pure(data, (input) => openRound(input, { revision: 'bbb2222', base: null, note: 'scope: src/' }));
+    data = pure(data, (input) => updateRound(input, { text: 'no findings' }));
+    expect(data.intro.reviewed.items[1]?.text).toBe('Round 2 — `bbb2222`, base none — reviewed as it stands; scope: src/; no findings');
+
+    data = pure(data, (input) => updateRound(input, { text: '11 fixed', round: 1 }));
+    expect(data.intro.reviewed.items[0]?.text).toBe('Round 1 — `abc1234`, base `def5678`; 11 fixed');
+  });
+
+  it('refuses when no round is open, when the round does not exist, or when the text is blank or multi-line', () => {
+    refuses(fresh(), (input) => updateRound(input, { text: 'no findings' }), 'no round is open yet; open a round first');
+    refuses(open(), (input) => updateRound(input, { text: 'no findings', round: 2 }), 'round 2 was never opened; the latest round is 1');
+    refuses(open(), (input) => updateRound(input, { text: '  ' }), 'text is empty');
+    refuses(open(), (input) => updateRound(input, { text: 'a\nb' }), 'text must be one line, it contains a line break');
   });
 });
 

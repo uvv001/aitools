@@ -31,7 +31,7 @@ import {
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, linksOf, unlink } from './review-links.ts';
 import type { ReviewState } from './review-links.ts';
 import type { Finding, ReviewData } from './review-model.ts';
-import { addFinding, addUpdate, openRound, setDescription, setSeverity, setState, setTitle } from './review-ops.ts';
+import { addFinding, addUpdate, openRound, setDescription, setSeverity, setState, setTitle, updateRound } from './review-ops.ts';
 import type { SeverityName } from './review-ops.ts';
 import { pendingItems, pendingJson, pendingLines } from './review-pending.ts';
 import { postFinding } from './review-post.ts';
@@ -347,6 +347,14 @@ async function openReviewRound({ env, values }: Context, db: string): Promise<nu
   const base = values['no-base'] ? null : await env.resolveRevision(need('--base', values.base));
   const data = await edit(db, (current) => openRound(current, { revision, base, note }));
   env.print(`Round ${latestRound(data)} opened\n`);
+  return 0;
+}
+
+async function updateReviewRound({ env, args: [text = ''], values }: Context, db: string): Promise<number> {
+  const note = need('the text', text);
+  const round = parsePositive('round', values.round);
+  const data = await edit(db, (current) => updateRound(current, { text: note, round }));
+  env.print(`Round ${round ?? latestRound(data)} updated\n`);
   return 0;
 }
 
@@ -747,6 +755,18 @@ const DEFINITIONS: Command[] = [
     database: 'change',
     example: 'pr-comments round open --base origin/main',
     run: openReviewRound,
+  },
+  {
+    words: 'round update',
+    summary: 'adds a note to a round',
+    description: ['Appends a note (such as "no findings" after an empty pass) to a round under Reviewed.'],
+    args: [{ name: '<text>', description: 'the note, one line' }],
+    options: [
+      { name: 'round', value: '<n>', description: 'the round to update (default: the latest round)' },
+    ],
+    database: 'change',
+    example: 'pr-comments round update "no findings"',
+    run: updateReviewRound,
   },
   {
     words: 'finding add',
