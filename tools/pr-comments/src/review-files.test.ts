@@ -807,6 +807,19 @@ describe('initReviewFile', () => {
         expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);
         expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.md'))).toBe(true);
         expect(await readFile(join(newRepo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
+
+        // Continuing in a new session after .ai/ was cleaned (passing --db <earlier-session>/<stem>.sqlite and
+        // --session-dir <new-session>/files) restores .ai/ and links the new session folder.
+        await rm(join(newRepo, '.ai'), { recursive: true, force: true });
+        const newSessionDir = join(dir, 'session-2', 'files');
+        expect(await renderReportFile(sessionDb, { sessionDir: newSessionDir, cwd: newRepo })).toEqual({
+          report: join(newRepo, '.ai', '2026-10-09_pr-42_review.md'),
+          action: 'created',
+          databaseChanged: true,
+        });
+        expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);
+        expect(existsSync(join(newSessionDir, '2026-10-09_pr-42_review.sqlite'))).toBe(true);
+        expect(await readFile(join(newSessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
       });
 
       it('compares 64-bit NTFS ino values as bigints and preserves divergent equal-timestamp copies', async () => {

@@ -634,11 +634,15 @@ export async function renderReportFile(
     let databaseChanged = false;
     const cwd = options.cwd ?? process.cwd();
     const resolvedSessionDir = options.sessionDir === undefined ? undefined : resolve(cwd, options.sessionDir);
+    const activeDir = dirname(resolve(cwd, paths.db));
+    const previousSessionDir = metaSessionDir;
+    const fromSessionDir =
+      (resolvedSessionDir !== undefined && samePath(activeDir, resolvedSessionDir)) ||
+      (previousSessionDir !== undefined && samePath(activeDir, previousSessionDir));
     if (resolvedSessionDir !== undefined) {
-      const activeDir = dirname(resolve(cwd, paths.db));
       const repoRoot = findRepoRoot(cwd);
       const resolvedWorkspaceDir =
-        samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir;
+        fromSessionDir && repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir;
       if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
         const rw = openReviewDb(paths.db, 'existing');
         try {
@@ -653,12 +657,20 @@ export async function renderReportFile(
           rw.close();
         }
       }
+      if (previousSessionDir !== undefined && !samePath(previousSessionDir, resolvedSessionDir)) {
+        await syncMirrorFiles({
+          activeDb: paths.db,
+          sessionDir: previousSessionDir,
+          workspaceDir: resolvedSessionDir,
+          cwd,
+        });
+      }
     }
     const target =
       options.out ??
       (metaSessionDir !== undefined &&
       metaWorkspaceDir !== undefined &&
-      samePath(dirname(resolve(cwd, paths.db)), metaSessionDir)
+      (fromSessionDir || samePath(activeDir, metaSessionDir))
         ? join(metaWorkspaceDir, basename(paths.report))
         : paths.report);
     if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
