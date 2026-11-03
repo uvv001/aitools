@@ -556,16 +556,28 @@ export async function initReviewFile(
     dualHomed ? { pullRequest, sessionDir, workspaceDir } : { pullRequest },
   );
   if (!created) throw existingDatabase(primaryDb);
+  let text = rendered;
   await mkdir(dirname(reportTarget), { recursive: true });
-  await writeFile(reportTarget, rendered, 'utf8');
-  if (dualHomed) {
-    await syncMirrorFiles({
-      activeDb: primaryDb,
-      sessionDir,
-      workspaceDir,
-      cwd,
-      preferredReport: reportTarget,
-    });
+  while (true) {
+    await writeFile(reportTarget, text, 'utf8');
+    if (dualHomed) {
+      await syncMirrorFiles({
+        activeDb: primaryDb,
+        sessionDir,
+        workspaceDir,
+        cwd,
+        preferredReport: reportTarget,
+      });
+    }
+    const handle = new DatabaseSync(existsSync(dbPath) ? dbPath : primaryDb, { readOnly: true, timeout: 10_000 });
+    let latest: string;
+    try {
+      latest = renderReport(loadReview(handle));
+    } finally {
+      handle.close();
+    }
+    if (latest === text) break;
+    text = latest;
   }
   return { db: dbPath, report: reportTarget };
 }

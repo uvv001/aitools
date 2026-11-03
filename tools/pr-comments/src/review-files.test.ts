@@ -1299,6 +1299,40 @@ describe('mutateReviewFile', () => {
     expect((await readFile(report, 'utf8')).startsWith('# Review — Committed during render\n')).toBe(true);
   });
 
+  it('never leaves the initial empty report on disk when initReviewFile finishes its report write after a first mutation commits', async () => {
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    const freshReport = join(dir, 'fresh.md');
+    const freshDb = join(dir, 'fresh.sqlite');
+    let releaseInitWrite!: () => void;
+    const initWritePaused = new Promise<void>((resolve) => {
+      releaseInitWrite = resolve;
+    });
+    let initWriteSeen!: () => void;
+    const reachedInitWrite = new Promise<void>((resolve) => {
+      initWriteSeen = resolve;
+    });
+    let intercepted = false;
+    vi.mocked(writeFile).mockImplementation(async (target, data, options) => {
+      if (!intercepted && String(target) === freshReport && String(data).startsWith('# Review — Initial state\n')) {
+        intercepted = true;
+        initWriteSeen();
+        await initWritePaused;
+      }
+      return actualFs.writeFile(target, data, options);
+    });
+    try {
+      const initPromise = initReviewFile('Initial state', { report: freshReport, now: NOW });
+      await reachedInitWrite;
+      await mutateReviewFile(freshDb, retarget('New committed state'));
+      releaseInitWrite();
+      await initPromise;
+    } finally {
+      vi.mocked(writeFile).mockImplementation(actualFs.writeFile);
+    }
+    expect((await loadReviewFile(freshDb)).data.target).toBe('New committed state');
+    expect((await readFile(freshReport, 'utf8')).startsWith('# Review — New committed state\n')).toBe(true);
+  });
+
   it('keeps the meta values of the database', async () => {
     const raw = openReviewDb(db, 'existing');
     try {
