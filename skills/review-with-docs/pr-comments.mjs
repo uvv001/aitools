@@ -2943,7 +2943,20 @@ async function ensureLinkedFile(source, target, preferNewer = true) {
 			}
 			await copyFile(source, temp);
 		}
-		await rename(temp, target);
+		try {
+			await rename(temp, target);
+		} catch (error) {
+			if (![
+				"EPERM",
+				"EBUSY",
+				"EACCES"
+			].includes(error.code ?? "")) throw error;
+			if (await exists(target)) {
+				const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
+				if (srcBytes.equals(dstBytes)) return;
+			}
+			await copyFile(source, target);
+		}
 	} finally {
 		await rm(temp, {
 			force: true,
@@ -3944,7 +3957,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+1ee2929`;
+	return `pr-comments ${VERSION}+60ea318`;
 }
 //#endregion
 //#region src/cli.ts
