@@ -595,7 +595,6 @@ describe('a round that was never opened', () => {
     ['setTitle', (data, round) => setTitle(data, 'F1', { title: 'Better', round }, at(5))],
     ['setDescription', (data, round) => setDescription(data, 'F1', { description: 'Revised.', round }, at(5))],
     ['addUpdate', (data, round) => addUpdate(data, 'F1', { text: 'a question', round }, at(5))],
-    ['updateRound', (data, round) => updateRound(data, { text: 'no findings', round })],
   ];
 
   it.each(changes)('%s refuses a round after the latest', (_name, run) => {
@@ -612,19 +611,28 @@ describe('a round that was never opened', () => {
     const data = inRound(3);
     for (const round of [1, 2, 3]) {
       const updated = pure(data, (input) => run(input, round));
-      if (_name === 'updateRound') {
-        expect(updated.intro.reviewed.items.find((item) => item.round === round)?.text).toContain('; no findings');
-      } else {
-        expect(first(updated).updates.at(-1)?.round).toBe(round);
-      }
+      expect(first(updated).updates.at(-1)?.round).toBe(round);
     }
   });
 
-  it.each(changes.filter(([name]) => name !== 'updateRound'))('%s accepts a round below the latest that the review skipped', (_name, run) => {
+  it.each(changes)('%s accepts a round below the latest that the review skipped', (_name, run) => {
     const data = open();
     const items = [{ text: 'Round 5 — `e5`, base none — reviewed as it stands', round: 5, revision: 'e5', base: null }];
     const gap: ReviewData = { ...data, intro: { ...data.intro, reviewed: { ...data.intro.reviewed, items } }, findings: [raw('F1')] };
     expect(first(pure(gap, (input) => run(input, 3))).updates.at(-1)?.round).toBe(3);
+  });
+
+  it('updateRound accepts an opened round and refuses one that is after the latest, skipped, or while none is open', () => {
+    refuses(reviewWith(1), (input) => updateRound(input, { text: 'no findings', round: 2 }), 'round 2 was never opened; the latest round is 1');
+    refuses({ ...fresh(), findings: [raw('F1')] }, (input) => updateRound(input, { text: 'no findings', round: 1 }), 'round 1 was never opened; no round is open yet');
+    const data = inRound(3);
+    for (const round of [1, 2, 3]) {
+      const updated = pure(data, (input) => updateRound(input, { text: 'no findings', round }));
+      expect(updated.intro.reviewed.items.find((item) => item.round === round)?.text).toContain('; no findings');
+    }
+    const items = [{ text: 'Round 5 — `e5`, base none — reviewed as it stands', round: 5, revision: 'e5', base: null }];
+    const gap: ReviewData = { ...open(), intro: { reviewed: { items } } };
+    refuses(gap, (input) => updateRound(input, { text: 'no findings', round: 3 }), 'round 3 was never opened; the latest round is 5');
   });
 
   it('refuses a round the update text opens with, as one given', () => {

@@ -1794,12 +1794,14 @@ describe('cli', () => {
         expect(await step('report', 'render', '--session-dir', sessionDir)).toBe(0);
         expect(printed).toBe(`unchanged ${report()}\n`);
         expect(warned).toBe('');
+      });
 
-        if (process.platform === 'win32') {
-          expect(await step('report', 'render', '--session-dir', join(work, 'SESSION', 'FILES'))).toBe(0);
-          expect(printed).toBe(`unchanged ${report()}\n`);
-          expect(warned).toBe('');
-        }
+      it.runIf(process.platform === 'win32')('does not print the Review database notice when --session-dir differs only in path case on Windows', async () => {
+        await step('report', 'render', '--session-dir', join(work, 'session', 'files'));
+
+        expect(await step('report', 'render', '--session-dir', join(work, 'SESSION', 'FILES'))).toBe(0);
+        expect(printed).toBe(`unchanged ${report()}\n`);
+        expect(warned).toBe('');
       });
 
       it('never writes over the database, another SQLite file or a name that is none, and leaves them as they were', async () => {
