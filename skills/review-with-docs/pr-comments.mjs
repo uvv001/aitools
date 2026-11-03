@@ -3248,7 +3248,8 @@ async function renderReportFile(arg, options = {}) {
 		if (resolvedSessionDir !== void 0) {
 			const repoRoot = findRepoRoot(cwd);
 			const resolvedWorkspaceDir = fromSessionDir && repoRoot ? join(repoRoot, ".ai") : activeDir;
-			if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
+			const differs = (a, b) => b === void 0 || !samePath(a, b);
+			if (differs(resolvedSessionDir, metaSessionDir) || differs(resolvedWorkspaceDir, metaWorkspaceDir)) {
 				const rw = openReviewDb(paths.db, "existing");
 				try {
 					inTransaction(rw, () => {
@@ -4122,7 +4123,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+7f7e0bb`;
+	return `pr-comments ${VERSION}+2c9df6e`;
 }
 //#endregion
 //#region src/cli.ts
