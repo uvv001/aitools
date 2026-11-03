@@ -3310,7 +3310,9 @@ async function renderReportFile(arg, options = {}) {
 		const fromSessionDir = resolvedSessionDir !== void 0 && samePath(activeDir, resolvedSessionDir) || previousSessionDir !== void 0 && samePath(activeDir, previousSessionDir);
 		if (resolvedSessionDir !== void 0) {
 			const repoRoot = findRepoRoot(cwd);
-			const resolvedWorkspaceDir = fromSessionDir && repoRoot ? join(repoRoot, ".ai") : activeDir;
+			const storedRepoRoot = metaWorkspaceDir === void 0 ? void 0 : findRepoRoot(metaWorkspaceDir);
+			const keepStoredWorkspace = isLiveWorkspaceDir(metaWorkspaceDir) && (repoRoot === void 0 || storedRepoRoot !== void 0 && samePath(storedRepoRoot, repoRoot));
+			const resolvedWorkspaceDir = fromSessionDir ? metaWorkspaceDir !== void 0 && keepStoredWorkspace ? metaWorkspaceDir : repoRoot ? join(repoRoot, ".ai") : activeDir : activeDir;
 			const differs = (a, b) => b === void 0 || !samePath(a, b);
 			if (differs(resolvedSessionDir, metaSessionDir) || differs(resolvedWorkspaceDir, metaWorkspaceDir)) {
 				const rw = openReviewDb(paths.db, "existing");
@@ -4189,7 +4191,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+e1c40aa`;
+	return `pr-comments ${VERSION}+a6e0762`;
 }
 //#endregion
 //#region src/cli.ts
