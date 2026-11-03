@@ -248,7 +248,7 @@ describe('bundle', () => {
 
     const init = await bundled(['init', 'Demo', '--report', report, '--pr', prUrl], elsewhere);
     expect(init.stdout).toBe(
-      `Created review.sqlite\nPull request: ${prUrl}\nRender the report with "pr-comments report render --db review.sqlite"\n`,
+      `Created review.sqlite\nPull request: ${prUrl}\nReport: review.md\n`,
     );
     expect((await bundled(['pr', 'show', '--db', db], elsewhere)).stdout).toBe(`${prUrl}\nnot synced yet; run "pr-comments pr sync"\n`);
 
