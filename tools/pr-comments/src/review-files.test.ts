@@ -1,7 +1,7 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, linkSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
-import { link, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -728,176 +728,181 @@ describe('initReviewFile', () => {
       expect(existsSync(join(repo, '.ai'))).toBe(false);
     });
 
-    it('creates the primary database in sessionDir, hard-links .ai/ and round folders on every DB write and render, and restores .ai/ after cleanup', async () => {
-      const sessionDir = join(dir, 'session', 'files');
-      const { db, report } = await initReviewFile('PR 42', { cwd, now: NOW, sessionDir });
-      const sessionDb = join(sessionDir, '2026-10-09_pr-42_review.sqlite');
-      const sessionReport = join(sessionDir, '2026-10-09_pr-42_review.md');
-      expect(existsSync(sessionDb)).toBe(true);
-      expect(existsSync(db)).toBe(true);
+    describe('with a session folder', () => {
+      let sessionDir: string;
+      let db: string;
+      let report: string;
+      let sessionDb: string;
+      let sessionReport: string;
+      let wsRoundFile: string;
+      let sessRoundFile: string;
 
-      // Write a round file in .ai/ and mutate the DB without rendering: both .sqlite and the round file sync to sessionDir.
-      const wsRoundFile = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
-      const wsTmpNote = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'notes.tmp');
-      const wsInternalTmp = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md.deadbeef.tmp');
-      await mkdir(join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1'), { recursive: true });
-      await writeFile(wsRoundFile, 'coverage\n', 'utf8');
-      await writeFile(wsTmpNote, 'user tmp note\n', 'utf8');
-      await writeFile(wsInternalTmp, 'in-flight link temp\n', 'utf8');
-      await rm(sessionDb);
-      await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 updated' }, result: null }));
-      expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 updated');
-      expect(await readFile(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
-      expect(await readFile(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'notes.tmp'), 'utf8')).toBe('user tmp note\n');
-      expect(existsSync(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md.deadbeef.tmp'))).toBe(false);
-      await rm(wsInternalTmp);
-
-      // Render report: .md is linked in sessionDir too.
-      await renderReportFile(db, { cwd });
-      expect(await readFile(sessionReport, 'utf8')).toContain('# Review — PR 42 updated');
-
-      // Clean up .ai/ completely and mutate or render from sessionDb: .ai/ is restored with DB, report, and round files.
-      await rm(join(repo, '.ai'), { recursive: true, force: true });
-      expect(existsSync(join(repo, '.ai'))).toBe(false);
-      await mutateReviewFile(sessionDb, (data) => ({ data: { ...data, target: 'PR 42 restored' }, result: null }));
-      expect((await loadReviewFile(db)).data.target).toBe('PR 42 restored');
-      expect(existsSync(report)).toBe(true);
-      expect(await readFile(wsRoundFile, 'utf8')).toBe('coverage\n');
-
-      // A newer detached round file in sessionDir is preserved and re-linked over the stale workspace peer on DB write.
-      const sessRoundFile = join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
-      const { utimes } = await import('node:fs/promises');
-      await rm(sessRoundFile);
-      await writeFile(sessRoundFile, 'newer session coverage\n', 'utf8');
-      const future = new Date(Date.now() + 10_000);
-      await utimes(sessRoundFile, future, future);
-      await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
-      expect(await readFile(wsRoundFile, 'utf8')).toBe('newer session coverage\n');
-
-      // Removing the old worktree and running renderReportFile with sessionDir in a new worktree updates workspace_dir.
-      await rm(repo, { recursive: true, force: true });
-      const newRepo = join(dir, 'new-worktree');
-      await mkdir(join(newRepo, '.git'), { recursive: true });
-      expect(await renderReportFile(sessionDb, { sessionDir, cwd: newRepo })).toEqual({
-        report: join(newRepo, '.ai', '2026-10-09_pr-42_review.md'),
-        action: 'created',
+      beforeEach(async () => {
+        sessionDir = join(dir, 'session', 'files');
+        ({ db, report } = await initReviewFile('PR 42', { cwd, now: NOW, sessionDir }));
+        sessionDb = join(sessionDir, '2026-10-09_pr-42_review.sqlite');
+        sessionReport = join(sessionDir, '2026-10-09_pr-42_review.md');
+        wsRoundFile = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
+        sessRoundFile = join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
+        await mkdir(dirname(wsRoundFile), { recursive: true });
+        await writeFile(wsRoundFile, 'coverage\n', 'utf8');
       });
-      expect(existsSync(repo)).toBe(false);
-      const newWsDb = join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite');
-      expect(existsSync(newWsDb)).toBe(true);
-      expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.md'))).toBe(true);
-      expect(await readFile(join(newRepo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe(
-        'newer session coverage\n',
-      );
 
-      // Even if sessionDb is detached with a newer mtime, mutating newWsDb (activeDb) overwrites sessionDb rather than reverting newWsDb.
-      const detachedBytes = await readFile(sessionDb);
-      await rm(sessionDb);
-      await writeFile(sessionDb, detachedBytes);
-      await utimes(sessionDb, future, future);
-      await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 active wins' }, result: null }));
-      expect((await loadReviewFile(newWsDb)).data.target).toBe('PR 42 active wins');
-      expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 active wins');
+      it('creates the primary database in sessionDir, syncs round files (skipping only hex-suffixed temp files), and restores .ai/ after cleanup', async () => {
+        expect(existsSync(sessionDb)).toBe(true);
+        expect(existsSync(db)).toBe(true);
 
-      // Two detached files whose 64-bit NTFS ino values differ only above 2^53 (17169973581500551n vs 17169973581500552n,
-      // which collide as Number) are not mistaken for the same inode by sameInode.
-      const newWsRoundFile = join(newRepo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
-      await rm(newWsRoundFile);
-      await writeFile(newWsRoundFile, 'fresh workspace coverage\n', 'utf8');
-      const newerStill = new Date(Date.now() + 20_000);
-      await utimes(newWsRoundFile, newerStill, newerStill);
-      const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-      const inoByPath = new Map<string, bigint>([
-        [newWsRoundFile, 17169973581500551n],
-        [sessRoundFile, 17169973581500552n],
-      ]);
-      vi.mocked(stat).mockImplementation((async (targetPath, options) => {
-        const fakeIno = inoByPath.get(String(targetPath));
-        if (options?.bigint) {
-          const info = await actualFs.stat(targetPath, { bigint: true });
-          return fakeIno === undefined ? info : Object.assign(info, { dev: 1n, ino: fakeIno });
-        }
-        const info = await actualFs.stat(targetPath);
-        return fakeIno === undefined ? info : Object.assign(info, { dev: 1, ino: Number(fakeIno) });
-      }) as typeof stat);
-      try {
-        await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 bigint ino' }, result: null }));
-      } finally {
-        vi.mocked(stat).mockImplementation(actualFs.stat);
-      }
-      expect(await readFile(sessRoundFile, 'utf8')).toBe('fresh workspace coverage\n');
+        const wsTmpNote = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'notes.tmp');
+        const wsInternalTmp = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md.deadbeef.tmp');
+        await writeFile(wsTmpNote, 'user tmp note\n', 'utf8');
+        await writeFile(wsInternalTmp, 'in-flight link temp\n', 'utf8');
+        await rm(sessionDb);
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 updated' }, result: null }));
+        expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 updated');
+        expect(await readFile(sessRoundFile, 'utf8')).toBe('coverage\n');
+        expect(await readFile(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'notes.tmp'), 'utf8')).toBe('user tmp note\n');
+        expect(existsSync(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md.deadbeef.tmp'))).toBe(false);
+        await rm(wsInternalTmp);
 
-      // When detached copies have equal timestamps and different contents, syncMirrorFiles preserves both instead of
-      // overwriting one by call order; when equal-timestamp copies have identical contents, it re-links them.
-      await rm(newWsRoundFile);
-      await rm(sessRoundFile);
-      await writeFile(newWsRoundFile, 'workspace tie content\n', 'utf8');
-      await writeFile(sessRoundFile, 'session tie content\n', 'utf8');
-      const tiedTime = new Date(Date.now() + 30_000);
-      await utimes(newWsRoundFile, tiedTime, tiedTime);
-      await utimes(sessRoundFile, tiedTime, tiedTime);
-      await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 tied mtime' }, result: null }));
-      expect(await readFile(newWsRoundFile, 'utf8')).toBe('workspace tie content\n');
-      expect(await readFile(sessRoundFile, 'utf8')).toBe('session tie content\n');
+        await renderReportFile(db, { cwd });
+        expect(await readFile(sessionReport, 'utf8')).toContain('# Review — PR 42 updated');
 
-      await writeFile(sessRoundFile, 'workspace tie content\n', 'utf8');
-      await utimes(newWsRoundFile, tiedTime, tiedTime);
-      await utimes(sessRoundFile, tiedTime, tiedTime);
-      await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 tied identical' }, result: null }));
-      const [wsStatAfter, sessStatAfter] = await Promise.all([
-        actualFs.stat(newWsRoundFile, { bigint: true }),
-        actualFs.stat(sessRoundFile, { bigint: true }),
-      ]);
-      expect(wsStatAfter.ino).toBe(sessStatAfter.ino);
-
-      // When a Windows viewer holds a mirror target open without FILE_SHARE_DELETE so rename(temp, target) fails with
-      // EPERM or EBUSY, ensureLinkedFile falls back to an in-place copyFile(source, target) and removes the temp file.
-      await rm(sessRoundFile);
-      await writeFile(sessRoundFile, 'stale open viewer copy\n', 'utf8');
-      await writeFile(newWsRoundFile, 'updated while viewer open\n', 'utf8');
-      const afterTie = new Date(Date.now() + 40_000);
-      await utimes(newWsRoundFile, afterTie, afterTie);
-      vi.mocked(rename).mockRejectedValueOnce(failure('EPERM')).mockRejectedValueOnce(failure('EBUSY'));
-      await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 open viewer fallback' }, result: null }));
-      expect(await readFile(sessRoundFile, 'utf8')).toBe('updated while viewer open\n');
-
-      // On cross-volume fallback (EXDEV), ensureLinkedDatabase uses a SQLite-consistent snapshot (VACUUM INTO) rather
-      // than copying raw file bytes that can hold uncommitted cache-spilled pages from a concurrent transaction.
-      await rm(sessionDb);
-      const spillScript = `
-        const { DatabaseSync } = require('node:sqlite');
-        const h = new DatabaseSync(process.argv[1]);
-        h.exec('BEGIN IMMEDIATE');
-        h.exec("UPDATE review SET target = 'Uncommitted spilled target'");
-        h.exec("INSERT INTO meta (key, value) VALUES ('spill', hex(zeroblob(2000000)))");
-        console.log('spilled');
-        setTimeout(() => {
-          h.exec('ROLLBACK');
-          h.close();
-        }, 150);
-      `;
-      let spillerExited: Promise<unknown> | undefined;
-      vi.mocked(link).mockImplementationOnce(async () => {
-        const spiller = spawn(process.execPath, [...NODE_FLAGS, '-e', spillScript, newWsDb], { stdio: ['ignore', 'pipe', 'inherit'] });
-        spillerExited = once(spiller, 'exit');
-        await once(spiller.stdout, 'data');
-        throw failure('EXDEV');
+        await rm(join(repo, '.ai'), { recursive: true, force: true });
+        expect(existsSync(join(repo, '.ai'))).toBe(false);
+        await mutateReviewFile(sessionDb, (data) => ({ data: { ...data, target: 'PR 42 restored' }, result: null }));
+        expect((await loadReviewFile(db)).data.target).toBe('PR 42 restored');
+        expect(existsSync(report)).toBe(true);
+        expect(await readFile(wsRoundFile, 'utf8')).toBe('coverage\n');
       });
-      try {
-        await renderReportFile(newWsDb, { sessionDir, cwd: newRepo });
-      } finally {
-        await spillerExited;
-      }
-      expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 open viewer fallback');
 
-      // Other link fallback error codes (ENOTSUP, EOPNOTSUPP, EMLINK, EINVAL, UNKNOWN) also fall back to copying/snapshot.
-      for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EMLINK', 'EINVAL', 'UNKNOWN']) {
+      it('preserves a newer detached round file and always syncs the database from activeDb', async () => {
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 initial' }, result: null }));
         await rm(sessRoundFile);
-        await writeFile(newWsRoundFile, `fallback ${code}\n`, 'utf8');
-        vi.mocked(link).mockRejectedValueOnce(failure(code)).mockRejectedValueOnce(failure(code));
-        await renderReportFile(newWsDb, { sessionDir, cwd: newRepo });
-        expect(await readFile(sessRoundFile, 'utf8')).toBe(`fallback ${code}\n`);
-      }
+        await writeFile(sessRoundFile, 'newer session coverage\n', 'utf8');
+        const future = new Date(Date.now() + 10_000);
+        await utimes(sessRoundFile, future, future);
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
+        expect(await readFile(wsRoundFile, 'utf8')).toBe('newer session coverage\n');
+
+        const detachedBytes = await readFile(sessionDb);
+        await rm(sessionDb);
+        await writeFile(sessionDb, detachedBytes);
+        await utimes(sessionDb, future, future);
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 active wins' }, result: null }));
+        expect((await loadReviewFile(db)).data.target).toBe('PR 42 active wins');
+        expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 active wins');
+      });
+
+      it('updates workspace_dir and targets the new workspace report when restoring from sessionDir in a new worktree', async () => {
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
+        await rm(repo, { recursive: true, force: true });
+        const newRepo = join(dir, 'new-worktree');
+        await mkdir(join(newRepo, '.git'), { recursive: true });
+        expect(await renderReportFile(sessionDb, { sessionDir, cwd: newRepo })).toEqual({
+          report: join(newRepo, '.ai', '2026-10-09_pr-42_review.md'),
+          action: 'created',
+        });
+        expect(existsSync(repo)).toBe(false);
+        expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);
+        expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.md'))).toBe(true);
+        expect(await readFile(join(newRepo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
+      });
+
+      it('compares 64-bit NTFS ino values as bigints and preserves divergent equal-timestamp copies', async () => {
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
+        await rm(wsRoundFile);
+        await writeFile(wsRoundFile, 'fresh workspace coverage\n', 'utf8');
+        const newerStill = new Date(Date.now() + 20_000);
+        await utimes(wsRoundFile, newerStill, newerStill);
+        const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+        const inoByPath = new Map<string, bigint>([
+          [wsRoundFile, 17169973581500551n],
+          [sessRoundFile, 17169973581500552n],
+        ]);
+        vi.mocked(stat).mockImplementation((async (targetPath, options) => {
+          const fakeIno = inoByPath.get(String(targetPath));
+          if (options?.bigint) {
+            const info = await actualFs.stat(targetPath, { bigint: true });
+            return fakeIno === undefined ? info : Object.assign(info, { dev: 1n, ino: fakeIno });
+          }
+          const info = await actualFs.stat(targetPath);
+          return fakeIno === undefined ? info : Object.assign(info, { dev: 1, ino: Number(fakeIno) });
+        }) as typeof stat);
+        try {
+          await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 bigint ino' }, result: null }));
+        } finally {
+          vi.mocked(stat).mockImplementation(actualFs.stat);
+        }
+        expect(await readFile(sessRoundFile, 'utf8')).toBe('fresh workspace coverage\n');
+
+        await rm(wsRoundFile);
+        await rm(sessRoundFile);
+        await writeFile(wsRoundFile, 'workspace tie content\n', 'utf8');
+        await writeFile(sessRoundFile, 'session tie content\n', 'utf8');
+        const tiedTime = new Date(Date.now() + 30_000);
+        await utimes(wsRoundFile, tiedTime, tiedTime);
+        await utimes(sessRoundFile, tiedTime, tiedTime);
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 tied mtime' }, result: null }));
+        expect(await readFile(wsRoundFile, 'utf8')).toBe('workspace tie content\n');
+        expect(await readFile(sessRoundFile, 'utf8')).toBe('session tie content\n');
+
+        await writeFile(sessRoundFile, 'workspace tie content\n', 'utf8');
+        await utimes(wsRoundFile, tiedTime, tiedTime);
+        await utimes(sessRoundFile, tiedTime, tiedTime);
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 tied identical' }, result: null }));
+        const [wsStatAfter, sessStatAfter] = await Promise.all([
+          actualFs.stat(wsRoundFile, { bigint: true }),
+          actualFs.stat(sessRoundFile, { bigint: true }),
+        ]);
+        expect(wsStatAfter.ino).toBe(sessStatAfter.ino);
+      });
+
+      it('falls back cleanly when rename or link fails, using VACUUM INTO for cross-volume database copies', async () => {
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 initial' }, result: null }));
+        await rm(sessRoundFile);
+        await writeFile(sessRoundFile, 'stale open viewer copy\n', 'utf8');
+        await writeFile(wsRoundFile, 'updated while viewer open\n', 'utf8');
+        const future = new Date(Date.now() + 10_000);
+        await utimes(wsRoundFile, future, future);
+        vi.mocked(rename).mockRejectedValueOnce(failure('EPERM')).mockRejectedValueOnce(failure('EBUSY'));
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 open viewer fallback' }, result: null }));
+        expect(await readFile(sessRoundFile, 'utf8')).toBe('updated while viewer open\n');
+
+        await rm(sessionDb);
+        const spillScript = `
+          const { DatabaseSync } = require('node:sqlite');
+          const h = new DatabaseSync(process.argv[1]);
+          h.exec('BEGIN IMMEDIATE');
+          h.exec("UPDATE review SET target = 'Uncommitted spilled target'");
+          h.exec("INSERT INTO meta (key, value) VALUES ('spill', hex(zeroblob(2000000)))");
+          console.log('spilled');
+          setTimeout(() => {
+            h.exec('ROLLBACK');
+            h.close();
+          }, 150);
+        `;
+        let spillerExited: Promise<unknown> | undefined;
+        vi.mocked(link).mockImplementationOnce(async () => {
+          const spiller = spawn(process.execPath, [...NODE_FLAGS, '-e', spillScript, db], { stdio: ['ignore', 'pipe', 'inherit'] });
+          spillerExited = once(spiller, 'exit');
+          await once(spiller.stdout, 'data');
+          throw failure('EXDEV');
+        });
+        try {
+          await renderReportFile(db, { sessionDir, cwd });
+        } finally {
+          await spillerExited;
+        }
+        expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 open viewer fallback');
+
+        for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EMLINK', 'EINVAL', 'UNKNOWN']) {
+          await rm(sessRoundFile);
+          await writeFile(wsRoundFile, `fallback ${code}\n`, 'utf8');
+          vi.mocked(link).mockRejectedValueOnce(failure(code)).mockRejectedValueOnce(failure(code));
+          await renderReportFile(db, { sessionDir, cwd });
+          expect(await readFile(sessRoundFile, 'utf8')).toBe(`fallback ${code}\n`);
+        }
+      });
     });
   });
 
