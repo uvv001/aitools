@@ -523,7 +523,27 @@ async function syncMirrorFiles(options: {
   }
 }
 
-// Creates the database of a new review named `name` (the title of its report): no rounds or findings. It
+// Publishes the initial workspace mirror of `primaryDb` exclusively so a competing `init` that created `workspaceDb`
+// after the pre-flight check is never overwritten.
+async function publishExclusiveMirror(primaryDb: string, workspaceDb: string): Promise<boolean> {
+  await mkdir(dirname(workspaceDb), { recursive: true });
+  try {
+    await link(primaryDb, workspaceDb);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? '';
+    if (code === 'EEXIST') return false;
+    if (!LINK_FALLBACK_CODES.has(code)) throw error;
+  }
+  if (await exists(workspaceDb)) return false;
+  const temp = `${workspaceDb}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    vacuumDatabase(primaryDb, temp);
+    return await publish(temp, workspaceDb);
+  } finally {
+    await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
 // lives at `options.report` (a report or a database path) or, without one, at the default place of a review of that
 // name (`.ai/` of the repository of `cwd`); `options.db` names another file, which must end in `.sqlite`. When
 // `options.sessionDir` is given, the primary file is created in `sessionDir` and hard-linked into the workspace folder.
@@ -563,6 +583,19 @@ export async function initReviewFile(
     dualHomed ? { pullRequest, sessionDir, workspaceDir } : { pullRequest },
   );
   if (!created) throw existingDatabase(primaryDb);
+  if (dualHomed) {
+    let mirrorPublished = false;
+    try {
+      mirrorPublished = await publishExclusiveMirror(primaryDb, dbPath);
+    } catch (error) {
+      await rm(primaryDb, { force: true, maxRetries: 5, retryDelay: 100 });
+      throw error;
+    }
+    if (!mirrorPublished) {
+      await rm(primaryDb, { force: true, maxRetries: 5, retryDelay: 100 });
+      throw existingDatabase(dbPath);
+    }
+  }
   let text = rendered;
   await mkdir(dirname(reportTarget), { recursive: true });
   while (true) {

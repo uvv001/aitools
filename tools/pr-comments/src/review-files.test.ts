@@ -1077,6 +1077,14 @@ describe('initReviewFile', () => {
       await expect(initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW })).rejects.toThrow('source of truth');
       expect(await readFile(join(dir, 'r.sqlite'), 'utf8')).toBe('precious');
       expect(listing()).toEqual(['r.sqlite']);
+
+      await rm(join(dir, 'r.sqlite'));
+      const sessionDir = join(dir, 'session');
+      await rivalAppearsWhileBuilding();
+      await expect(initReviewFile('PR 42', { report: join(dir, 'r.md'), sessionDir, now: NOW })).rejects.toThrow('source of truth');
+      expect(await readFile(join(dir, 'r.sqlite'), 'utf8')).toBe('precious');
+      expect(existsSync(join(sessionDir, 'r.sqlite'))).toBe(false);
+      expect(existsSync(join(dir, 'r.md'))).toBe(false);
     });
 
     it('publishes with a rename where the file system has no hard links', async () => {
