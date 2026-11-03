@@ -1697,6 +1697,16 @@ describe('changeReviewState', () => {
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
+  it('keeps a committed database change successful when refreshing the derived report fails with EPERM', async () => {
+    vi.mocked(writeFile).mockRejectedValueOnce(failure('EPERM'));
+    const changed = await changeReviewState(db, (state) => ({
+      state: { ...state, data: { ...state.data, target: 'Saved despite EPERM' } },
+      result: 'saved',
+    }));
+    expect(changed.result).toBe('saved');
+    expect((await loadReviewFile(db)).data.target).toBe('Saved despite EPERM');
+  });
+
   it('says when the database is missing, with or without a report next to it', async () => {
     const lonely = await write('lonely.md', sampleReport());
     await expect(changeReviewState(lonely, (state) => ({ state, result: null }))).rejects.toThrow(

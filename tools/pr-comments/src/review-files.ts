@@ -848,28 +848,33 @@ export async function changeReviewState<T>(
       },
       { immediate: true },
     );
-    if (rendered !== undefined) {
-      await mkdir(dirname(reportTarget), { recursive: true });
-      while (true) {
-        await writeFile(reportTarget, rendered, 'utf8');
-        if (sessionDir !== undefined) {
-          await syncMirrorFiles({
-            activeDb: paths.db,
-            sessionDir,
-            workspaceDir,
-            preferredReport: reportTarget,
-          });
+    try {
+      if (rendered !== undefined) {
+        await mkdir(dirname(reportTarget), { recursive: true });
+        while (true) {
+          await writeFile(reportTarget, rendered, 'utf8');
+          if (sessionDir !== undefined) {
+            await syncMirrorFiles({
+              activeDb: paths.db,
+              sessionDir,
+              workspaceDir,
+              preferredReport: reportTarget,
+            });
+          }
+          const latest = renderReport(loadReview(db));
+          if (latest === rendered) break;
+          rendered = latest;
         }
-        const latest = renderReport(loadReview(db));
-        if (latest === rendered) break;
-        rendered = latest;
+      } else if (sessionDir !== undefined) {
+        await syncMirrorFiles({
+          activeDb: paths.db,
+          sessionDir,
+          workspaceDir,
+        });
       }
-    } else if (sessionDir !== undefined) {
-      await syncMirrorFiles({
-        activeDb: paths.db,
-        sessionDir,
-        workspaceDir,
-      });
+    } catch {
+      // The database transaction has already committed; do not report the saved change as failed if the derived report
+      // or mirror cannot be refreshed right now.
     }
     return changed;
   } finally {
@@ -940,7 +945,11 @@ export async function syncReviewFile(arg: string, data: PullRequestData): Promis
     db.close();
   }
   if (sessionDir !== undefined) {
-    await syncMirrorFiles({ activeDb: paths.db, sessionDir, workspaceDir });
+    try {
+      await syncMirrorFiles({ activeDb: paths.db, sessionDir, workspaceDir });
+    } catch {
+      // The pull request snapshot is already committed in the database.
+    }
   }
   const annotations = (data.checkRuns ?? []).reduce((total, run) => total + run.annotations.length, 0);
   return { db: paths.db, reviews: data.reviews.length, threads: data.threads.length, comments: data.comments.length, annotations };
