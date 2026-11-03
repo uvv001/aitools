@@ -849,6 +849,17 @@ describe('initReviewFile', () => {
         expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);
         expect(existsSync(join(newSessionDir, '2026-10-09_pr-42_review.sqlite'))).toBe(true);
         expect(await readFile(join(newSessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
+
+        // An explicit --report directory in the same repository is preserved when renderReportFile runs on sessionDb.
+        const customReport = join(newRepo, 'docs', 'custom_review.md');
+        const customSessionDb = join(newSessionDir, 'custom_review.sqlite');
+        await initReviewFile('Custom PR', { report: customReport, sessionDir: newSessionDir, cwd: newRepo, now: NOW });
+        expect(await renderReportFile(customSessionDb, { sessionDir: newSessionDir, cwd: newRepo })).toEqual({
+          report: customReport,
+          action: 'unchanged',
+        });
+        await mutateReviewFile(customSessionDb, (data) => ({ data: { ...data, target: 'Custom PR updated' }, result: null }));
+        expect(await readFile(customReport, 'utf8')).toContain('# Review — Custom PR updated');
       });
 
       it('compares 64-bit NTFS ino values as bigints', async () => {

@@ -697,8 +697,17 @@ export async function renderReportFile(
       (previousSessionDir !== undefined && samePath(activeDir, previousSessionDir));
     if (resolvedSessionDir !== undefined) {
       const repoRoot = findRepoRoot(cwd);
-      const resolvedWorkspaceDir =
-        fromSessionDir && repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir;
+      const storedRepoRoot = metaWorkspaceDir === undefined ? undefined : findRepoRoot(metaWorkspaceDir);
+      const keepStoredWorkspace =
+        isLiveWorkspaceDir(metaWorkspaceDir) &&
+        (repoRoot === undefined || (storedRepoRoot !== undefined && samePath(storedRepoRoot, repoRoot)));
+      const resolvedWorkspaceDir = fromSessionDir
+        ? metaWorkspaceDir !== undefined && keepStoredWorkspace
+          ? metaWorkspaceDir
+          : repoRoot
+            ? join(repoRoot, REVIEW_FOLDER)
+            : activeDir
+        : activeDir;
       const differs = (a: string, b: string | undefined): boolean => b === undefined || !samePath(a, b);
       if (differs(resolvedSessionDir, metaSessionDir) || differs(resolvedWorkspaceDir, metaWorkspaceDir)) {
         const rw = openReviewDb(paths.db, 'existing');
