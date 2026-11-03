@@ -3058,7 +3058,8 @@ async function prepareDatabasePath(dbPath, options = {}) {
 			const wsRepoRoot = findRepoRoot(workspaceDir);
 			if (wsRepoRoot !== void 0 && samePath(workspaceDir, join(wsRepoRoot, ".ai"))) await ensureAiGitExcluded(wsRepoRoot);
 			if (!await exists(workspaceDb)) await ensureLinkedDatabase(sessionDb, workspaceDb);
-			if (await sameInode(sessionDb, workspaceDb)) return workspaceDb;
+			const wsDirs = readStoredDirs(workspaceDb);
+			if (await sameInode(sessionDb, workspaceDb) || wsDirs.sessionDir !== void 0 && wsDirs.workspaceDir !== void 0 && samePath(wsDirs.sessionDir, sessionDir) && samePath(wsDirs.workspaceDir, workspaceDir)) return workspaceDb;
 		}
 	}
 	return dbPath;
@@ -4138,7 +4139,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+70d646a`;
+	return `pr-comments ${VERSION}+7bfdb64`;
 }
 //#endregion
 //#region src/cli.ts
