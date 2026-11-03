@@ -3181,15 +3181,30 @@ async function initReviewFile(name, options = {}) {
 		sessionDir,
 		workspaceDir
 	} : { pullRequest })) throw existingDatabase(primaryDb);
+	let text = rendered;
 	await mkdir(dirname(reportTarget), { recursive: true });
-	await writeFile(reportTarget, rendered, "utf8");
-	if (dualHomed) await syncMirrorFiles({
-		activeDb: primaryDb,
-		sessionDir,
-		workspaceDir,
-		cwd,
-		preferredReport: reportTarget
-	});
+	while (true) {
+		await writeFile(reportTarget, text, "utf8");
+		if (dualHomed) await syncMirrorFiles({
+			activeDb: primaryDb,
+			sessionDir,
+			workspaceDir,
+			cwd,
+			preferredReport: reportTarget
+		});
+		const handle = new DatabaseSync(existsSync(dbPath) ? dbPath : primaryDb, {
+			readOnly: true,
+			timeout: 1e4
+		});
+		let latest;
+		try {
+			latest = renderReport(loadReview(handle));
+		} finally {
+			handle.close();
+		}
+		if (latest === text) break;
+		text = latest;
+	}
 	return {
 		db: dbPath,
 		report: reportTarget
@@ -4123,7 +4138,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+71275c4`;
+	return `pr-comments ${VERSION}+bfc983f`;
 }
 //#endregion
 //#region src/cli.ts
