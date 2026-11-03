@@ -3054,7 +3054,7 @@ async function prepareDatabasePath(dbPath, options = {}) {
 		const workspaceDb = join(workspaceDir, fileName);
 		if (existsSync(`${workspaceDb}-journal`) && (samePath(dbPath, workspaceDb) || await sameInode(dbPath, workspaceDb))) reconcileHotJournal(workspaceDb);
 		if (existsSync(`${sessionDb}-journal`) && (samePath(dbPath, sessionDb) || await sameInode(dbPath, sessionDb))) reconcileHotJournal(sessionDb);
-		if (options.restoreWorkspace && samePath(dirname(resolve(dbPath)), sessionDir) && !samePath(sessionDir, workspaceDir) && findRepoRoot(workspaceDir) !== void 0) {
+		if (options.restoreWorkspace && samePath(dirname(resolve(dbPath)), sessionDir) && !samePath(sessionDir, workspaceDir) && isLiveWorkspaceDir(workspaceDir)) {
 			const wsRepoRoot = findRepoRoot(workspaceDir);
 			if (wsRepoRoot !== void 0 && samePath(workspaceDir, join(wsRepoRoot, ".ai"))) await ensureAiGitExcluded(wsRepoRoot);
 			if (!await exists(workspaceDb)) await ensureLinkedDatabase(sessionDb, workspaceDb);
@@ -3125,13 +3125,16 @@ async function walkFiles(root, prefix = "") {
 	}
 	return files;
 }
+function isLiveWorkspaceDir(workspaceDir) {
+	return workspaceDir !== void 0 && (existsSync(workspaceDir) || existsSync(dirname(workspaceDir)));
+}
 async function syncMirrorFiles(options) {
 	const { activeDb, sessionDir, cwd, preferredReport } = options;
 	if (sessionDir === void 0) return;
 	const activeDir = dirname(resolve(activeDb));
 	const repoRoot = findRepoRoot(cwd ?? activeDir);
 	const workspaceDir = options.workspaceDir ?? (samePath(activeDir, sessionDir) ? repoRoot ? join(repoRoot, ".ai") : activeDir : activeDir);
-	if (samePath(sessionDir, workspaceDir)) return;
+	if (!isLiveWorkspaceDir(workspaceDir) || samePath(sessionDir, workspaceDir)) return;
 	const wsRepoRoot = findRepoRoot(workspaceDir);
 	if (wsRepoRoot !== void 0 && samePath(workspaceDir, join(wsRepoRoot, ".ai"))) await ensureAiGitExcluded(wsRepoRoot);
 	const dbFileName = basename(activeDb);
@@ -3323,14 +3326,17 @@ async function renderReportFile(arg, options = {}) {
 					rw.close();
 				}
 			}
-			if (previousSessionDir !== void 0 && !samePath(previousSessionDir, resolvedSessionDir)) await syncMirrorFiles({
-				activeDb: paths.db,
-				sessionDir: previousSessionDir,
-				workspaceDir: resolvedSessionDir,
-				cwd
-			});
+			if (previousSessionDir !== void 0 && !samePath(previousSessionDir, resolvedSessionDir)) {
+				await mkdir(resolvedSessionDir, { recursive: true });
+				await syncMirrorFiles({
+					activeDb: paths.db,
+					sessionDir: previousSessionDir,
+					workspaceDir: resolvedSessionDir,
+					cwd
+				});
+			}
 		}
-		const target = options.out ?? (metaSessionDir !== void 0 && metaWorkspaceDir !== void 0 && (fromSessionDir || samePath(activeDir, metaSessionDir)) ? join(metaWorkspaceDir, basename(paths.report)) : paths.report);
+		const target = options.out ?? (metaSessionDir !== void 0 && isLiveWorkspaceDir(metaWorkspaceDir) && (fromSessionDir || samePath(activeDir, metaSessionDir)) ? join(metaWorkspaceDir, basename(paths.report)) : paths.report);
 		if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
 		const current = await readExisting(target);
 		if (current !== text) text = renderReport(loadReview(db));
@@ -3404,7 +3410,7 @@ async function changeReviewState(arg, change, options = {}) {
 			sessionDir = getMeta(db, SESSION_DIR);
 			workspaceDir = getMeta(db, WORKSPACE_DIR);
 			if (rendered !== void 0) {
-				reportTarget = sessionDir !== void 0 && workspaceDir !== void 0 && samePath(dirname(resolve(paths.db)), sessionDir) ? join(workspaceDir, basename(paths.report)) : paths.report;
+				reportTarget = sessionDir !== void 0 && isLiveWorkspaceDir(workspaceDir) && samePath(dirname(resolve(paths.db)), sessionDir) ? join(workspaceDir, basename(paths.report)) : paths.report;
 				await refuseDatabase(reportTarget, paths.db);
 			}
 			return result;
@@ -4183,7 +4189,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+0e7428b`;
+	return `pr-comments ${VERSION}+9a437be`;
 }
 //#endregion
 //#region src/cli.ts
