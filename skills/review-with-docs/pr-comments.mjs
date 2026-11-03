@@ -3030,24 +3030,20 @@ async function ensureLinkedDatabase(source, target) {
 		});
 	}
 }
+const TEMP_FILE_SUFFIX = /\.[0-9a-f]{8}\.tmp$/u;
 async function walkFiles(root, prefix = "") {
 	let entries;
 	try {
 		entries = await readdir(join(root, prefix), { withFileTypes: true });
 	} catch (error) {
-		if ([
-			"ENOENT",
-			"ENOTDIR",
-			"EACCES",
-			"EPERM"
-		].includes(error.code ?? "")) return [];
+		if (["ENOENT", "ENOTDIR"].includes(error.code ?? "")) return [];
 		throw error;
 	}
 	const files = [];
 	for (const entry of entries) {
 		const rel = prefix ? join(prefix, entry.name) : entry.name;
 		if (entry.isDirectory()) files.push(...await walkFiles(root, rel));
-		else if (entry.isFile() && !/\.sqlite\.[0-9a-f]{8}\.tmp$|\.tmp$/u.test(entry.name)) files.push(rel);
+		else if (entry.isFile() && !TEMP_FILE_SUFFIX.test(entry.name)) files.push(rel);
 	}
 	return files;
 }
@@ -4031,7 +4027,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+c1120c0`;
+	return `pr-comments ${VERSION}+83e6fe4`;
 }
 //#endregion
 //#region src/cli.ts
