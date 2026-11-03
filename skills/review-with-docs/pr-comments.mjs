@@ -3417,11 +3417,13 @@ async function changeReviewState(arg, change, options = {}) {
 			}
 			return result;
 		}, { immediate: true });
-		try {
-			if (rendered !== void 0) {
+		if (rendered !== void 0) {
+			let reportWritten = false;
+			try {
 				await mkdir(dirname(reportTarget), { recursive: true });
 				while (true) {
 					await writeFile(reportTarget, rendered, "utf8");
+					reportWritten = true;
 					if (sessionDir !== void 0) await syncMirrorFiles({
 						activeDb: paths.db,
 						sessionDir,
@@ -3432,7 +3434,17 @@ async function changeReviewState(arg, change, options = {}) {
 					if (latest === rendered) break;
 					rendered = latest;
 				}
-			} else if (sessionDir !== void 0) await syncMirrorFiles({
+			} catch {
+				if (!reportWritten && sessionDir !== void 0) try {
+					await syncMirrorFiles({
+						activeDb: paths.db,
+						sessionDir,
+						workspaceDir
+					});
+				} catch {}
+			}
+		} else if (sessionDir !== void 0) try {
+			await syncMirrorFiles({
 				activeDb: paths.db,
 				sessionDir,
 				workspaceDir
@@ -4195,7 +4207,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+2bf7cee`;
+	return `pr-comments ${VERSION}+fa74f01`;
 }
 //#endregion
 //#region src/cli.ts
