@@ -3158,55 +3158,64 @@ async function renderReportFile(arg, options = {}) {
 	const paths = reviewPaths(arg);
 	await refuseDatabase(options.out ?? paths.report, paths.db);
 	const db = openReviewDb(paths.db, "readonly");
-	let text;
-	let metaSessionDir;
-	let metaWorkspaceDir;
 	try {
-		text = renderReport(loadReview(db));
-		metaSessionDir = getMeta(db, SESSION_DIR);
-		metaWorkspaceDir = getMeta(db, WORKSPACE_DIR);
+		let text = renderReport(loadReview(db));
+		let metaSessionDir = getMeta(db, SESSION_DIR);
+		let metaWorkspaceDir = getMeta(db, WORKSPACE_DIR);
+		const cwd = options.cwd ?? process.cwd();
+		const resolvedSessionDir = options.sessionDir === void 0 ? void 0 : resolve(cwd, options.sessionDir);
+		if (resolvedSessionDir !== void 0) {
+			const activeDir = dirname(resolve(cwd, paths.db));
+			const repoRoot = findRepoRoot(cwd);
+			const resolvedWorkspaceDir = samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, ".ai") : activeDir;
+			if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
+				const rw = openReviewDb(paths.db, "existing");
+				try {
+					inTransaction(rw, () => {
+						setMeta(rw, SESSION_DIR, resolvedSessionDir);
+						setMeta(rw, WORKSPACE_DIR, resolvedWorkspaceDir);
+					});
+					metaSessionDir = resolvedSessionDir;
+					metaWorkspaceDir = resolvedWorkspaceDir;
+				} finally {
+					rw.close();
+				}
+			}
+		}
+		const target = options.out ?? (metaSessionDir !== void 0 && metaWorkspaceDir !== void 0 && samePath(dirname(resolve(cwd, paths.db)), metaSessionDir) ? join(metaWorkspaceDir, basename(paths.report)) : paths.report);
+		if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
+		const current = await readExisting(target);
+		if (current !== text) text = renderReport(loadReview(db));
+		const action = current === text ? "unchanged" : current === void 0 ? "created" : "updated";
+		if (action !== "unchanged") {
+			await mkdir(dirname(target), { recursive: true });
+			while (true) {
+				await writeFile(target, text, "utf8");
+				if (metaSessionDir !== void 0) await syncMirrorFiles({
+					activeDb: paths.db,
+					sessionDir: metaSessionDir,
+					workspaceDir: metaWorkspaceDir,
+					cwd,
+					preferredReport: options.out === void 0 ? target : void 0
+				});
+				const latest = renderReport(loadReview(db));
+				if (latest === text) break;
+				text = latest;
+			}
+		} else if (metaSessionDir !== void 0) await syncMirrorFiles({
+			activeDb: paths.db,
+			sessionDir: metaSessionDir,
+			workspaceDir: metaWorkspaceDir,
+			cwd,
+			preferredReport: options.out === void 0 ? target : void 0
+		});
+		return {
+			report: target,
+			action
+		};
 	} finally {
 		db.close();
 	}
-	const cwd = options.cwd ?? process.cwd();
-	const resolvedSessionDir = options.sessionDir === void 0 ? void 0 : resolve(cwd, options.sessionDir);
-	if (resolvedSessionDir !== void 0) {
-		const activeDir = dirname(resolve(cwd, paths.db));
-		const repoRoot = findRepoRoot(cwd);
-		const resolvedWorkspaceDir = samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, ".ai") : activeDir;
-		if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
-			const rw = openReviewDb(paths.db, "existing");
-			try {
-				inTransaction(rw, () => {
-					setMeta(rw, SESSION_DIR, resolvedSessionDir);
-					setMeta(rw, WORKSPACE_DIR, resolvedWorkspaceDir);
-				});
-				metaSessionDir = resolvedSessionDir;
-				metaWorkspaceDir = resolvedWorkspaceDir;
-			} finally {
-				rw.close();
-			}
-		}
-	}
-	const target = options.out ?? (metaSessionDir !== void 0 && metaWorkspaceDir !== void 0 && samePath(dirname(resolve(cwd, paths.db)), metaSessionDir) ? join(metaWorkspaceDir, basename(paths.report)) : paths.report);
-	if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
-	const current = await readExisting(target);
-	const action = current === text ? "unchanged" : current === void 0 ? "created" : "updated";
-	if (action !== "unchanged") {
-		await mkdir(dirname(target), { recursive: true });
-		await writeFile(target, text, "utf8");
-	}
-	if (metaSessionDir !== void 0) await syncMirrorFiles({
-		activeDb: paths.db,
-		sessionDir: metaSessionDir,
-		workspaceDir: metaWorkspaceDir,
-		cwd,
-		preferredReport: options.out === void 0 ? target : void 0
-	});
-	return {
-		report: target,
-		action
-	};
 }
 async function dumpReviewFile(arg) {
 	const { data, links, pullRequest } = await loadReviewFile(arg);
@@ -4022,7 +4031,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+c949d12`;
+	return `pr-comments ${VERSION}+c1120c0`;
 }
 //#endregion
 //#region src/cli.ts
