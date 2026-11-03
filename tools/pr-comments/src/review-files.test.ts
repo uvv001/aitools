@@ -904,6 +904,45 @@ describe('initReviewFile', () => {
           expect(await readFile(sessRoundFile, 'utf8')).toBe(`fallback ${code}\n`);
         }
       });
+
+      it('reconciles peer hot rollback journals after a writer crash and prevents cache spill on hard-linked databases', async () => {
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Committed target' }, result: null }));
+
+        // Case 1: a writer opened through openReviewDb (cache_spill = OFF) crashes mid-transaction on db; deleting .ai/
+        // and restoring from sessionDb preserves 'Committed target'.
+        const openDbCrash = `
+          const [storeUrl, targetDb] = process.argv.slice(1);
+          const { openReviewDb } = await import(storeUrl);
+          const h = openReviewDb(targetDb, 'existing');
+          h.exec('BEGIN IMMEDIATE');
+          h.exec("UPDATE review SET target = 'Uncommitted target'");
+          h.exec("INSERT INTO meta (key, value) VALUES ('big', '" + 'x'.repeat(4 * 1024 * 1024) + "')");
+          process.exit(9);
+        `;
+        const storeUrl = new URL('./review-store.ts', import.meta.url).href;
+        await runNode(['--input-type=module', '-e', openDbCrash, storeUrl, db]);
+        await rm(join(repo, '.ai'), { recursive: true, force: true });
+        await renderReportFile(sessionDb, { sessionDir, cwd });
+        expect((await loadReviewFile(db)).data.target).toBe('Committed target');
+        expect((await loadReviewFile(sessionDb)).data.target).toBe('Committed target');
+
+        // Case 2: even if an external raw SQLite connection spills uncommitted pages and leaves a hot journal on one
+        // hard-linked path, opening or mutating through the other path reconciles the peer journal first.
+        const rawCrash = `
+          const { DatabaseSync } = require('node:sqlite');
+          const h = new DatabaseSync(process.argv[1]);
+          h.exec('BEGIN IMMEDIATE');
+          h.exec("UPDATE review SET target = 'Uncommitted raw target'");
+          h.exec("INSERT INTO meta (key, value) VALUES ('rawbig', '" + 'y'.repeat(8 * 1024 * 1024) + "')");
+          process.exit(9);
+        `;
+        await runNode(['-e', rawCrash, sessionDb]);
+        expect(existsSync(`${sessionDb}-journal`)).toBe(true);
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Next committed target' }, result: null }));
+        expect(existsSync(`${sessionDb}-journal`)).toBe(false);
+        expect((await loadReviewFile(sessionDb)).data.target).toBe('Next committed target');
+        expect((await loadReviewFile(db)).data.target).toBe('Next committed target');
+      });
     });
   });
 

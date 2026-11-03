@@ -14,7 +14,7 @@ import { defaultReportPath, findRepoRoot, REVIEW_FOLDER } from './review-naming.
 import { newReview } from './review-ops.ts';
 import { readReport } from './review-read.ts';
 import { renderReport } from './review-render.ts';
-import { getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
+import { getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, REVIEW_SCHEMA_VERSION, saveLinks, saveReview, setMeta } from './review-store.ts';
 import { clearPullRequest, loadKnownRefs, loadPullRequest, savePullRequest } from './store.ts';
 
 export interface ReviewPaths {
@@ -311,10 +311,87 @@ function vacuumDatabase(source: string, destination: string): void {
   }
 }
 
+function reconcileHotJournal(candidatePath: string): void {
+  if (!existsSync(candidatePath) || !existsSync(`${candidatePath}-journal`)) return;
+  const handle = new DatabaseSync(candidatePath, { timeout: 10_000 });
+  try {
+    handle.exec('BEGIN IMMEDIATE; ROLLBACK');
+  } catch {
+    // Ignore if the file is not a valid SQLite database.
+  } finally {
+    handle.close();
+  }
+}
+
+function readStoredDirs(dbPath: string): { sessionDir?: string; workspaceDir?: string } {
+  if (!existsSync(dbPath)) return {};
+  let handle: DatabaseSync | undefined;
+  try {
+    handle = new DatabaseSync(dbPath, { readOnly: true, timeout: 10_000 });
+    const version = (handle.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined)?.user_version;
+    if (version !== REVIEW_SCHEMA_VERSION) return {};
+    const rows = handle
+      .prepare("SELECT key, value FROM meta WHERE key IN ('session_dir', 'workspace_dir')")
+      .all() as { key: string; value: string }[];
+    let sessionDir: string | undefined;
+    let workspaceDir: string | undefined;
+    for (const row of rows) {
+      if (row.key === SESSION_DIR) sessionDir = row.value;
+      else if (row.key === WORKSPACE_DIR) workspaceDir = row.value;
+    }
+    return { sessionDir, workspaceDir };
+  } catch {
+    return {};
+  } finally {
+    handle?.close();
+  }
+}
+
+// Reconciles any hot rollback journal on `dbPath` or its hard-linked session/workspace peer before opening the
+// database, and when `restoreWorkspace` is true and `dbPath` is the session copy of an existing workspace repository,
+// restores a missing `.ai/` database link first so manipulations run against the `.ai/` database path.
+async function prepareDatabasePath(dbPath: string, options: { restoreWorkspace?: boolean } = {}): Promise<string> {
+  if (!existsSync(dbPath)) return dbPath;
+  reconcileHotJournal(dbPath);
+  const { sessionDir, workspaceDir } = readStoredDirs(dbPath);
+  if (sessionDir !== undefined && workspaceDir !== undefined) {
+    const fileName = basename(dbPath);
+    const sessionDb = join(sessionDir, fileName);
+    const workspaceDb = join(workspaceDir, fileName);
+    if (existsSync(`${workspaceDb}-journal`) && (samePath(dbPath, workspaceDb) || (await sameInode(dbPath, workspaceDb)))) {
+      reconcileHotJournal(workspaceDb);
+    }
+    if (existsSync(`${sessionDb}-journal`) && (samePath(dbPath, sessionDb) || (await sameInode(dbPath, sessionDb)))) {
+      reconcileHotJournal(sessionDb);
+    }
+    if (
+      options.restoreWorkspace &&
+      samePath(dirname(resolve(dbPath)), sessionDir) &&
+      !samePath(sessionDir, workspaceDir) &&
+      findRepoRoot(workspaceDir) !== undefined
+    ) {
+      const wsRepoRoot = findRepoRoot(workspaceDir);
+      if (wsRepoRoot !== undefined && samePath(workspaceDir, join(wsRepoRoot, REVIEW_FOLDER))) {
+        await ensureAiGitExcluded(wsRepoRoot);
+      }
+      if (!(await exists(workspaceDb))) {
+        await ensureLinkedDatabase(sessionDb, workspaceDb);
+      }
+      if (await sameInode(sessionDb, workspaceDb)) {
+        return workspaceDb;
+      }
+    }
+  }
+  return dbPath;
+}
+
 // Ensures `target` is a hard link to the SQLite database `source` or, when hard links are unavailable, a
 // transactionally consistent SQLite snapshot (`VACUUM INTO`) so uncommitted cache-spilled pages are never copied.
 async function ensureLinkedDatabase(source: string, target: string): Promise<void> {
-  if (samePath(source, target) || !(await exists(source)) || (await sameInode(source, target))) return;
+  if (samePath(source, target) || !(await exists(source))) return;
+  reconcileHotJournal(source);
+  reconcileHotJournal(target);
+  if (await sameInode(source, target)) return;
   await mkdir(dirname(target), { recursive: true });
   const temp = `${target}.${randomBytes(4).toString('hex')}.tmp`;
   let vacuumed = false;
@@ -491,6 +568,7 @@ function loadState(db: DatabaseSync): ReviewState {
 // Reads the whole review through a read-only connection: nothing is written, not even by accident.
 export async function loadReviewFile(arg: string): Promise<LoadedReview> {
   const paths = reviewPaths(arg);
+  await prepareDatabasePath(paths.db);
   const db = openReviewDb(paths.db, 'readonly');
   try {
     return { ...loadState(db), paths };
@@ -501,7 +579,9 @@ export async function loadReviewFile(arg: string): Promise<LoadedReview> {
 
 // The pull request that the last `pr sync` stored, `undefined` before the first one. Read-only.
 export async function loadSnapshot(arg: string): Promise<PullRequestData | undefined> {
-  const db = openReviewDb(reviewPaths(arg).db, 'readonly');
+  const dbPath = reviewPaths(arg).db;
+  await prepareDatabasePath(dbPath);
+  const db = openReviewDb(dbPath, 'readonly');
   try {
     return inTransaction(db, () => loadPullRequest(db));
   } finally {
@@ -526,6 +606,7 @@ export async function renderReportFile(
 ): Promise<RenderResult> {
   const paths = reviewPaths(arg);
   await refuseDatabase(options.out ?? paths.report, paths.db);
+  await prepareDatabasePath(paths.db);
   const db = openReviewDb(paths.db, 'readonly');
   try {
     let text = renderReport(loadReview(db));
@@ -625,7 +706,8 @@ export async function changeReviewState<T>(
   change: (state: ReviewState) => StateChange<T> | Promise<StateChange<T>>,
   options: { snapshot?: PullRequestData } = {},
 ): Promise<StateChange<T>> {
-  const paths = reviewPaths(arg);
+  const activeDbPath = await prepareDatabasePath(reviewPaths(arg).db, { restoreWorkspace: true });
+  const paths = reviewPaths(activeDbPath);
   const db = openReviewDb(paths.db, 'existing');
   let sessionDir: string | undefined;
   let workspaceDir: string | undefined;
@@ -734,7 +816,8 @@ const samePullRequest = (a: PullRequestRef, b: PullRequestRef): boolean =>
 // connected to a pull request, and it must be this one (host, owner and repository compared without regard to case).
 // The links stay as they are: what they point at is kept, as gone, when the pull request no longer has it.
 export async function syncReviewFile(arg: string, data: PullRequestData): Promise<SyncResult> {
-  const paths = reviewPaths(arg);
+  const activeDbPath = await prepareDatabasePath(reviewPaths(arg).db, { restoreWorkspace: true });
+  const paths = reviewPaths(activeDbPath);
   const db = openReviewDb(paths.db, 'existing');
   let sessionDir: string | undefined;
   let workspaceDir: string | undefined;

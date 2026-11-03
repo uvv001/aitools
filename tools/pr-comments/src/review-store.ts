@@ -122,7 +122,7 @@ function configure(db: DatabaseSync, path: string, mode: OpenMode): void {
   }
   if (mode !== 'readonly') {
     if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}PRAGMA user_version = ${REVIEW_SCHEMA_VERSION}`));
-    db.exec('PRAGMA journal_mode = DELETE');
+    db.exec('PRAGMA journal_mode = DELETE; PRAGMA cache_spill = OFF');
   }
   db.exec('PRAGMA foreign_keys = ON');
 }

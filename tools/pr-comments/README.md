@@ -508,7 +508,7 @@ git config diff.review.textconv "pr-comments report dump --db"
 
 - One writer at a time. A binary file cannot be merged. After a conflict, take one side (`git checkout --theirs <file>` or `--ours`) and redo the other changes with the commands.
 - The repository that holds tracked databases must not git-ignore `*.sqlite`.
-- The database is one file. A `-journal` file exists only while a command writes.
+- The database is one file (`journal_mode = DELETE`, `cache_spill = OFF`). A `-journal` file exists only while a command commits (or after an abrupt crash until the next command reconciles it).
 
 ## Development
 
