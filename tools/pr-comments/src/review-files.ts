@@ -391,7 +391,14 @@ async function prepareDatabasePath(dbPath: string, options: { restoreWorkspace?:
       if (!(await exists(workspaceDb))) {
         await ensureLinkedDatabase(sessionDb, workspaceDb);
       }
-      if (await sameInode(sessionDb, workspaceDb)) {
+      const wsDirs = readStoredDirs(workspaceDb);
+      if (
+        (await sameInode(sessionDb, workspaceDb)) ||
+        (wsDirs.sessionDir !== undefined &&
+          wsDirs.workspaceDir !== undefined &&
+          samePath(wsDirs.sessionDir, sessionDir) &&
+          samePath(wsDirs.workspaceDir, workspaceDir))
+      ) {
         return workspaceDb;
       }
     }

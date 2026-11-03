@@ -25,7 +25,7 @@ import { dumpReview } from './review-dump.ts';
 import type { CommentLink, ReviewState } from './review-links.ts';
 import { linkDuplicate, linkNote, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
-import { newReview } from './review-ops.ts';
+import { newReview, openRound, updateRound } from './review-ops.ts';
 import { readReport } from './review-read.ts';
 import { renderReport } from './review-render.ts';
 import { REVIEW_SCHEMA_VERSION, getMeta, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
@@ -977,6 +977,37 @@ describe('initReviewFile', () => {
           vi.mocked(rename).mockImplementation(actualFs.rename);
         }
         expect((await loadReviewFile(sessionDb)).links).toEqual([{ ref: 'c2', role: 'note', note: 'Keep this classification' }]);
+
+        // Even when SQLite hard links fail with EXDEV so sessionDb and workspaceDb are separate snapshot files,
+        // mutations through sessionDb redirect to workspaceDb and serialize on one SQLite write lock so neither update is lost.
+        vi.mocked(link).mockImplementation(async (src, dst) => {
+          if (String(src).endsWith('.sqlite') || String(dst).includes('.sqlite')) throw failure('EXDEV');
+          return actualFs.link(src, dst);
+        });
+        try {
+          await mutateReviewFile(db, (data) => ({
+            data: openRound(data, { revision: '11111111', base: null }),
+            result: null,
+          }));
+          const [wsResult, sessResult] = await Promise.all([
+            mutateReviewFile(db, (data) => ({
+              data: updateRound(data, { text: 'Workspace accepted note' }),
+              result: null,
+            })),
+            mutateReviewFile(sessionDb, (data) => ({
+              data: updateRound(data, { text: 'Session accepted note' }),
+              result: null,
+            })),
+          ]);
+          expect([wsResult.result, sessResult.result]).toEqual([null, null]);
+        } finally {
+          vi.mocked(link).mockImplementation(actualFs.link);
+        }
+        const finalWsText = (await loadReviewFile(db)).data.intro.reviewed.items[0]?.text ?? '';
+        const finalSessText = (await loadReviewFile(sessionDb)).data.intro.reviewed.items[0]?.text ?? '';
+        expect(finalWsText).toContain('Workspace accepted note');
+        expect(finalWsText).toContain('Session accepted note');
+        expect(finalSessText).toBe(finalWsText);
       });
 
       it('reconciles peer hot rollback journals after a writer crash and prevents cache spill on hard-linked databases', async () => {
