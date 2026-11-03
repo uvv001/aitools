@@ -2,7 +2,7 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, linkSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { link, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -652,6 +652,33 @@ describe('initReviewFile', () => {
       const loaded = await loadReviewFile(result.report);
       expect(loaded.data).toStrictEqual(NEW_REVIEW);
       expect(loaded.paths).toEqual({ db: result.db, report: result.report });
+    });
+
+    it('re-appends /.ai/ to .git/info/exclude when a later negation undoes an earlier rule, and reports a conflict when .gitignore negates .ai/', async () => {
+      const excludePath = join(repo, '.git', 'info', 'exclude');
+      await mkdir(dirname(excludePath), { recursive: true });
+      await writeFile(excludePath, '/.ai/\n!/.ai/\n', 'utf8');
+      await initReviewFile('PR 42', { cwd, now: NOW });
+      expect(await readFile(excludePath, 'utf8')).toBe('/.ai/\n!/.ai/\n/.ai/\n');
+
+      await rm(join(repo, '.ai'), { recursive: true, force: true });
+      await rm(excludePath, { force: true });
+      await writeFile(join(repo, '.gitignore'), '/.ai/\n!docs/review.md\n', 'utf8');
+      await initReviewFile('PR 42', { cwd, now: NOW });
+      expect(existsSync(excludePath)).toBe(false);
+
+      await rm(join(repo, '.ai'), { recursive: true, force: true });
+      await writeFile(join(repo, '.gitignore'), '/.ai/\n!/.ai/\n!/.ai/**\n', 'utf8');
+      await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
+        `${join(repo, '.gitignore')} negates .ai/, which overrides .git/info/exclude and exposes .ai/ to git`,
+      );
+      expect(await readFile(excludePath, 'utf8')).toBe('/.ai/\n');
+      expect(existsSync(join(repo, '.ai'))).toBe(false);
+
+      await writeFile(join(repo, '.gitignore'), '/.ai/**\n!/.ai/*.md\n', 'utf8');
+      await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
+        `${join(repo, '.gitignore')} negates .ai/, which overrides .git/info/exclude and exposes .ai/ to git`,
+      );
     });
 
     it('makes the file name of a name with markup and punctuation', async () => {

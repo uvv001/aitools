@@ -189,7 +189,17 @@ const PULL_REQUEST = 'pull_request';
 const SESSION_DIR = 'session_dir';
 const WORKSPACE_DIR = 'workspace_dir';
 
-const AI_IGNORE_LINE = /^[ \t]*\/?\.ai\/?[ \t]*$/mu;
+const AI_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
+const AI_NEGATE_LINE = /^[ \t]*!(?:\/?\.ai(?:\/[^\r\n]*)?|\*+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
+
+function aiIgnoreState(content: string): 'ignored' | 'negated' | 'none' {
+  let state: 'ignored' | 'negated' | 'none' = 'none';
+  for (const line of content.split(/\r?\n/u)) {
+    if (AI_IGNORE_LINE.test(line)) state = 'ignored';
+    else if (AI_NEGATE_LINE.test(line)) state = 'negated';
+  }
+  return state;
+}
 
 function resolveGitDir(repoRoot: string): string | undefined {
   const dotGit = join(repoRoot, '.git');
@@ -220,16 +230,23 @@ function resolveGitDir(repoRoot: string): string | undefined {
 // Ensures `.ai/` is ignored by Git when a review file is placed in `<repoRoot>/.ai/`: uses `.git/info/exclude` (or the
 // worktree's common git dir) when `.gitignore` does not already ignore `.ai/`, so tracked files stay untouched.
 export async function ensureAiGitExcluded(repoRoot: string): Promise<void> {
-  const gitignore = await readExisting(join(repoRoot, '.gitignore'));
-  if (gitignore !== undefined && AI_IGNORE_LINE.test(gitignore)) return;
+  const gitignorePath = join(repoRoot, '.gitignore');
+  const gitignore = await readExisting(gitignorePath);
+  const gitignoreState = gitignore !== undefined ? aiIgnoreState(gitignore) : 'none';
+  if (gitignoreState === 'ignored') return;
   const gitDir = resolveGitDir(repoRoot);
-  if (gitDir === undefined || !existsSync(gitDir)) return;
-  const excludePath = join(gitDir, 'info', 'exclude');
-  const current = (await readExisting(excludePath)) ?? '';
-  if (AI_IGNORE_LINE.test(current)) return;
-  await mkdir(dirname(excludePath), { recursive: true });
-  const prefix = current === '' || current.endsWith('\n') ? '' : '\n';
-  await writeFile(excludePath, `${current}${prefix}/.ai/\n`, 'utf8');
+  if (gitDir !== undefined && existsSync(gitDir)) {
+    const excludePath = join(gitDir, 'info', 'exclude');
+    const current = (await readExisting(excludePath)) ?? '';
+    if (aiIgnoreState(current) !== 'ignored') {
+      await mkdir(dirname(excludePath), { recursive: true });
+      const prefix = current === '' || current.endsWith('\n') ? '' : '\n';
+      await writeFile(excludePath, `${current}${prefix}/.ai/\n`, 'utf8');
+    }
+  }
+  if (gitignoreState === 'negated') {
+    throw new Error(`${gitignorePath} negates .ai/, which overrides .git/info/exclude and exposes .ai/ to git`);
+  }
 }
 
 async function sameInode(a: string, b: string): Promise<boolean> {
@@ -428,17 +445,17 @@ export async function initReviewFile(
   await refuseDatabase(reportTarget, dbPath);
   const rendered = assertRenders(data, reportTarget);
 
+  const repoRoot = findRepoRoot(workspaceDir);
+  if (repoRoot !== undefined && samePath(workspaceDir, join(repoRoot, REVIEW_FOLDER))) {
+    await ensureAiGitExcluded(repoRoot);
+  }
+
   const created = await createDatabase(
     primaryDb,
     data,
     dualHomed ? { pullRequest, sessionDir, workspaceDir } : { pullRequest },
   );
   if (!created) throw existingDatabase(primaryDb);
-
-  const repoRoot = findRepoRoot(workspaceDir);
-  if (repoRoot !== undefined && samePath(workspaceDir, join(repoRoot, REVIEW_FOLDER))) {
-    await ensureAiGitExcluded(repoRoot);
-  }
   await mkdir(dirname(reportTarget), { recursive: true });
   await writeFile(reportTarget, rendered, 'utf8');
   if (dualHomed) {
