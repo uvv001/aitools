@@ -2926,6 +2926,17 @@ async function sameInode(a, b) {
 		return false;
 	}
 }
+const LINK_FALLBACK_CODES = /* @__PURE__ */ new Set([
+	"EXDEV",
+	"EPERM",
+	"EACCES",
+	"ENOSYS",
+	"ENOTSUP",
+	"EOPNOTSUPP",
+	"EMLINK",
+	"EINVAL",
+	"UNKNOWN"
+]);
 async function ensureLinkedFile(source, target, preferNewer = true) {
 	if (samePath(source, target) || !await exists(source) || await sameInode(source, target)) return;
 	if (preferNewer && await exists(target)) {
@@ -2943,12 +2954,7 @@ async function ensureLinkedFile(source, target, preferNewer = true) {
 		try {
 			await link(source, temp);
 		} catch (error) {
-			if (![
-				"EXDEV",
-				"EPERM",
-				"EACCES",
-				"ENOSYS"
-			].includes(error.code ?? "")) throw error;
+			if (!LINK_FALLBACK_CODES.has(error.code ?? "")) throw error;
 			if (await exists(target)) {
 				const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
 				if (srcBytes.equals(dstBytes)) return;
@@ -2998,12 +3004,7 @@ async function ensureLinkedDatabase(source, target) {
 		try {
 			await link(source, temp);
 		} catch (error) {
-			if (![
-				"EXDEV",
-				"EPERM",
-				"EACCES",
-				"ENOSYS"
-			].includes(error.code ?? "")) throw error;
+			if (!LINK_FALLBACK_CODES.has(error.code ?? "")) throw error;
 			vacuumDatabase(source, temp);
 			vacuumed = true;
 		}
@@ -4027,7 +4028,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+83e6fe4`;
+	return `pr-comments ${VERSION}+85f168f`;
 }
 //#endregion
 //#region src/cli.ts
