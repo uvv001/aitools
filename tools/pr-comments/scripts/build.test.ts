@@ -10,7 +10,7 @@ import { samplePullRequest } from '../src/fixtures.ts';
 import { renderMarkdown } from '../src/markdown.ts';
 import type { PullRequestData } from '../src/model.ts';
 import { VERSION } from '../src/version.ts';
-import { buildBundle } from './build.ts';
+import { buildBundle, buildId } from './build.ts';
 
 const run = promisify(execFile);
 
@@ -306,5 +306,28 @@ describe('bundle', () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('is not a review database');
     expect(await readFile(db, 'utf8')).toBe('not a database');
+  });
+
+  it('scopes the buildId -dirty suffix to tracked files under the package root', async () => {
+    const repo = join(work, 'dirty-scope-repo');
+    const pkgRoot = join(repo, 'tools', 'pr-comments');
+    const skillDir = join(repo, 'skills', 'review-with-docs');
+    await makeRepository(repo);
+    await mkdir(pkgRoot, { recursive: true });
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(join(pkgRoot, 'src.ts'), 'export const x = 1;\n', 'utf8');
+    await writeFile(join(skillDir, 'pr-comments.mjs'), '// bundle\n', 'utf8');
+    const gitConfig = ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'core.autocrlf=false'];
+    await run('git', [...gitConfig, 'add', '.']);
+    await run('git', [...gitConfig, 'commit', '-q', '-m', 'add files']);
+    const head = (await run('git', ['-C', repo, 'rev-parse', '--short', 'HEAD'])).stdout.trim();
+
+    expect(buildId(pkgRoot)).toBe(head);
+
+    await writeFile(join(skillDir, 'pr-comments.mjs'), '// modified bundle\n', 'utf8');
+    expect(buildId(pkgRoot)).toBe(head);
+
+    await writeFile(join(pkgRoot, 'src.ts'), 'export const x = 2;\n', 'utf8');
+    expect(buildId(pkgRoot)).toBe(`${head}-dirty`);
   });
 });

@@ -434,7 +434,7 @@ Build:
 
 - `pnpm build` runs `scripts/build.ts`. It bundles `src/cli.ts` and everything it imports into one ES module with rolldown (`platform: 'node'`): `../../skills/review-with-docs/pr-comments.mjs`, with a shebang and a notice that it is generated. `--out <file>` writes it elsewhere.
 - Only `node:` built-ins stay as imports. The file needs Node 24.2 and nothing else.
-- `pr-comments --version` prints the version of `package.json`. The bundle adds the build id that the build script sets (`__BUILD__`): `pr-comments 0.1.0+75c05c9` (the short commit, with `-dirty` when tracked files have uncommitted changes, and nothing without git). A copy of the bundle that fell behind can be recognised by it.
+- `pr-comments --version` prints the version of `package.json`. The bundle adds the build id that the build script sets (`__BUILD__`): `pr-comments 0.1.0+75c05c9` (the short commit, with `-dirty` when tracked files under `tools/pr-comments/` have uncommitted changes, and nothing without git). A copy of the bundle that fell behind can be recognised by it.
 - `bin` in `package.json` points to `./src/cli.ts`. A global install must link the project (`pnpm add -g .`). Node refuses to run TypeScript files under `node_modules`, so a copy from a tarball or registry would fail with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.
 
 Tests (`pnpm test` runs `vitest run`; `pnpm typecheck` runs `tsc --noEmit`):
