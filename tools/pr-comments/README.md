@@ -54,7 +54,7 @@ This is one complete review of a pull request, in order. The example reviews pul
 pr-comments init "PR 42 tenant registry" --session-dir <session-folder>/files --pr https://github.com/acme/widgets/pull/42
 Created .ai/2026-10-29_pr-42-tenant-registry_review.sqlite
 Pull request: https://github.com/acme/widgets/pull/42
-Render the report with "pr-comments report render --db .ai/2026-10-29_pr-42-tenant-registry_review.sqlite"
+Report: .ai/2026-10-29_pr-42-tenant-registry_review.md
 ```
 
 Both the database and the report are created, and every change updates the report. Without `--report`, the files go to `.ai/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root, and `.ai/` is added to `.git/info/exclude` when not already ignored. With `--session-dir <dir>`, the primary files live in `<dir>` and are hard-linked into `.ai/` on every database change and `report render`. If the pull request does not exist yet, leave out `--pr`, and connect it later:

@@ -15,7 +15,7 @@ import type { PublishComment, PublishOptions, PublishResult } from './publish.ts
 import { AGENT_DISCLAIMER } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult, ReplyTarget } from './reply.ts';
 import { parseReport } from './report-parse.ts';
-import { dumpReviewFile, loadReviewFile, loadSnapshot } from './review-files.ts';
+import { dumpReviewFile, loadReviewFile, loadSnapshot, reviewPaths } from './review-files.ts';
 import { pendingItems, pendingLines } from './review-pending.ts';
 import { renderReport } from './review-render.ts';
 import { removeScratch, scratchDir } from './review-test-support.ts';
@@ -946,7 +946,7 @@ describe('cli', () => {
   });
 
   describe('init', () => {
-    const created = (path: string) => `Created ${shown(path)}\nRender the report with "pr-comments report render --db ${shown(path)}"\n`;
+    const created = (path: string) => `Created ${shown(path)}\nReport: ${shown(reviewPaths(path).report)}\n`;
 
     it('creates the database and report, next to the report or where --db says, and names no database on stderr', async () => {
       const report = join(docs, 'chain_review.md');
@@ -979,7 +979,7 @@ describe('cli', () => {
 
       expect(await step('init', 'PR 42', '--db', named, '--pr', `${prUrl}/`)).toBe(0);
 
-      expect(printed).toBe(`Created ${shown(named)}\nPull request: ${prUrl}\nRender the report with "pr-comments report render --db ${shown(named)}"\n`);
+      expect(printed).toBe(`Created ${shown(named)}\nPull request: ${prUrl}\nReport: ${shown(reviewPaths(named).report)}\n`);
       expect((await loadReviewFile(named)).pullRequest).toBe(prUrl);
     });
 
@@ -992,7 +992,8 @@ describe('cli', () => {
 
       const db = join(repo, '.ai', '2026-10-09_pr-42-tenant-registry_review.sqlite');
       const below = relative(repo, db);
-      expect(printed).toBe(`Created ${below}\nRender the report with "pr-comments report render --db ${below}"\n`);
+      const belowReport = relative(repo, reviewPaths(db).report);
+      expect(printed).toBe(`Created ${below}\nReport: ${belowReport}\n`);
       expect(await exists(db)).toBe(true);
     });
 
