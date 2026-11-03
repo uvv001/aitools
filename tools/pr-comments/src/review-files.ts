@@ -522,61 +522,72 @@ export async function renderReportFile(
   const paths = reviewPaths(arg);
   await refuseDatabase(options.out ?? paths.report, paths.db);
   const db = openReviewDb(paths.db, 'readonly');
-  let text: string;
-  let metaSessionDir: string | undefined;
-  let metaWorkspaceDir: string | undefined;
   try {
-    text = renderReport(loadReview(db));
-    metaSessionDir = getMeta(db, SESSION_DIR);
-    metaWorkspaceDir = getMeta(db, WORKSPACE_DIR);
+    let text = renderReport(loadReview(db));
+    let metaSessionDir = getMeta(db, SESSION_DIR);
+    let metaWorkspaceDir = getMeta(db, WORKSPACE_DIR);
+    const cwd = options.cwd ?? process.cwd();
+    const resolvedSessionDir = options.sessionDir === undefined ? undefined : resolve(cwd, options.sessionDir);
+    if (resolvedSessionDir !== undefined) {
+      const activeDir = dirname(resolve(cwd, paths.db));
+      const repoRoot = findRepoRoot(cwd);
+      const resolvedWorkspaceDir =
+        samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir;
+      if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
+        const rw = openReviewDb(paths.db, 'existing');
+        try {
+          inTransaction(rw, () => {
+            setMeta(rw, SESSION_DIR, resolvedSessionDir);
+            setMeta(rw, WORKSPACE_DIR, resolvedWorkspaceDir);
+          });
+          metaSessionDir = resolvedSessionDir;
+          metaWorkspaceDir = resolvedWorkspaceDir;
+        } finally {
+          rw.close();
+        }
+      }
+    }
+    const target =
+      options.out ??
+      (metaSessionDir !== undefined &&
+      metaWorkspaceDir !== undefined &&
+      samePath(dirname(resolve(cwd, paths.db)), metaSessionDir)
+        ? join(metaWorkspaceDir, basename(paths.report))
+        : paths.report);
+    if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
+    const current = await readExisting(target);
+    if (current !== text) text = renderReport(loadReview(db));
+    const action: RenderResult['action'] = current === text ? 'unchanged' : current === undefined ? 'created' : 'updated';
+    if (action !== 'unchanged') {
+      await mkdir(dirname(target), { recursive: true });
+      while (true) {
+        await writeFile(target, text, 'utf8');
+        if (metaSessionDir !== undefined) {
+          await syncMirrorFiles({
+            activeDb: paths.db,
+            sessionDir: metaSessionDir,
+            workspaceDir: metaWorkspaceDir,
+            cwd,
+            preferredReport: options.out === undefined ? target : undefined,
+          });
+        }
+        const latest = renderReport(loadReview(db));
+        if (latest === text) break;
+        text = latest;
+      }
+    } else if (metaSessionDir !== undefined) {
+      await syncMirrorFiles({
+        activeDb: paths.db,
+        sessionDir: metaSessionDir,
+        workspaceDir: metaWorkspaceDir,
+        cwd,
+        preferredReport: options.out === undefined ? target : undefined,
+      });
+    }
+    return { report: target, action };
   } finally {
     db.close();
   }
-  const cwd = options.cwd ?? process.cwd();
-  const resolvedSessionDir = options.sessionDir === undefined ? undefined : resolve(cwd, options.sessionDir);
-  if (resolvedSessionDir !== undefined) {
-    const activeDir = dirname(resolve(cwd, paths.db));
-    const repoRoot = findRepoRoot(cwd);
-    const resolvedWorkspaceDir =
-      samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir;
-    if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
-      const rw = openReviewDb(paths.db, 'existing');
-      try {
-        inTransaction(rw, () => {
-          setMeta(rw, SESSION_DIR, resolvedSessionDir);
-          setMeta(rw, WORKSPACE_DIR, resolvedWorkspaceDir);
-        });
-        metaSessionDir = resolvedSessionDir;
-        metaWorkspaceDir = resolvedWorkspaceDir;
-      } finally {
-        rw.close();
-      }
-    }
-  }
-  const target =
-    options.out ??
-    (metaSessionDir !== undefined &&
-    metaWorkspaceDir !== undefined &&
-    samePath(dirname(resolve(cwd, paths.db)), metaSessionDir)
-      ? join(metaWorkspaceDir, basename(paths.report))
-      : paths.report);
-  if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
-  const current = await readExisting(target);
-  const action: RenderResult['action'] = current === text ? 'unchanged' : current === undefined ? 'created' : 'updated';
-  if (action !== 'unchanged') {
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, text, 'utf8');
-  }
-  if (metaSessionDir !== undefined) {
-    await syncMirrorFiles({
-      activeDb: paths.db,
-      sessionDir: metaSessionDir,
-      workspaceDir: metaWorkspaceDir,
-      cwd,
-      preferredReport: options.out === undefined ? target : undefined,
-    });
-  }
-  return { report: target, action };
 }
 
 // The deterministic text dump of the database of `arg`.

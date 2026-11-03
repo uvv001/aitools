@@ -1131,6 +1131,39 @@ describe('mutateReviewFile', () => {
     expect((await readFile(report, 'utf8')).startsWith('# Review — Second committed change\n')).toBe(true);
   });
 
+  it('never leaves an older report on disk when a delayed renderReportFile finishes after a newer mutation commits', async () => {
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    await writeFile(report, 'stale manual edit\n', 'utf8');
+    let releaseRenderWrite!: () => void;
+    const renderWritePaused = new Promise<void>((resolve) => {
+      releaseRenderWrite = resolve;
+    });
+    let renderWriteSeen!: () => void;
+    const reachedRenderWrite = new Promise<void>((resolve) => {
+      renderWriteSeen = resolve;
+    });
+    let intercepted = false;
+    vi.mocked(writeFile).mockImplementation(async (target, data, options) => {
+      if (!intercepted && String(target) === report && String(data).startsWith('# Review — PR 42\n')) {
+        intercepted = true;
+        renderWriteSeen();
+        await renderWritePaused;
+      }
+      return actualFs.writeFile(target, data, options);
+    });
+    try {
+      const renderPromise = renderReportFile(db);
+      await reachedRenderWrite;
+      await mutateReviewFile(db, retarget('Committed during render'));
+      releaseRenderWrite();
+      await renderPromise;
+    } finally {
+      vi.mocked(writeFile).mockImplementation(actualFs.writeFile);
+    }
+    expect((await loadReviewFile(db)).data.target).toBe('Committed during render');
+    expect((await readFile(report, 'utf8')).startsWith('# Review — Committed during render\n')).toBe(true);
+  });
+
   it('keeps the meta values of the database', async () => {
     const raw = openReviewDb(db, 'existing');
     try {
