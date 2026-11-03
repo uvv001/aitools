@@ -815,6 +815,17 @@ describe('initReviewFile', () => {
         actualFs.stat(sessRoundFile, { bigint: true }),
       ]);
       expect(wsStatAfter.ino).toBe(sessStatAfter.ino);
+
+      // When a Windows viewer holds a mirror target open without FILE_SHARE_DELETE so rename(temp, target) fails with
+      // EPERM or EBUSY, ensureLinkedFile falls back to an in-place copyFile(source, target) and removes the temp file.
+      await rm(sessRoundFile);
+      await writeFile(sessRoundFile, 'stale open viewer copy\n', 'utf8');
+      await writeFile(newWsRoundFile, 'updated while viewer open\n', 'utf8');
+      const afterTie = new Date(Date.now() + 40_000);
+      await utimes(newWsRoundFile, afterTie, afterTie);
+      vi.mocked(rename).mockRejectedValueOnce(failure('EPERM')).mockRejectedValueOnce(failure('EBUSY'));
+      await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 open viewer fallback' }, result: null }));
+      expect(await readFile(sessRoundFile, 'utf8')).toBe('updated while viewer open\n');
     });
   });
 
