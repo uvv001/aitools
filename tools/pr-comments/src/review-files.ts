@@ -382,7 +382,7 @@ async function prepareDatabasePath(dbPath: string, options: { restoreWorkspace?:
       options.restoreWorkspace &&
       samePath(dirname(resolve(dbPath)), sessionDir) &&
       !samePath(sessionDir, workspaceDir) &&
-      findRepoRoot(workspaceDir) !== undefined
+      isLiveWorkspaceDir(workspaceDir)
     ) {
       const wsRepoRoot = findRepoRoot(workspaceDir);
       if (wsRepoRoot !== undefined && samePath(workspaceDir, join(wsRepoRoot, REVIEW_FOLDER))) {
@@ -464,6 +464,10 @@ async function walkFiles(root: string, prefix = ''): Promise<string[]> {
   return files;
 }
 
+function isLiveWorkspaceDir(workspaceDir: string | undefined): workspaceDir is string {
+  return workspaceDir !== undefined && (existsSync(workspaceDir) || existsSync(dirname(workspaceDir)));
+}
+
 // Synchronizes the `.sqlite` database, `.md` report, and `<stem>/round-<n>/**` files between `sessionDir` (the
 // durable primary store) and `workspaceDir` (the `.ai/` folder in the working tree for IDE access).
 async function syncMirrorFiles(options: {
@@ -480,7 +484,7 @@ async function syncMirrorFiles(options: {
   const workspaceDir =
     options.workspaceDir ??
     (samePath(activeDir, sessionDir) ? (repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir) : activeDir);
-  if (samePath(sessionDir, workspaceDir)) return;
+  if (!isLiveWorkspaceDir(workspaceDir) || samePath(sessionDir, workspaceDir)) return;
 
   const wsRepoRoot = findRepoRoot(workspaceDir);
   if (wsRepoRoot !== undefined && samePath(workspaceDir, join(wsRepoRoot, REVIEW_FOLDER))) {
@@ -711,6 +715,7 @@ export async function renderReportFile(
         }
       }
       if (previousSessionDir !== undefined && !samePath(previousSessionDir, resolvedSessionDir)) {
+        await mkdir(resolvedSessionDir, { recursive: true });
         await syncMirrorFiles({
           activeDb: paths.db,
           sessionDir: previousSessionDir,
@@ -722,7 +727,7 @@ export async function renderReportFile(
     const target =
       options.out ??
       (metaSessionDir !== undefined &&
-      metaWorkspaceDir !== undefined &&
+      isLiveWorkspaceDir(metaWorkspaceDir) &&
       (fromSessionDir || samePath(activeDir, metaSessionDir))
         ? join(metaWorkspaceDir, basename(paths.report))
         : paths.report);
@@ -824,7 +829,7 @@ export async function changeReviewState<T>(
         if (rendered !== undefined) {
           reportTarget =
             sessionDir !== undefined &&
-            workspaceDir !== undefined &&
+            isLiveWorkspaceDir(workspaceDir) &&
             samePath(dirname(resolve(paths.db)), sessionDir)
               ? join(workspaceDir, basename(paths.report))
               : paths.report;

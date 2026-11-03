@@ -819,6 +819,12 @@ describe('initReviewFile', () => {
       it('updates workspace_dir and targets the new workspace report when restoring from sessionDir in a new worktree', async () => {
         await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
         await rm(repo, { recursive: true, force: true });
+
+        // Mutating sessionDb after the old worktree was removed does not recreate the deleted worktree folder.
+        await mutateReviewFile(sessionDb, (data) => ({ data: { ...data, target: 'PR 42 headless session' }, result: null }));
+        expect(existsSync(repo)).toBe(false);
+        expect(await readFile(sessionReport, 'utf8')).toContain('# Review — PR 42 headless session');
+
         const newRepo = join(dir, 'new-worktree');
         await mkdir(join(newRepo, '.git'), { recursive: true });
         expect(await renderReportFile(sessionDb, { sessionDir, cwd: newRepo })).toEqual({
