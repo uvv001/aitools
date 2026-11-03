@@ -848,11 +848,13 @@ export async function changeReviewState<T>(
       },
       { immediate: true },
     );
-    try {
-      if (rendered !== undefined) {
+    if (rendered !== undefined) {
+      let reportWritten = false;
+      try {
         await mkdir(dirname(reportTarget), { recursive: true });
         while (true) {
           await writeFile(reportTarget, rendered, 'utf8');
+          reportWritten = true;
           if (sessionDir !== undefined) {
             await syncMirrorFiles({
               activeDb: paths.db,
@@ -865,16 +867,25 @@ export async function changeReviewState<T>(
           if (latest === rendered) break;
           rendered = latest;
         }
-      } else if (sessionDir !== undefined) {
+      } catch {
+        if (!reportWritten && sessionDir !== undefined) {
+          try {
+            await syncMirrorFiles({ activeDb: paths.db, sessionDir, workspaceDir });
+          } catch {
+            // The database transaction has already committed.
+          }
+        }
+      }
+    } else if (sessionDir !== undefined) {
+      try {
         await syncMirrorFiles({
           activeDb: paths.db,
           sessionDir,
           workspaceDir,
         });
+      } catch {
+        // The database transaction has already committed.
       }
-    } catch {
-      // The database transaction has already committed; do not report the saved change as failed if the derived report
-      // or mirror cannot be refreshed right now.
     }
     return changed;
   } finally {
