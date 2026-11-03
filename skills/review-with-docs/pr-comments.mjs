@@ -3158,6 +3158,29 @@ async function syncMirrorFiles(options) {
 	for (const rel of await walkFiles(workspaceRounds)) await ensureLinkedFile(join(workspaceRounds, rel), join(sessionRounds, rel));
 	for (const rel of await walkFiles(sessionRounds)) await ensureLinkedFile(join(sessionRounds, rel), join(workspaceRounds, rel));
 }
+async function publishExclusiveMirror(primaryDb, workspaceDb) {
+	await mkdir(dirname(workspaceDb), { recursive: true });
+	try {
+		await link(primaryDb, workspaceDb);
+		return true;
+	} catch (error) {
+		const code = error.code ?? "";
+		if (code === "EEXIST") return false;
+		if (!LINK_FALLBACK_CODES.has(code)) throw error;
+	}
+	if (await exists(workspaceDb)) return false;
+	const temp = `${workspaceDb}.${randomBytes(4).toString("hex")}.tmp`;
+	try {
+		vacuumDatabase(primaryDb, temp);
+		return await publish(temp, workspaceDb);
+	} finally {
+		await rm(temp, {
+			force: true,
+			maxRetries: 5,
+			retryDelay: 100
+		});
+	}
+}
 async function initReviewFile(name, options = {}) {
 	mustBeDatabase(options.db);
 	const cwd = options.cwd ?? process.cwd();
@@ -3182,6 +3205,27 @@ async function initReviewFile(name, options = {}) {
 		sessionDir,
 		workspaceDir
 	} : { pullRequest })) throw existingDatabase(primaryDb);
+	if (dualHomed) {
+		let mirrorPublished = false;
+		try {
+			mirrorPublished = await publishExclusiveMirror(primaryDb, dbPath);
+		} catch (error) {
+			await rm(primaryDb, {
+				force: true,
+				maxRetries: 5,
+				retryDelay: 100
+			});
+			throw error;
+		}
+		if (!mirrorPublished) {
+			await rm(primaryDb, {
+				force: true,
+				maxRetries: 5,
+				retryDelay: 100
+			});
+			throw existingDatabase(dbPath);
+		}
+	}
 	let text = rendered;
 	await mkdir(dirname(reportTarget), { recursive: true });
 	while (true) {
@@ -4139,7 +4183,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+7bfdb64`;
+	return `pr-comments ${VERSION}+0e7428b`;
 }
 //#endregion
 //#region src/cli.ts
