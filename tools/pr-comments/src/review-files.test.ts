@@ -738,12 +738,19 @@ describe('initReviewFile', () => {
 
       // Write a round file in .ai/ and mutate the DB without rendering: both .sqlite and the round file sync to sessionDir.
       const wsRoundFile = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
+      const wsTmpNote = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'notes.tmp');
+      const wsInternalTmp = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md.deadbeef.tmp');
       await mkdir(join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1'), { recursive: true });
       await writeFile(wsRoundFile, 'coverage\n', 'utf8');
+      await writeFile(wsTmpNote, 'user tmp note\n', 'utf8');
+      await writeFile(wsInternalTmp, 'in-flight link temp\n', 'utf8');
       await rm(sessionDb);
       await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 updated' }, result: null }));
       expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 updated');
       expect(await readFile(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
+      expect(await readFile(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'notes.tmp'), 'utf8')).toBe('user tmp note\n');
+      expect(existsSync(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md.deadbeef.tmp'))).toBe(false);
+      await rm(wsInternalTmp);
 
       // Render report: .md is linked in sessionDir too.
       await renderReportFile(db, { cwd });

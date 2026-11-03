@@ -340,19 +340,21 @@ async function ensureLinkedDatabase(source: string, target: string): Promise<voi
   }
 }
 
+const TEMP_FILE_SUFFIX = /\.[0-9a-f]{8}\.tmp$/u;
+
 async function walkFiles(root: string, prefix = ''): Promise<string[]> {
   let entries;
   try {
     entries = await readdir(join(root, prefix), { withFileTypes: true });
   } catch (error) {
-    if (['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) return [];
+    if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return [];
     throw error;
   }
   const files: string[] = [];
   for (const entry of entries) {
     const rel = prefix ? join(prefix, entry.name) : entry.name;
     if (entry.isDirectory()) files.push(...(await walkFiles(root, rel)));
-    else if (entry.isFile() && !/\.sqlite\.[0-9a-f]{8}\.tmp$|\.tmp$/u.test(entry.name)) files.push(rel);
+    else if (entry.isFile() && !TEMP_FILE_SUFFIX.test(entry.name)) files.push(rel);
   }
   return files;
 }
