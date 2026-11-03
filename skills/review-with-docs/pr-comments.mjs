@@ -2612,7 +2612,7 @@ function configure(db, path, mode) {
 	}
 	if (mode !== "readonly") {
 		if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}PRAGMA user_version = 5`));
-		db.exec("PRAGMA journal_mode = DELETE");
+		db.exec("PRAGMA journal_mode = DELETE; PRAGMA cache_spill = OFF");
 	}
 	db.exec("PRAGMA foreign_keys = ON");
 }
@@ -2995,8 +2995,63 @@ function vacuumDatabase(source, destination) {
 		snapshot.close();
 	}
 }
+function reconcileHotJournal(candidatePath) {
+	if (!existsSync(candidatePath) || !existsSync(`${candidatePath}-journal`)) return;
+	const handle = new DatabaseSync(candidatePath, { timeout: 1e4 });
+	try {
+		handle.exec("BEGIN IMMEDIATE; ROLLBACK");
+	} catch {} finally {
+		handle.close();
+	}
+}
+function readStoredDirs(dbPath) {
+	if (!existsSync(dbPath)) return {};
+	let handle;
+	try {
+		handle = new DatabaseSync(dbPath, {
+			readOnly: true,
+			timeout: 1e4
+		});
+		if (handle.prepare("PRAGMA user_version").get()?.user_version !== 5) return {};
+		const rows = handle.prepare("SELECT key, value FROM meta WHERE key IN ('session_dir', 'workspace_dir')").all();
+		let sessionDir;
+		let workspaceDir;
+		for (const row of rows) if (row.key === SESSION_DIR) sessionDir = row.value;
+		else if (row.key === WORKSPACE_DIR) workspaceDir = row.value;
+		return {
+			sessionDir,
+			workspaceDir
+		};
+	} catch {
+		return {};
+	} finally {
+		handle?.close();
+	}
+}
+async function prepareDatabasePath(dbPath, options = {}) {
+	if (!existsSync(dbPath)) return dbPath;
+	reconcileHotJournal(dbPath);
+	const { sessionDir, workspaceDir } = readStoredDirs(dbPath);
+	if (sessionDir !== void 0 && workspaceDir !== void 0) {
+		const fileName = basename(dbPath);
+		const sessionDb = join(sessionDir, fileName);
+		const workspaceDb = join(workspaceDir, fileName);
+		if (existsSync(`${workspaceDb}-journal`) && (samePath(dbPath, workspaceDb) || await sameInode(dbPath, workspaceDb))) reconcileHotJournal(workspaceDb);
+		if (existsSync(`${sessionDb}-journal`) && (samePath(dbPath, sessionDb) || await sameInode(dbPath, sessionDb))) reconcileHotJournal(sessionDb);
+		if (options.restoreWorkspace && samePath(dirname(resolve(dbPath)), sessionDir) && !samePath(sessionDir, workspaceDir) && findRepoRoot(workspaceDir) !== void 0) {
+			const wsRepoRoot = findRepoRoot(workspaceDir);
+			if (wsRepoRoot !== void 0 && samePath(workspaceDir, join(wsRepoRoot, ".ai"))) await ensureAiGitExcluded(wsRepoRoot);
+			if (!await exists(workspaceDb)) await ensureLinkedDatabase(sessionDb, workspaceDb);
+			if (await sameInode(sessionDb, workspaceDb)) return workspaceDb;
+		}
+	}
+	return dbPath;
+}
 async function ensureLinkedDatabase(source, target) {
-	if (samePath(source, target) || !await exists(source) || await sameInode(source, target)) return;
+	if (samePath(source, target) || !await exists(source)) return;
+	reconcileHotJournal(source);
+	reconcileHotJournal(target);
+	if (await sameInode(source, target)) return;
 	await mkdir(dirname(target), { recursive: true });
 	const temp = `${target}.${randomBytes(4).toString("hex")}.tmp`;
 	let vacuumed = false;
@@ -3133,6 +3188,7 @@ function loadState(db) {
 }
 async function loadReviewFile(arg) {
 	const paths = reviewPaths(arg);
+	await prepareDatabasePath(paths.db);
 	const db = openReviewDb(paths.db, "readonly");
 	try {
 		return {
@@ -3144,7 +3200,9 @@ async function loadReviewFile(arg) {
 	}
 }
 async function loadSnapshot(arg) {
-	const db = openReviewDb(reviewPaths(arg).db, "readonly");
+	const dbPath = reviewPaths(arg).db;
+	await prepareDatabasePath(dbPath);
+	const db = openReviewDb(dbPath, "readonly");
 	try {
 		return inTransaction(db, () => loadPullRequest(db));
 	} finally {
@@ -3154,6 +3212,7 @@ async function loadSnapshot(arg) {
 async function renderReportFile(arg, options = {}) {
 	const paths = reviewPaths(arg);
 	await refuseDatabase(options.out ?? paths.report, paths.db);
+	await prepareDatabasePath(paths.db);
 	const db = openReviewDb(paths.db, "readonly");
 	try {
 		let text = renderReport(loadReview(db));
@@ -3228,7 +3287,7 @@ async function dumpReviewFile(arg) {
 	});
 }
 async function changeReviewState(arg, change, options = {}) {
-	const paths = reviewPaths(arg);
+	const paths = reviewPaths(await prepareDatabasePath(reviewPaths(arg).db, { restoreWorkspace: true }));
 	const db = openReviewDb(paths.db, "existing");
 	let sessionDir;
 	let workspaceDir;
@@ -3302,7 +3361,7 @@ async function mutateReviewFile(arg, mutate) {
 }
 const samePullRequest = (a, b) => a.number === b.number && a.host.toLowerCase() === b.host.toLowerCase() && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase();
 async function syncReviewFile(arg, data) {
-	const paths = reviewPaths(arg);
+	const paths = reviewPaths(await prepareDatabasePath(reviewPaths(arg).db, { restoreWorkspace: true }));
 	const db = openReviewDb(paths.db, "existing");
 	let sessionDir;
 	let workspaceDir;
@@ -4034,7 +4093,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+96de68f`;
+	return `pr-comments ${VERSION}+06c6f9e`;
 }
 //#endregion
 //#region src/cli.ts
