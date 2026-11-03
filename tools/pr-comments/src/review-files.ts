@@ -258,6 +258,8 @@ async function sameInode(a: string, b: string): Promise<boolean> {
   }
 }
 
+const LINK_FALLBACK_CODES = new Set(['EXDEV', 'EPERM', 'EACCES', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EMLINK', 'EINVAL', 'UNKNOWN']);
+
 // Ensures `target` is a hard link to `source` (or an identical copy when the file system or volume does not allow a
 // hard link). Replaces a detached link or stale copy atomically via a temporary sibling file.
 async function ensureLinkedFile(source: string, target: string, preferNewer = true): Promise<void> {
@@ -277,7 +279,7 @@ async function ensureLinkedFile(source: string, target: string, preferNewer = tr
     try {
       await link(source, temp);
     } catch (error) {
-      if (!['EXDEV', 'EPERM', 'EACCES', 'ENOSYS'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      if (!LINK_FALLBACK_CODES.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
       if (await exists(target)) {
         const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
         if (srcBytes.equals(dstBytes)) return;
@@ -320,7 +322,7 @@ async function ensureLinkedDatabase(source: string, target: string): Promise<voi
     try {
       await link(source, temp);
     } catch (error) {
-      if (!['EXDEV', 'EPERM', 'EACCES', 'ENOSYS'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      if (!LINK_FALLBACK_CODES.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
       vacuumDatabase(source, temp);
       vacuumed = true;
     }

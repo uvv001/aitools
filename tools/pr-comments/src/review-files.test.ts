@@ -889,6 +889,15 @@ describe('initReviewFile', () => {
         await spillerExited;
       }
       expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 open viewer fallback');
+
+      // Other link fallback error codes (ENOTSUP, EOPNOTSUPP, EMLINK, EINVAL, UNKNOWN) also fall back to copying/snapshot.
+      for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EMLINK', 'EINVAL', 'UNKNOWN']) {
+        await rm(sessRoundFile);
+        await writeFile(newWsRoundFile, `fallback ${code}\n`, 'utf8');
+        vi.mocked(link).mockRejectedValueOnce(failure(code)).mockRejectedValueOnce(failure(code));
+        await renderReportFile(newWsDb, { sessionDir, cwd: newRepo });
+        expect(await readFile(sessRoundFile, 'utf8')).toBe(`fallback ${code}\n`);
+      }
     });
   });
 
