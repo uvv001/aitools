@@ -681,6 +681,29 @@ describe('initReviewFile', () => {
       );
     });
 
+    it('writes /.ai/ to the shared common git info/exclude in a linked worktree, or to gitdir/info/exclude when commondir is absent', async () => {
+      const commonGit = join(dir, 'main-repo', '.git');
+      const worktreeGit = join(commonGit, 'worktrees', 'wt1');
+      const worktreeRoot = join(dir, 'wt1');
+      await mkdir(worktreeGit, { recursive: true });
+      await mkdir(worktreeRoot, { recursive: true });
+      await writeFile(join(worktreeRoot, '.git'), `gitdir: ../main-repo/.git/worktrees/wt1\n`, 'utf8');
+      await writeFile(join(worktreeGit, 'commondir'), '../..\n', 'utf8');
+
+      await initReviewFile('PR 42', { cwd: worktreeRoot, now: NOW });
+      expect(await readFile(join(commonGit, 'info', 'exclude'), 'utf8')).toBe('/.ai/\n');
+      expect(existsSync(join(worktreeGit, 'info', 'exclude'))).toBe(false);
+
+      const submoduleGit = join(commonGit, 'modules', 'sub1');
+      const submoduleRoot = join(dir, 'sub1');
+      await mkdir(submoduleGit, { recursive: true });
+      await mkdir(submoduleRoot, { recursive: true });
+      await writeFile(join(submoduleRoot, '.git'), `gitdir: ../main-repo/.git/modules/sub1\n`, 'utf8');
+
+      await initReviewFile('PR 42', { cwd: submoduleRoot, now: NOW });
+      expect(await readFile(join(submoduleGit, 'info', 'exclude'), 'utf8')).toBe('/.ai/\n');
+    });
+
     it('makes the file name of a name with markup and punctuation', async () => {
       const result = await initReviewFile('PR 42 — Tenant Registry (v2)', { cwd, now: NOW });
       expect(result.report).toBe(ai('2026-10-09_pr-42-tenant-registry-v2_review.md'));
