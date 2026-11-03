@@ -30,7 +30,7 @@ below, write a description file at
 `<report-stem>/round-<n>/pr-comments/<ref>.md` for each concern no finding
 covers yet, a refuted one included, and reply with one classification per
 ref (`own <F>`, `duplicate <F>`, `note '<reason>'`, or the new finding's
-file, severity, and title). Record each ref from the orchestrator:
+reply line per [fleet.md](fleet.md)). Record each ref from the orchestrator:
 
 | The comment or annotation | Command |
 |---|---|
