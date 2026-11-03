@@ -552,12 +552,13 @@ async function replyToLinked({ env, args: [ref = ''], values }: Context, db: str
 }
 
 async function renderReview({ env, values }: Context, db: string): Promise<number> {
-  const { report, action } = await renderReportFile(db, {
+  const { report, action, databaseChanged } = await renderReportFile(db, {
     out: values.out,
     sessionDir: optional('--session-dir', values['session-dir']),
     cwd: env.cwd(),
   });
   env.print(`${action.padEnd(ACTION_WIDTH)} ${report}\n`);
+  if (databaseChanged) env.warn(`Review database: ${shownPath(db, env.cwd())}\n`);
   return 0;
 }
 

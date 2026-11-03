@@ -1783,6 +1783,18 @@ describe('cli', () => {
         expect(await exists(report())).toBe(false);
       });
 
+      it('prints the Review database notice when --session-dir updates the stored directories, and not when they are unchanged', async () => {
+        const sessionDir = join(work, 'session', 'files');
+
+        expect(await step('report', 'render', '--session-dir', sessionDir)).toBe(0);
+        expect(printed).toBe(`created   ${report()}\n`);
+        expect(warned).toBe(line());
+
+        expect(await step('report', 'render', '--session-dir', sessionDir)).toBe(0);
+        expect(printed).toBe(`unchanged ${report()}\n`);
+        expect(warned).toBe('');
+      });
+
       it('never writes over the database, another SQLite file or a name that is none, and leaves them as they were', async () => {
         const before = await bytes();
         const other = join(docs, 'other.sqlite');

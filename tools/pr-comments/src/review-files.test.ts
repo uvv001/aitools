@@ -801,6 +801,7 @@ describe('initReviewFile', () => {
         expect(await renderReportFile(sessionDb, { sessionDir, cwd: newRepo })).toEqual({
           report: join(newRepo, '.ai', '2026-10-09_pr-42_review.md'),
           action: 'created',
+          databaseChanged: true,
         });
         expect(existsSync(repo)).toBe(false);
         expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);

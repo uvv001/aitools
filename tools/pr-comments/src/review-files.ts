@@ -513,6 +513,7 @@ export interface RenderResult {
   // The file that was written (or found unchanged).
   report: string;
   action: 'created' | 'updated' | 'unchanged';
+  databaseChanged?: boolean;
 }
 
 // Writes the derived report, with LF line breaks and no BOM, to `out` or next to the database. The
@@ -530,6 +531,7 @@ export async function renderReportFile(
     let text = renderReport(loadReview(db));
     let metaSessionDir = getMeta(db, SESSION_DIR);
     let metaWorkspaceDir = getMeta(db, WORKSPACE_DIR);
+    let databaseChanged = false;
     const cwd = options.cwd ?? process.cwd();
     const resolvedSessionDir = options.sessionDir === undefined ? undefined : resolve(cwd, options.sessionDir);
     if (resolvedSessionDir !== undefined) {
@@ -546,6 +548,7 @@ export async function renderReportFile(
           });
           metaSessionDir = resolvedSessionDir;
           metaWorkspaceDir = resolvedWorkspaceDir;
+          databaseChanged = true;
         } finally {
           rw.close();
         }
@@ -588,7 +591,7 @@ export async function renderReportFile(
         preferredReport: options.out === undefined ? target : undefined,
       });
     }
-    return { report: target, action };
+    return databaseChanged ? { report: target, action, databaseChanged: true } : { report: target, action };
   } finally {
     db.close();
   }

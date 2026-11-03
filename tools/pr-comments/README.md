@@ -469,7 +469,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 - Without `--db`, the tool searches the git repository that contains the working directory (the working directory itself outside a repository) for a file whose name ends in `review.sqlite` and that really is a review database. Exactly one must be found. None, or several, is an error (several are listed). So the commands work from any folder of the repository.
 - A command that changes the database prints `Review database: <path>` on stderr after it succeeded, so you can see which review it changed. A dry run does not, and neither does `pr connect` to the pull request the review is already connected to.
 - `init` uses `--db` to name the file it creates.
-- Several commands at once are safe: they wait for each other, up to 10 seconds. The read commands (`finding list`, `finding show`, `link pending`, `pr show`, and the `report` commands) open the file read-only and change nothing in it.
+- Several commands at once are safe: they wait for each other, up to 10 seconds. The read commands (`finding list`, `finding show`, `link pending`, `pr show`, and the `report` commands, unless `report render --session-dir` updates the stored session or workspace directory) open the file read-only and change nothing in it.
 
 ### Strict arguments, help, `--json`
 
