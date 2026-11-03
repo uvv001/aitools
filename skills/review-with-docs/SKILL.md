@@ -43,9 +43,9 @@ the expected outcome.
 A review database already in `.ai/`, in the session's `files/` folder, or in
 an earlier session's `files/` folder that the user names means the request
 continues it: where several exist, take the one whose title or `pr show`
-matches the target and pass `--db` on every command; when continuing in a
-new session or when `.ai/` was cleaned, run
-`report render --session-dir <session-folder>/files` first (with
+matches the target and pass `--db` on every command; where the host provides
+a session folder and the review continues in a new session or `.ai/` was
+cleaned, run `report render --session-dir <session-folder>/files` first (with
 `--db <earlier-files>/<stem>.sqlite` when the database is only in an earlier
 session's folder) to bind the session folder and restore `.ai/`; then read
 `finding list` and start at the step the request calls for — a verdict is
