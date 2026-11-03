@@ -454,7 +454,7 @@ export interface RenderResult {
 }
 
 // Writes the derived report, with LF line breaks and no BOM, to `out` or next to the database. The
-// database is only read (unless `sessionDir` updates the stored session folder). An existing file is overwritten
+// database is only read (unless `sessionDir` updates the stored session or workspace folder). An existing file is overwritten
 // whatever it holds, except a database: `out` may be neither the database of `arg` nor any other SQLite file, nor
 // named `.sqlite`.
 export async function renderReportFile(
