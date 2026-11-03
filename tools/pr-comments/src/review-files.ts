@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { access, copyFile, link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual } from 'node:util';
 import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
@@ -271,11 +271,52 @@ async function ensureLinkedFile(source: string, target: string, preferNewer = tr
       await rename(temp, target);
     } catch (error) {
       if (!['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      if (await sameInode(source, target)) return;
       if (await exists(target)) {
         const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
         if (srcBytes.equals(dstBytes)) return;
       }
       await copyFile(source, target);
+    }
+  } finally {
+    await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
+
+function vacuumDatabase(source: string, destination: string): void {
+  const snapshot = new DatabaseSync(source, { readOnly: true, timeout: 10_000 });
+  try {
+    snapshot.prepare('VACUUM INTO ?').run(destination);
+  } finally {
+    snapshot.close();
+  }
+}
+
+// Ensures `target` is a hard link to the SQLite database `source` or, when hard links are unavailable, a
+// transactionally consistent SQLite snapshot (`VACUUM INTO`) so uncommitted cache-spilled pages are never copied.
+async function ensureLinkedDatabase(source: string, target: string): Promise<void> {
+  if (samePath(source, target) || !(await exists(source)) || (await sameInode(source, target))) return;
+  await mkdir(dirname(target), { recursive: true });
+  const temp = `${target}.${randomBytes(4).toString('hex')}.tmp`;
+  let vacuumed = false;
+  try {
+    try {
+      await link(source, temp);
+    } catch (error) {
+      if (!['EXDEV', 'EPERM', 'EACCES', 'ENOSYS'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      vacuumDatabase(source, temp);
+      vacuumed = true;
+    }
+    try {
+      await rename(temp, target);
+    } catch (error) {
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      if (await sameInode(source, target)) return;
+      if (!vacuumed) {
+        await rm(temp, { force: true });
+        vacuumDatabase(source, temp);
+      }
+      await copyFile(temp, target);
     }
   } finally {
     await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
@@ -329,12 +370,12 @@ async function syncMirrorFiles(options: {
   const workspaceDb = join(workspaceDir, dbFileName);
 
   if (samePath(activeDb, sessionDb)) {
-    await ensureLinkedFile(sessionDb, workspaceDb, false);
+    await ensureLinkedDatabase(sessionDb, workspaceDb);
   } else if (samePath(activeDb, workspaceDb)) {
-    await ensureLinkedFile(workspaceDb, sessionDb, false);
+    await ensureLinkedDatabase(workspaceDb, sessionDb);
   } else {
-    await ensureLinkedFile(activeDb, sessionDb, false);
-    await ensureLinkedFile(sessionDb, workspaceDb, false);
+    await ensureLinkedDatabase(activeDb, sessionDb);
+    await ensureLinkedDatabase(sessionDb, workspaceDb);
   }
 
   const sessionReport = join(sessionDir, `${stem}.md`);

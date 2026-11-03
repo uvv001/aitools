@@ -826,6 +826,35 @@ describe('initReviewFile', () => {
       vi.mocked(rename).mockRejectedValueOnce(failure('EPERM')).mockRejectedValueOnce(failure('EBUSY'));
       await mutateReviewFile(newWsDb, (data) => ({ data: { ...data, target: 'PR 42 open viewer fallback' }, result: null }));
       expect(await readFile(sessRoundFile, 'utf8')).toBe('updated while viewer open\n');
+
+      // On cross-volume fallback (EXDEV), ensureLinkedDatabase uses a SQLite-consistent snapshot (VACUUM INTO) rather
+      // than copying raw file bytes that can hold uncommitted cache-spilled pages from a concurrent transaction.
+      await rm(sessionDb);
+      const spillScript = `
+        const { DatabaseSync } = require('node:sqlite');
+        const h = new DatabaseSync(process.argv[1]);
+        h.exec('BEGIN IMMEDIATE');
+        h.exec("UPDATE review SET target = 'Uncommitted spilled target'");
+        h.exec("INSERT INTO meta (key, value) VALUES ('spill', hex(zeroblob(2000000)))");
+        console.log('spilled');
+        setTimeout(() => {
+          h.exec('ROLLBACK');
+          h.close();
+        }, 150);
+      `;
+      let spillerExited: Promise<unknown> | undefined;
+      vi.mocked(link).mockImplementationOnce(async () => {
+        const spiller = spawn(process.execPath, [...NODE_FLAGS, '-e', spillScript, newWsDb], { stdio: ['ignore', 'pipe', 'inherit'] });
+        spillerExited = once(spiller, 'exit');
+        await once(spiller.stdout, 'data');
+        throw failure('EXDEV');
+      });
+      try {
+        await renderReportFile(newWsDb, { sessionDir, cwd: newRepo });
+      } finally {
+        await spillerExited;
+      }
+      expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 open viewer fallback');
     });
   });
 
