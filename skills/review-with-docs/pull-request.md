@@ -20,8 +20,9 @@ the user to create it.
 check annotations. Run it after every push and before every publish.
 `link pending` then lists each top-level comment and check annotation that no
 link names yet; empty output means every one is handled. Read the full pending
-threads and annotations with `report comments --pending`, then classify each
-ref and record it from the orchestrator:
+threads and annotations with `report comments --pending` — past a handful of
+pending items, the parallel agents below read them instead — then classify
+each ref and record it from the orchestrator:
 
 | The comment or annotation | Command |
 |---|---|
