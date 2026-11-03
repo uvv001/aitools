@@ -311,6 +311,20 @@ function vacuumDatabase(source: string, destination: string): void {
   }
 }
 
+function readDatabaseSnapshot(dbPath: string): unknown {
+  const handle = new DatabaseSync(dbPath, { readOnly: true, timeout: 10_000 });
+  try {
+    return inTransaction(handle, () => ({
+      state: loadState(handle),
+      pullRequestData: loadPullRequest(handle),
+      sessionDir: getMeta(handle, SESSION_DIR),
+      workspaceDir: getMeta(handle, WORKSPACE_DIR),
+    }));
+  } finally {
+    handle.close();
+  }
+}
+
 function reconcileHotJournal(candidatePath: string): void {
   if (!existsSync(candidatePath) || !existsSync(`${candidatePath}-journal`)) return;
   const handle = new DatabaseSync(candidatePath, { timeout: 10_000 });
@@ -393,29 +407,34 @@ async function ensureLinkedDatabase(source: string, target: string): Promise<voi
   reconcileHotJournal(target);
   if (await sameInode(source, target)) return;
   await mkdir(dirname(target), { recursive: true });
-  const temp = `${target}.${randomBytes(4).toString('hex')}.tmp`;
-  let vacuumed = false;
-  try {
+  while (true) {
+    const temp = `${target}.${randomBytes(4).toString('hex')}.tmp`;
+    let vacuumed = false;
     try {
-      await link(source, temp);
-    } catch (error) {
-      if (!LINK_FALLBACK_CODES.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
-      vacuumDatabase(source, temp);
-      vacuumed = true;
-    }
-    try {
-      await rename(temp, target);
-    } catch (error) {
-      if (!['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-      if (await sameInode(source, target)) return;
-      if (!vacuumed) {
-        await rm(temp, { force: true });
+      try {
+        await link(source, temp);
+      } catch (error) {
+        if (!LINK_FALLBACK_CODES.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
         vacuumDatabase(source, temp);
+        vacuumed = true;
       }
-      await copyFile(temp, target);
+      try {
+        await rename(temp, target);
+      } catch (error) {
+        if (!['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+        if (await sameInode(source, target)) return;
+        if (!vacuumed) {
+          await rm(temp, { force: true });
+          vacuumDatabase(source, temp);
+          vacuumed = true;
+        }
+        await copyFile(temp, target);
+      }
+    } finally {
+      await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
     }
-  } finally {
-    await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
+    if (!vacuumed || (await sameInode(source, target))) return;
+    if (isDeepStrictEqual(readDatabaseSnapshot(target), readDatabaseSnapshot(source))) return;
   }
 }
 

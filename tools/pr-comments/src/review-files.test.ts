@@ -23,7 +23,7 @@ import {
 } from './review-files.ts';
 import { dumpReview } from './review-dump.ts';
 import type { CommentLink, ReviewState } from './review-links.ts';
-import { linkDuplicate, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
+import { linkDuplicate, linkNote, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { newReview } from './review-ops.ts';
 import { readReport } from './review-read.ts';
@@ -903,6 +903,44 @@ describe('initReviewFile', () => {
           await renderReportFile(db, { sessionDir, cwd });
           expect(await readFile(sessRoundFile, 'utf8')).toBe(`fallback ${code}\n`);
         }
+
+        // When a cross-volume VACUUM INTO snapshot in syncReviewFile is delayed at rename while a concurrent
+        // changeReviewState commits a newer state, ensureLinkedDatabase re-snapshots so sessionDb keeps the newer state.
+        const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+        await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
+        await rm(sessionDb);
+        let releaseFirstRename!: () => void;
+        const firstRenamePaused = new Promise<void>((resolve) => {
+          releaseFirstRename = resolve;
+        });
+        let firstRenameSeen!: () => void;
+        const reachedFirstRename = new Promise<void>((resolve) => {
+          firstRenameSeen = resolve;
+        });
+        let pausedOnce = false;
+        vi.mocked(link).mockImplementation(async (src, dst) => {
+          if (String(src).endsWith('.sqlite') || String(dst).includes('.sqlite')) throw failure('EXDEV');
+          return actualFs.link(src, dst);
+        });
+        vi.mocked(rename).mockImplementation(async (oldPath, newPath) => {
+          if (!pausedOnce && String(newPath) === sessionDb) {
+            pausedOnce = true;
+            firstRenameSeen();
+            await firstRenamePaused;
+          }
+          return actualFs.rename(oldPath, newPath);
+        });
+        try {
+          const syncPromise = syncReviewFile(db, snapshotOf(['c1', 'c2']));
+          await reachedFirstRename;
+          await changeReviewState(db, (state) => ({ state: linkNote(state, 'c2', 'Keep this classification'), result: null }));
+          releaseFirstRename();
+          await syncPromise;
+        } finally {
+          vi.mocked(link).mockImplementation(actualFs.link);
+          vi.mocked(rename).mockImplementation(actualFs.rename);
+        }
+        expect((await loadReviewFile(sessionDb)).links).toEqual([{ ref: 'c2', role: 'note', note: 'Keep this classification' }]);
       });
 
       it('reconciles peer hot rollback journals after a writer crash and prevents cache spill on hard-linked databases', async () => {
