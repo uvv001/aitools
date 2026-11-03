@@ -3417,25 +3417,27 @@ async function changeReviewState(arg, change, options = {}) {
 			}
 			return result;
 		}, { immediate: true });
-		if (rendered !== void 0) {
-			await mkdir(dirname(reportTarget), { recursive: true });
-			while (true) {
-				await writeFile(reportTarget, rendered, "utf8");
-				if (sessionDir !== void 0) await syncMirrorFiles({
-					activeDb: paths.db,
-					sessionDir,
-					workspaceDir,
-					preferredReport: reportTarget
-				});
-				const latest = renderReport(loadReview(db));
-				if (latest === rendered) break;
-				rendered = latest;
-			}
-		} else if (sessionDir !== void 0) await syncMirrorFiles({
-			activeDb: paths.db,
-			sessionDir,
-			workspaceDir
-		});
+		try {
+			if (rendered !== void 0) {
+				await mkdir(dirname(reportTarget), { recursive: true });
+				while (true) {
+					await writeFile(reportTarget, rendered, "utf8");
+					if (sessionDir !== void 0) await syncMirrorFiles({
+						activeDb: paths.db,
+						sessionDir,
+						workspaceDir,
+						preferredReport: reportTarget
+					});
+					const latest = renderReport(loadReview(db));
+					if (latest === rendered) break;
+					rendered = latest;
+				}
+			} else if (sessionDir !== void 0) await syncMirrorFiles({
+				activeDb: paths.db,
+				sessionDir,
+				workspaceDir
+			});
+		} catch {}
 		return changed;
 	} finally {
 		db.close();
@@ -3475,11 +3477,13 @@ async function syncReviewFile(arg, data) {
 	} finally {
 		db.close();
 	}
-	if (sessionDir !== void 0) await syncMirrorFiles({
-		activeDb: paths.db,
-		sessionDir,
-		workspaceDir
-	});
+	if (sessionDir !== void 0) try {
+		await syncMirrorFiles({
+			activeDb: paths.db,
+			sessionDir,
+			workspaceDir
+		});
+	} catch {}
 	const annotations = (data.checkRuns ?? []).reduce((total, run) => total + run.annotations.length, 0);
 	return {
 		db: paths.db,
@@ -4191,7 +4195,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+a6e0762`;
+	return `pr-comments ${VERSION}+828435a`;
 }
 //#endregion
 //#region src/cli.ts
