@@ -22,15 +22,15 @@ check annotations. Run it after every push and before every publish.
 link names yet; empty output means every one is handled. Read the full pending
 threads and annotations with `report comments --pending` — or, past a handful
 of pending items, slice the refs across parallel agents (each given its
-model per [fleet.md](fleet.md)) that read `report comments --ref <slice>`
-against the pinned revision, its base, `finding list`, the Evidence
-rules of [SKILL.md](SKILL.md), the user's login, and the table and the
-paragraph below, write a description file at
+model and read-only contract per [fleet.md](fleet.md)) that read
+`report comments --ref <slice>` against the pinned revision, its base, and
+the dirty-tree remark, `finding list`, the Evidence rules of
+[SKILL.md](SKILL.md), the user's login, and the table and the paragraph
+below, write a description file at
 `<report-stem>/round-<n>/pr-comments/<ref>.md` for each concern no finding
-covers yet, a refuted one included (leaving the database and working tree
-untouched), and reply with one classification per ref
-(`own <F>`, `duplicate <F>`, `note '<reason>'`, or the new finding's file,
-severity, and title). Record each ref from the orchestrator:
+covers yet, a refuted one included, and reply with one classification per
+ref (`own <F>`, `duplicate <F>`, `note '<reason>'`, or the new finding's
+file, severity, and title). Record each ref from the orchestrator:
 
 | The comment or annotation | Command |
 |---|---|
