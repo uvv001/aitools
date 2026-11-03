@@ -2951,11 +2951,64 @@ async function ensureLinkedFile(source, target, preferNewer = true) {
 				"EBUSY",
 				"EACCES"
 			].includes(error.code ?? "")) throw error;
+			if (await sameInode(source, target)) return;
 			if (await exists(target)) {
 				const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
 				if (srcBytes.equals(dstBytes)) return;
 			}
 			await copyFile(source, target);
+		}
+	} finally {
+		await rm(temp, {
+			force: true,
+			maxRetries: 5,
+			retryDelay: 100
+		});
+	}
+}
+function vacuumDatabase(source, destination) {
+	const snapshot = new DatabaseSync(source, {
+		readOnly: true,
+		timeout: 1e4
+	});
+	try {
+		snapshot.prepare("VACUUM INTO ?").run(destination);
+	} finally {
+		snapshot.close();
+	}
+}
+async function ensureLinkedDatabase(source, target) {
+	if (samePath(source, target) || !await exists(source) || await sameInode(source, target)) return;
+	await mkdir(dirname(target), { recursive: true });
+	const temp = `${target}.${randomBytes(4).toString("hex")}.tmp`;
+	let vacuumed = false;
+	try {
+		try {
+			await link(source, temp);
+		} catch (error) {
+			if (![
+				"EXDEV",
+				"EPERM",
+				"EACCES",
+				"ENOSYS"
+			].includes(error.code ?? "")) throw error;
+			vacuumDatabase(source, temp);
+			vacuumed = true;
+		}
+		try {
+			await rename(temp, target);
+		} catch (error) {
+			if (![
+				"EPERM",
+				"EBUSY",
+				"EACCES"
+			].includes(error.code ?? "")) throw error;
+			if (await sameInode(source, target)) return;
+			if (!vacuumed) {
+				await rm(temp, { force: true });
+				vacuumDatabase(source, temp);
+			}
+			await copyFile(temp, target);
 		}
 	} finally {
 		await rm(temp, {
@@ -3000,11 +3053,11 @@ async function syncMirrorFiles(options) {
 	const stem = dbFileName.slice(0, dbFileName.length - ext.length);
 	const sessionDb = join(sessionDir, dbFileName);
 	const workspaceDb = join(workspaceDir, dbFileName);
-	if (samePath(activeDb, sessionDb)) await ensureLinkedFile(sessionDb, workspaceDb, false);
-	else if (samePath(activeDb, workspaceDb)) await ensureLinkedFile(workspaceDb, sessionDb, false);
+	if (samePath(activeDb, sessionDb)) await ensureLinkedDatabase(sessionDb, workspaceDb);
+	else if (samePath(activeDb, workspaceDb)) await ensureLinkedDatabase(workspaceDb, sessionDb);
 	else {
-		await ensureLinkedFile(activeDb, sessionDb, false);
-		await ensureLinkedFile(sessionDb, workspaceDb, false);
+		await ensureLinkedDatabase(activeDb, sessionDb);
+		await ensureLinkedDatabase(sessionDb, workspaceDb);
 	}
 	const sessionReport = join(sessionDir, `${stem}.md`);
 	const workspaceReport = join(workspaceDir, `${stem}.md`);
@@ -3957,7 +4010,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+eb0613e`;
+	return `pr-comments ${VERSION}+d27482c`;
 }
 //#endregion
 //#region src/cli.ts
