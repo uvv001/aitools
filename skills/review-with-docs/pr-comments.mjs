@@ -4138,7 +4138,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+bfc983f`;
+	return `pr-comments ${VERSION}+e43b9c2`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4283,7 +4283,7 @@ function reportMatchesDatabase({ report, db }) {
 async function initReview({ env, args: [name = ""], values }) {
 	const title = need("the name", name);
 	reportMatchesDatabase(values);
-	const { db } = await initReviewFile(title, {
+	const { db, report } = await initReviewFile(title, {
 		report: values.report,
 		db: values.db,
 		pr: values.pr,
@@ -4294,7 +4294,7 @@ async function initReview({ env, args: [name = ""], values }) {
 	const shown = shownPath(db, env.cwd());
 	env.print(`Created ${shown}\n`);
 	if (values.pr !== void 0) env.print(`Pull request: ${formatPullRequestUrl(parsePullRequestUrl(values.pr))}\n`);
-	env.print(`Render the report with "pr-comments report render --db ${shown}"\n`);
+	env.print(`Report: ${shownPath(report, env.cwd())}\n`);
 	return 0;
 }
 async function connectReview({ env, args: [url = ""] }, db) {
