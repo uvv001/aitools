@@ -3159,6 +3159,7 @@ async function renderReportFile(arg, options = {}) {
 		let text = renderReport(loadReview(db));
 		let metaSessionDir = getMeta(db, SESSION_DIR);
 		let metaWorkspaceDir = getMeta(db, WORKSPACE_DIR);
+		let databaseChanged = false;
 		const cwd = options.cwd ?? process.cwd();
 		const resolvedSessionDir = options.sessionDir === void 0 ? void 0 : resolve(cwd, options.sessionDir);
 		if (resolvedSessionDir !== void 0) {
@@ -3174,6 +3175,7 @@ async function renderReportFile(arg, options = {}) {
 					});
 					metaSessionDir = resolvedSessionDir;
 					metaWorkspaceDir = resolvedWorkspaceDir;
+					databaseChanged = true;
 				} finally {
 					rw.close();
 				}
@@ -3206,7 +3208,11 @@ async function renderReportFile(arg, options = {}) {
 			cwd,
 			preferredReport: options.out === void 0 ? target : void 0
 		});
-		return {
+		return databaseChanged ? {
+			report: target,
+			action,
+			databaseChanged: true
+		} : {
 			report: target,
 			action
 		};
@@ -4028,7 +4034,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+60fcebe`;
+	return `pr-comments ${VERSION}+96de68f`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4480,12 +4486,13 @@ async function replyToLinked({ env, args: [ref = ""], values }, db) {
 	return result.action === "error" ? 1 : 0;
 }
 async function renderReview({ env, values }, db) {
-	const { report, action } = await renderReportFile(db, {
+	const { report, action, databaseChanged } = await renderReportFile(db, {
 		out: values.out,
 		sessionDir: optional("--session-dir", values["session-dir"]),
 		cwd: env.cwd()
 	});
 	env.print(`${action.padEnd(ACTION_WIDTH)} ${report}\n`);
+	if (databaseChanged) env.warn(`Review database: ${shownPath(db, env.cwd())}\n`);
 	return 0;
 }
 async function renderComments({ env, values }, db) {
