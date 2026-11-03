@@ -643,7 +643,8 @@ export async function renderReportFile(
       const repoRoot = findRepoRoot(cwd);
       const resolvedWorkspaceDir =
         fromSessionDir && repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir;
-      if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
+      const differs = (a: string, b: string | undefined): boolean => b === undefined || !samePath(a, b);
+      if (differs(resolvedSessionDir, metaSessionDir) || differs(resolvedWorkspaceDir, metaWorkspaceDir)) {
         const rw = openReviewDb(paths.db, 'existing');
         try {
           inTransaction(rw, () => {
