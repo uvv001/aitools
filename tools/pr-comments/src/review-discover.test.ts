@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { discoverReview, findReviews } from './review-discover.ts';
 import { newReview } from './review-ops.ts';
 import { openReviewDb, saveReview } from './review-store.ts';
@@ -11,6 +11,11 @@ import { openReviewDb, saveReview } from './review-store.ts';
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return { ...actual, stat: vi.fn(actual.stat) };
+});
+
+afterEach(async () => {
+  const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  vi.mocked(stat).mockImplementation(actualFs.stat);
 });
 
 const roots: string[] = [];
@@ -210,28 +215,28 @@ describe('findReviews', () => {
       await expect(findReviews(repo)).resolves.toEqual([inAi, kept]);
     });
 
-    it('falls back to sessionDir when no review database exists in the repository, and deduplicates hard links to the same database', async () => {
+    it('falls back to sessionDir when no review database exists in the repository, and deduplicates hard-linked aliases there', async () => {
       const repo = repository();
       const session = folder(scratch(), 'session', 'files');
       const sessionDb = review(join(session, '2026-10-08_pr-1_review.sqlite'));
-      const { linkSync } = await import('node:fs');
       linkSync(sessionDb, join(session, 'z_alias_review.sqlite'));
       await expect(discoverReview(repo, session)).resolves.toBe(sessionDb);
+    });
 
-      // A hard link inside the repository to the same database counts once, preferring .ai/.
+    it('counts hard-linked aliases inside the repository once, preferring .ai/', async () => {
+      const repo = repository();
+      const inSub = review(join(repo, 'session', '2026-10-08_pr-1_review.sqlite'));
       const inAi = join(repo, '.ai', '2026-10-08_pr-1_review.sqlite');
       mkdirSync(dirname(inAi), { recursive: true });
-      const inSub = join(repo, 'session', '2026-10-08_pr-1_review.sqlite');
-      mkdirSync(dirname(inSub), { recursive: true });
-      linkSync(sessionDb, inAi);
-      linkSync(sessionDb, inSub);
-      await expect(discoverReview(repo, join(repo, 'session'))).resolves.toBe(inAi);
+      linkSync(inSub, inAi);
+      await expect(findReviews(repo)).resolves.toEqual([inAi]);
+      await expect(discoverReview(repo)).resolves.toBe(inAi);
+    });
 
-      // Two distinct review databases whose 64-bit NTFS ino values differ only above 2^53 (17169973581500551n vs
-      // 17169973581500552n) are not conflated as hard links.
-      const repo2 = repository();
-      const dbA = review(join(repo2, '.ai', 'a_review.sqlite'));
-      const dbB = review(join(repo2, '.ai', 'b_review.sqlite'));
+    it('distinguishes distinct review databases whose 64-bit NTFS ino values differ only above 2^53', async () => {
+      const repo = repository();
+      const dbA = review(join(repo, '.ai', 'a_review.sqlite'));
+      const dbB = review(join(repo, '.ai', 'b_review.sqlite'));
       const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
       const inoByPath = new Map<string, bigint>([
         [dbA, 17169973581500551n],
@@ -246,11 +251,7 @@ describe('findReviews', () => {
         const info = await actualFs.stat(targetPath);
         return fakeIno === undefined ? info : Object.assign(info, { dev: 1, ino: Number(fakeIno) });
       }) as typeof stat);
-      try {
-        await expect(findReviews(repo2)).resolves.toEqual([dbA, dbB]);
-      } finally {
-        vi.mocked(stat).mockImplementation(actualFs.stat);
-      }
+      await expect(findReviews(repo)).resolves.toEqual([dbA, dbB]);
     });
 
     it('searches folders that only look like the skipped ones', async () => {
