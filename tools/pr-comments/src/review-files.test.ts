@@ -851,7 +851,7 @@ describe('initReviewFile', () => {
         expect(await readFile(join(newSessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
       });
 
-      it('compares 64-bit NTFS ino values as bigints and preserves divergent equal-timestamp copies', async () => {
+      it('compares 64-bit NTFS ino values as bigints', async () => {
         await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
         await rm(wsRoundFile);
         await writeFile(wsRoundFile, 'fresh workspace coverage\n', 'utf8');
@@ -877,7 +877,11 @@ describe('initReviewFile', () => {
           vi.mocked(stat).mockImplementation(actualFs.stat);
         }
         expect(await readFile(sessRoundFile, 'utf8')).toBe('fresh workspace coverage\n');
+      });
 
+      it('preserves divergent equal-timestamp copies and re-links identical equal-timestamp copies', async () => {
+        const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
         await rm(wsRoundFile);
         await rm(sessRoundFile);
         await writeFile(wsRoundFile, 'workspace tie content\n', 'utf8');
@@ -900,7 +904,7 @@ describe('initReviewFile', () => {
         expect(wsStatAfter.ino).toBe(sessStatAfter.ino);
       });
 
-      it('falls back cleanly when rename or link fails, using VACUUM INTO for cross-volume database copies', async () => {
+      it('falls back to in-place copyFile when rename fails with EPERM or EBUSY', async () => {
         await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 initial' }, result: null }));
         await rm(sessRoundFile);
         await writeFile(sessRoundFile, 'stale open viewer copy\n', 'utf8');
@@ -910,8 +914,12 @@ describe('initReviewFile', () => {
         vi.mocked(rename).mockRejectedValueOnce(failure('EPERM')).mockRejectedValueOnce(failure('EBUSY'));
         await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 open viewer fallback' }, result: null }));
         expect(await readFile(sessRoundFile, 'utf8')).toBe('updated while viewer open\n');
+      });
 
+      it('uses VACUUM INTO on cross-volume EXDEV fallback so uncommitted cache-spilled pages are not copied', async () => {
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 committed' }, result: null }));
         await rm(sessionDb);
+        // DatabaseSync VACUUM INTO blocks the parent thread in sqlite3 busy_timeout until the child releases its lock.
         const spillScript = `
           const { DatabaseSync } = require('node:sqlite');
           const h = new DatabaseSync(process.argv[1]);
@@ -922,7 +930,7 @@ describe('initReviewFile', () => {
           setTimeout(() => {
             h.exec('ROLLBACK');
             h.close();
-          }, 150);
+          }, 50);
         `;
         let spillerExited: Promise<unknown> | undefined;
         vi.mocked(link).mockImplementationOnce(async () => {
@@ -936,18 +944,21 @@ describe('initReviewFile', () => {
         } finally {
           await spillerExited;
         }
-        expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 open viewer fallback');
+        expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 committed');
+      });
 
-        for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EMLINK', 'EINVAL', 'UNKNOWN']) {
-          await rm(sessRoundFile);
+      it.each(['ENOTSUP', 'EOPNOTSUPP', 'EMLINK', 'EINVAL', 'UNKNOWN'])(
+        'falls back to copying and snapshot when link fails with %s',
+        async (code) => {
+          await rm(sessionDb);
           await writeFile(wsRoundFile, `fallback ${code}\n`, 'utf8');
           vi.mocked(link).mockRejectedValueOnce(failure(code)).mockRejectedValueOnce(failure(code));
           await renderReportFile(db, { sessionDir, cwd });
           expect(await readFile(sessRoundFile, 'utf8')).toBe(`fallback ${code}\n`);
-        }
+        },
+      );
 
-        // When a cross-volume VACUUM INTO snapshot in syncReviewFile is delayed at rename while a concurrent
-        // changeReviewState commits a newer state, ensureLinkedDatabase re-snapshots so sessionDb keeps the newer state.
+      it('re-snapshots on cross-volume VACUUM INTO when a delayed syncReviewFile finishes after a newer changeReviewState', async () => {
         const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
         await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
         await rm(sessionDb);
@@ -983,9 +994,11 @@ describe('initReviewFile', () => {
           vi.mocked(rename).mockImplementation(actualFs.rename);
         }
         expect((await loadReviewFile(sessionDb)).links).toEqual([{ ref: 'c2', role: 'note', note: 'Keep this classification' }]);
+      });
 
-        // Even when SQLite hard links fail with EXDEV so sessionDb and workspaceDb are separate snapshot files,
-        // mutations through sessionDb redirect to workspaceDb and serialize on one SQLite write lock so neither update is lost.
+      it('routes cross-volume sessionDb mutations to workspaceDb so concurrent updates serialize on one lock', async () => {
+        const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+        await rm(sessionDb);
         vi.mocked(link).mockImplementation(async (src, dst) => {
           if (String(src).endsWith('.sqlite') || String(dst).includes('.sqlite')) throw failure('EXDEV');
           return actualFs.link(src, dst);
@@ -1016,11 +1029,8 @@ describe('initReviewFile', () => {
         expect(finalSessText).toBe(finalWsText);
       });
 
-      it('reconciles peer hot rollback journals after a writer crash and prevents cache spill on hard-linked databases', async () => {
+      it('prevents uncommitted cache spill on openReviewDb writers when a writer crashes and .ai/ is deleted', async () => {
         await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Committed target' }, result: null }));
-
-        // Case 1: a writer opened through openReviewDb (cache_spill = OFF) crashes mid-transaction on db; deleting .ai/
-        // and restoring from sessionDb preserves 'Committed target'.
         const openDbCrash = `
           const [storeUrl, targetDb] = process.argv.slice(1);
           const { openReviewDb } = await import(storeUrl);
@@ -1036,9 +1046,10 @@ describe('initReviewFile', () => {
         await renderReportFile(sessionDb, { sessionDir, cwd });
         expect((await loadReviewFile(db)).data.target).toBe('Committed target');
         expect((await loadReviewFile(sessionDb)).data.target).toBe('Committed target');
+      });
 
-        // Case 2: even if an external raw SQLite connection spills uncommitted pages and leaves a hot journal on one
-        // hard-linked path, opening or mutating through the other path reconciles the peer journal first.
+      it('reconciles a peer hot rollback journal left by an external raw SQLite crash before mutating the other path', async () => {
+        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Committed target' }, result: null }));
         const rawCrash = `
           const { DatabaseSync } = require('node:sqlite');
           const h = new DatabaseSync(process.argv[1]);
