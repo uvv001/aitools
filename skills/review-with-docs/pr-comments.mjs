@@ -3242,10 +3242,12 @@ async function renderReportFile(arg, options = {}) {
 		let databaseChanged = false;
 		const cwd = options.cwd ?? process.cwd();
 		const resolvedSessionDir = options.sessionDir === void 0 ? void 0 : resolve(cwd, options.sessionDir);
+		const activeDir = dirname(resolve(cwd, paths.db));
+		const previousSessionDir = metaSessionDir;
+		const fromSessionDir = resolvedSessionDir !== void 0 && samePath(activeDir, resolvedSessionDir) || previousSessionDir !== void 0 && samePath(activeDir, previousSessionDir);
 		if (resolvedSessionDir !== void 0) {
-			const activeDir = dirname(resolve(cwd, paths.db));
 			const repoRoot = findRepoRoot(cwd);
-			const resolvedWorkspaceDir = samePath(activeDir, resolvedSessionDir) && repoRoot ? join(repoRoot, ".ai") : activeDir;
+			const resolvedWorkspaceDir = fromSessionDir && repoRoot ? join(repoRoot, ".ai") : activeDir;
 			if (resolvedSessionDir !== metaSessionDir || resolvedWorkspaceDir !== metaWorkspaceDir) {
 				const rw = openReviewDb(paths.db, "existing");
 				try {
@@ -3260,8 +3262,14 @@ async function renderReportFile(arg, options = {}) {
 					rw.close();
 				}
 			}
+			if (previousSessionDir !== void 0 && !samePath(previousSessionDir, resolvedSessionDir)) await syncMirrorFiles({
+				activeDb: paths.db,
+				sessionDir: previousSessionDir,
+				workspaceDir: resolvedSessionDir,
+				cwd
+			});
 		}
-		const target = options.out ?? (metaSessionDir !== void 0 && metaWorkspaceDir !== void 0 && samePath(dirname(resolve(cwd, paths.db)), metaSessionDir) ? join(metaWorkspaceDir, basename(paths.report)) : paths.report);
+		const target = options.out ?? (metaSessionDir !== void 0 && metaWorkspaceDir !== void 0 && (fromSessionDir || samePath(activeDir, metaSessionDir)) ? join(metaWorkspaceDir, basename(paths.report)) : paths.report);
 		if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
 		const current = await readExisting(target);
 		if (current !== text) text = renderReport(loadReview(db));
@@ -4114,7 +4122,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+17e808e`;
+	return `pr-comments ${VERSION}+7f7e0bb`;
 }
 //#endregion
 //#region src/cli.ts
