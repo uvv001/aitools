@@ -2868,7 +2868,14 @@ function assertRenders(data, report) {
 const PULL_REQUEST = "pull_request";
 const SESSION_DIR = "session_dir";
 const WORKSPACE_DIR = "workspace_dir";
-const AI_IGNORE_LINE = /^[ \t]*\/?\.ai\/?[ \t]*$/mu;
+const AI_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
+const AI_NEGATE_LINE = /^[ \t]*!(?:\/?\.ai(?:\/[^\r\n]*)?|\*+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
+function aiIgnoreState(content) {
+	let state = "none";
+	for (const line of content.split(/\r?\n/u)) if (AI_IGNORE_LINE.test(line)) state = "ignored";
+	else if (AI_NEGATE_LINE.test(line)) state = "negated";
+	return state;
+}
 function resolveGitDir(repoRoot) {
 	const dotGit = join(repoRoot, ".git");
 	let info;
@@ -2895,16 +2902,21 @@ function resolveGitDir(repoRoot) {
 	}
 }
 async function ensureAiGitExcluded(repoRoot) {
-	const gitignore = await readExisting(join(repoRoot, ".gitignore"));
-	if (gitignore !== void 0 && AI_IGNORE_LINE.test(gitignore)) return;
+	const gitignorePath = join(repoRoot, ".gitignore");
+	const gitignore = await readExisting(gitignorePath);
+	const gitignoreState = gitignore !== void 0 ? aiIgnoreState(gitignore) : "none";
+	if (gitignoreState === "ignored") return;
 	const gitDir = resolveGitDir(repoRoot);
-	if (gitDir === void 0 || !existsSync(gitDir)) return;
-	const excludePath = join(gitDir, "info", "exclude");
-	const current = await readExisting(excludePath) ?? "";
-	if (AI_IGNORE_LINE.test(current)) return;
-	await mkdir(dirname(excludePath), { recursive: true });
-	const prefix = current === "" || current.endsWith("\n") ? "" : "\n";
-	await writeFile(excludePath, `${current}${prefix}/.ai/\n`, "utf8");
+	if (gitDir !== void 0 && existsSync(gitDir)) {
+		const excludePath = join(gitDir, "info", "exclude");
+		const current = await readExisting(excludePath) ?? "";
+		if (aiIgnoreState(current) !== "ignored") {
+			await mkdir(dirname(excludePath), { recursive: true });
+			const prefix = current === "" || current.endsWith("\n") ? "" : "\n";
+			await writeFile(excludePath, `${current}${prefix}/.ai/\n`, "utf8");
+		}
+	}
+	if (gitignoreState === "negated") throw new Error(`${gitignorePath} negates .ai/, which overrides .git/info/exclude and exposes .ai/ to git`);
 }
 async function sameInode(a, b) {
 	try {
@@ -3089,13 +3101,13 @@ async function initReviewFile(name, options = {}) {
 	const reportTarget = options.report !== void 0 || options.db === void 0 ? paths.report : reviewPaths(dbPath).report;
 	await refuseDatabase(reportTarget, dbPath);
 	const rendered = assertRenders(data, reportTarget);
+	const repoRoot = findRepoRoot(workspaceDir);
+	if (repoRoot !== void 0 && samePath(workspaceDir, join(repoRoot, ".ai"))) await ensureAiGitExcluded(repoRoot);
 	if (!await createDatabase(primaryDb, data, dualHomed ? {
 		pullRequest,
 		sessionDir,
 		workspaceDir
 	} : { pullRequest })) throw existingDatabase(primaryDb);
-	const repoRoot = findRepoRoot(workspaceDir);
-	if (repoRoot !== void 0 && samePath(workspaceDir, join(repoRoot, ".ai"))) await ensureAiGitExcluded(repoRoot);
 	await mkdir(dirname(reportTarget), { recursive: true });
 	await writeFile(reportTarget, rendered, "utf8");
 	if (dualHomed) await syncMirrorFiles({
@@ -4010,7 +4022,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+d27482c`;
+	return `pr-comments ${VERSION}+c949d12`;
 }
 //#endregion
 //#region src/cli.ts
