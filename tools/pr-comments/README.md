@@ -402,7 +402,7 @@ pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [
 pr-comments report comments --author alice --out pr-42.md
 ```
 
-`--author` keeps the comments and reviews of that user and the check runs of that app. `--ref` keeps only the listed comments (with their thread) and check annotations. `--pending` keeps only comments and check annotations that no link names yet. On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.
+`--author` and `--ref` may be repeated, or take a comma-separated list. `--author` keeps the comments and reviews of that user and the check runs of that app. `--ref` keeps only the listed comments (with their thread) and check annotations; an unknown ref gives a warning, and a malformed ref is an error. `--pending` keeps only comments and check annotations that no link names yet. With `--ref` or `--pending`, review bodies are not shown. On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.
 
 **`report dump`**: prints the review as text, for `git diff` (see [Git](#git)). It lists the findings, the rounds, the links and the pull request URL, not the downloaded comments.
 
