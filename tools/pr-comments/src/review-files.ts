@@ -370,6 +370,7 @@ export interface StateChange<T> {
   state: ReviewState;
   // Whatever the caller wants back from the change, such as the id of a new finding.
   result: T;
+  reportError?: Error;
 }
 
 // Loads the whole state of a review (the review, its links, its pull request, the refs a link may name), lets
@@ -429,9 +430,10 @@ export async function changeReviewState<T>(
           if (latest === rendered) break;
           rendered = latest;
         }
-      } catch {
+      } catch (error) {
         // The database transaction has already committed; do not report the saved change as failed if the derived
-        // report cannot be refreshed right now.
+        // report cannot be refreshed right now, but surface the refresh error to the caller so it can warn.
+        return { ...changed, reportError: error instanceof Error ? error : new Error(String(error)) };
       }
     }
     return changed;
@@ -444,6 +446,7 @@ export interface Mutation<T> {
   data: ReviewData;
   // Whatever the caller wants back from the change, such as the id of a new finding.
   result: T;
+  reportError?: Error;
 }
 
 // `changeReviewState` for a change of the review alone: the links and the pull request are carried along as they are.
@@ -451,11 +454,11 @@ export async function mutateReviewFile<T>(
   arg: string,
   mutate: (data: ReviewData) => Mutation<T> | Promise<Mutation<T>>,
 ): Promise<Mutation<T>> {
-  const { state, result } = await changeReviewState(arg, async (current) => {
+  const { state, result, reportError } = await changeReviewState(arg, async (current) => {
     const changed = await mutate(current.data);
     return { state: { ...current, data: changed.data }, result: changed.result };
   });
-  return { data: state.data, result };
+  return reportError ? { data: state.data, result, reportError } : { data: state.data, result };
 }
 
 export interface SyncResult {

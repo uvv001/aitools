@@ -246,8 +246,10 @@ async function readDescription(env: CliEnvironment, file: string): Promise<strin
 }
 
 // A change of the review that has nothing to say but its one line.
-async function edit(db: string, change: (data: ReviewData) => ReviewData): Promise<ReviewData> {
-  return (await mutateReviewFile(db, (data) => ({ data: change(data), result: undefined }))).data;
+async function edit(env: CliEnvironment, db: string, change: (data: ReviewData) => ReviewData): Promise<ReviewData> {
+  const { data, reportError } = await mutateReviewFile(db, (current) => ({ data: change(current), result: undefined }));
+  warnReportError(env, db, reportError);
+  return data;
 }
 
 // A path below the working directory is shown relative to it, so the output stays short and the same on every
@@ -256,6 +258,15 @@ function shownPath(path: string, cwd: string): string {
   if (!isAbsolute(path)) return path;
   const below = relative(cwd, path);
   return below !== '' && !below.startsWith('..') && !isAbsolute(below) ? below : path;
+}
+
+function warnReportError(env: CliEnvironment, db: string, error: Error | undefined): void {
+  if (error === undefined) return;
+  const shownDb = shownPath(db, env.cwd());
+  const shownReport = shownPath(reviewPaths(db).report, env.cwd());
+  env.warn(
+    `Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${shownDb}"\n`,
+  );
 }
 
 const countAnnotations = (data: PullRequestData): number => (data.checkRuns ?? []).reduce((total, run) => total + run.annotations.length, 0);
@@ -342,7 +353,7 @@ async function openReviewRound({ env, values }: Context, db: string): Promise<nu
   const note = optional('--note', values.note);
   const revision = await env.resolveRevision(need('--revision', values.revision ?? 'HEAD'));
   const base = values['no-base'] ? null : await env.resolveRevision(need('--base', values.base));
-  const data = await edit(db, (current) => openRound(current, { revision, base, note }));
+  const data = await edit(env, db, (current) => openRound(current, { revision, base, note }));
   env.print(`Round ${latestRound(data)} opened\n`);
   return 0;
 }
@@ -350,7 +361,7 @@ async function openReviewRound({ env, values }: Context, db: string): Promise<nu
 async function updateReviewRound({ env, args: [text = ''], values }: Context, db: string): Promise<number> {
   const note = need('the text', text);
   const round = parsePositive('round', values.round);
-  const data = await edit(db, (current) => updateRound(current, { text: note, round }));
+  const data = await edit(env, db, (current) => updateRound(current, { text: note, round }));
   env.print(`Round ${round ?? latestRound(data)} updated\n`);
   return 0;
 }
@@ -363,10 +374,11 @@ async function addReviewFinding({ env, values }: Context, db: string): Promise<n
     note: optional('--note', values.note),
     description: await readDescription(env, need('--description-file', values['description-file'])),
   };
-  const { result } = await mutateReviewFile(db, (data) => {
+  const { result, reportError } = await mutateReviewFile(db, (data) => {
     const { data: changed, id } = addFinding(data, input, env.now());
     return { data: changed, result: id };
   });
+  warnReportError(env, db, reportError);
   if (values.json) printJson(env, { id: result });
   else env.print(`Added ${result}\n`);
   return 0;
@@ -403,11 +415,12 @@ async function changeFinding(
   change: (data: ReviewData, id: string) => ReviewData,
   describe: (before: Finding, after: Finding) => string,
 ): Promise<number> {
-  const { result } = await mutateReviewFile(db, (data) => {
+  const { result, reportError } = await mutateReviewFile(db, (data) => {
     const before = findFinding(data, id);
     const changed = change(data, before.id);
     return { data: changed, result: `${before.id}: ${describe(before, findFinding(changed, before.id))}` };
   });
+  warnReportError(env, db, reportError);
   env.print(`${result}\n`);
   return 0;
 }
@@ -485,10 +498,11 @@ async function changeLinks(
   db: string,
   change: (state: ReviewState) => { state: ReviewState; line: string },
 ): Promise<number> {
-  const { result } = await changeReviewState(db, (current) => {
+  const { result, reportError } = await changeReviewState(db, (current) => {
     const { state, line } = change(current);
     return { state, result: line };
   });
+  warnReportError(env, db, reportError);
   env.print(`${result}\n`);
   return 0;
 }

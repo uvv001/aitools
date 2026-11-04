@@ -1368,13 +1368,14 @@ describe('changeReviewState', () => {
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
-  it('keeps a committed database change successful when refreshing the derived report fails with EPERM', async () => {
+  it('keeps a committed database change successful and returns reportError when refreshing the derived report fails with EPERM', async () => {
     vi.mocked(writeFile).mockRejectedValueOnce(failure('EPERM'));
     const changed = await changeReviewState(db, (state) => ({
       state: { ...state, data: { ...state.data, target: 'Saved despite EPERM' } },
       result: 'saved',
     }));
     expect(changed.result).toBe('saved');
+    expect(changed.reportError?.message).toBe('failed: EPERM');
     expect((await loadReviewFile(db)).data.target).toBe('Saved despite EPERM');
   });
 
