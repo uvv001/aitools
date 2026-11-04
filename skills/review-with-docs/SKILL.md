@@ -100,7 +100,8 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
    best practices, and every finding evidenced or opened as ❓ unverified;
    with a fleet, the round's folder holds a coverage file per agent — one per
    rule, plus purpose fit and best practices — and the index shows each tier
-   on at least two model families where the schema offers them.
+   with two or more agents on at least two model families where the schema
+   offers them.
 4. **Record.** `finding add --severity --title --description-file` records
    each finding in the open round, with `--unverified` where its evidence
    stayed unsettled — a fleet's reply line marks it ❓; the description follows

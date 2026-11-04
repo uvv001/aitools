@@ -3040,7 +3040,7 @@ async function initReviewFile(name, options = {}) {
 	const dbPath = options.db ?? paths.db;
 	const targetDir = dirname(resolve(cwd, dbPath));
 	if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
-	const reportTarget = reviewPaths(reviewPaths(options.report !== void 0 || options.db === void 0 ? paths.report : reviewPaths(dbPath).report).db).report;
+	const reportTarget = reviewPaths(reviewPaths(options.report !== void 0 && options.db !== void 0 && !samePath(paths.db, dbPath) ? paths.report : reviewPaths(dbPath).report).db).report;
 	await refuseDatabase(reportTarget, dbPath);
 	if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
 	if (options.report !== void 0 && options.report !== reportTarget && !samePath(options.report, dbPath)) {
@@ -3778,7 +3778,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+44272ee`;
+	return `pr-comments ${VERSION}+5945d6b`;
 }
 //#endregion
 //#region src/cli.ts
