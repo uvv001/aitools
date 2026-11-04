@@ -160,6 +160,12 @@ function mustBeDatabase(dbPath: string | undefined): void {
   }
 }
 
+// The report is always next to the database with the same name, so naming both is fine only when they agree.
+function reportMatchesDatabase(report: string | undefined, db: string | undefined): void {
+  if (report === undefined || db === undefined || samePath(reviewPaths(report).db, db)) return;
+  throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
+}
+
 // The first place, as a path such as `findings[1].title`, where two values differ.
 function firstDifference(a: unknown, b: unknown, path: string): string {
   if (typeof a === 'object' && a !== null && typeof b === 'object' && b !== null) {
@@ -316,6 +322,7 @@ export async function initReviewFile(
   options: { report?: string; db?: string; pr?: string; now?: Date; cwd?: string } = {},
 ): Promise<InitResult> {
   mustBeDatabase(options.db);
+  reportMatchesDatabase(options.report, options.db);
   const cwd = options.cwd ?? process.cwd();
   const now = options.now ?? new Date();
   const data = newReview(name);
@@ -325,11 +332,7 @@ export async function initReviewFile(
   const targetDir = dirname(resolve(cwd, dbPath));
 
   if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
-  const reportBase =
-    options.report !== undefined && options.db !== undefined && !samePath(paths.db, dbPath)
-      ? paths.report
-      : reviewPaths(dbPath).report;
-  const reportTarget = reviewPaths(reviewPaths(reportBase).db).report;
+  const reportTarget = reviewPaths(dbPath).report;
   await refuseDatabase(reportTarget, dbPath);
   if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
   if (options.report !== undefined && options.report !== reportTarget && !samePath(options.report, dbPath)) {

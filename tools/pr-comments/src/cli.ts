@@ -278,15 +278,8 @@ async function snapshotOf(db: string): Promise<PullRequestData> {
   return data;
 }
 
-// The report is always next to the database with the same name, so naming both is fine only when they agree.
-function reportMatchesDatabase({ report, db }: Values): void {
-  if (report === undefined || db === undefined || samePath(reviewPaths(report).db, db)) return;
-  throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
-}
-
 async function initReview({ env, args: [name = ''], values }: Context): Promise<number> {
   const title = need('the name', name);
-  reportMatchesDatabase(values);
   const { db, report, reportError } = await initReviewFile(title, {
     report: values.report,
     db: values.db,

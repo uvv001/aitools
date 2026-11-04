@@ -533,13 +533,16 @@ describe('initReviewFile', () => {
     expect(meta(db, 'pull_request')).toBeUndefined();
   });
 
-  it('takes the database as the report option too, another db, and creates their folders', async () => {
+  it('takes the database as the report option too, another db, creates their folders, and refuses mismatched report and db', async () => {
     const fromDb = await initReviewFile('PR 42', { report: join(dir, 'a', 'r.sqlite'), now: NOW });
     expect(fromDb).toEqual({ db: join(dir, 'a', 'r.sqlite'), report: join(dir, 'a', 'r.md') });
 
     const named = join(dir, 'b', 'c', 'named.sqlite');
-    const other = await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW, db: named });
-    expect(other).toEqual({ db: named, report: join(dir, 'r.md') });
+    await expect(initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW, db: named })).rejects.toThrow(
+      `--report ${join(dir, 'r.md')} and --db ${named} name different files; the report is always next to the database with the same name`,
+    );
+    const other = await initReviewFile('PR 42', { now: NOW, db: named });
+    expect(other).toEqual({ db: named, report: join(dir, 'b', 'c', 'named.md') });
     expect(existsSync(named)).toBe(true);
     expect(existsSync(join(dir, 'r.sqlite'))).toBe(false);
   });
@@ -552,8 +555,8 @@ describe('initReviewFile', () => {
 
   it('accepts a database path in upper case', async () => {
     const db = join(dir, 'NAMED.SQLITE');
-    expect((await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW, db })).db).toBe(db);
-    expect(listing()).toEqual(['NAMED.SQLITE', 'r.md']);
+    expect((await initReviewFile('PR 42', { now: NOW, db })).db).toBe(db);
+    expect(listing()).toEqual(['NAMED.SQLITE', 'NAMED.md']);
   });
 
   it('is rendered into a report that parses', async () => {
