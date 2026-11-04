@@ -749,6 +749,16 @@ describe('initReviewFile', () => {
       expect(existsSync(join(repo, '.ai'))).toBe(false);
     });
 
+    it('names the nested .ai/.gitignore when it exposes .ai/review-with-docs/ without a root .gitignore', async () => {
+      const nestedIgnore = join(repo, '.ai', '.gitignore');
+      await mkdir(dirname(nestedIgnore), { recursive: true });
+      await writeFile(nestedIgnore, '!review-with-docs/\n', 'utf8');
+      await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
+        `${nestedIgnore} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
+      );
+      expect(existsSync(join(repo, '.ai', 'review-with-docs'))).toBe(false);
+    });
+
     it('writes /.ai/review-with-docs/ to the shared common git info/exclude in a linked worktree', async () => {
       const commonGit = join(dir, 'main-repo', '.git');
       const worktreeGit = join(commonGit, 'worktrees', 'wt1');
