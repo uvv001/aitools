@@ -3736,7 +3736,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+adb5f87`;
+	return `pr-comments ${VERSION}+0ff046c`;
 }
 //#endregion
 //#region src/cli.ts
