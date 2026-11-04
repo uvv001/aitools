@@ -2956,7 +2956,13 @@ async function changeReviewState(arg, change, options = {}) {
 		const changed = await inTransactionAsync(db, async () => {
 			if (options.snapshot !== void 0) savePullRequest(db, options.snapshot);
 			const before = loadState(db);
-			const result = await change(before);
+			let result;
+			try {
+				result = await change(before);
+			} catch (error) {
+				if (error instanceof Error && error.message.includes("--db <file.sqlite>")) throw new Error(error.message.replaceAll("--db <file.sqlite>", `--db ${paths.db}`));
+				throw error;
+			}
 			const { state } = result;
 			if (state !== before) {
 				if (state.data !== before.data) {
@@ -3031,15 +3037,15 @@ async function syncReviewFile(arg, data) {
 }
 //#endregion
 //#region src/review-links.ts
-const REMOVE = "pr-comments link remove";
+const REMOVE = "pr-comments link remove --db <file.sqlite>";
 function checkedRef(ref) {
 	if (!isLinkRef(ref)) throw new Error(`"${ref}" is not a PR comment ref; expected r544830, c623843 or a3f9c2d1e`);
 }
 function knownRef(state, ref) {
-	if (!state.known.has(ref)) throw new Error(`${ref} is not in the database; run "pr-comments pr sync" first, or check the id`);
+	if (!state.known.has(ref)) throw new Error(`${ref} is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id`);
 }
 const ONLY_DUPLICATE = ": it can only be linked as a duplicate of a finding (the tool does not publish it, and every check item has to be tied to a finding)";
-const NOT_A_NOTE = ": every check item has to be tied to a finding, so it cannot be recorded as a note; link it to a finding (add one with \"pr-comments finding add\" when none covers it)";
+const NOT_A_NOTE = ": every check item has to be tied to a finding, so it cannot be recorded as a note; link it to a finding (add one with \"pr-comments finding add --db <file.sqlite>\" when none covers it)";
 const NOTHING_TO_REPLY = "; there is nothing to reply to";
 function refuseAnnotation(ref, why) {
 	if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation${why}`);
@@ -3153,7 +3159,7 @@ function recordReplied(state, ref, replyRef, where, now) {
 	checkedRef(replyRef);
 	knownRef(state, ref);
 	const link = linkOf(state.links, ref);
-	if (link === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate <finding> ${ref}"`);
+	if (link === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db <file.sqlite> <finding> ${ref}"`);
 	if (link.role !== "duplicate") throw new Error(link.role === "note" ? `${ref} is recorded as a note, not as a duplicate of a finding` : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`);
 	const found = findFinding$1(state.data, link.finding);
 	const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;
@@ -3736,7 +3742,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+f6f1147`;
+	return `pr-comments ${VERSION}+3829ea2`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4320,7 +4326,7 @@ const DEFINITIONS = [
 	{
 		words: "pr connect",
 		summary: "connects the review to its pull request",
-		description: ["Another pull request is refused once the review has links to the comments of this one.", "Connecting the review to a different pull request drops the downloaded data of the old one; run \"pr-comments pr sync\" next."],
+		description: ["Another pull request is refused once the review has links to the comments of this one.", "Connecting the review to a different pull request drops the downloaded data of the old one; run \"pr-comments pr sync --db <file.sqlite>\" next."],
 		args: [{
 			name: "<url>",
 			description: "the URL of the pull request"
