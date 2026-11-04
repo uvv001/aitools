@@ -1270,7 +1270,7 @@ async function execute(command: Command, argv: string[], env: CliEnvironment): P
   const context = { env, args, values };
   if (command.database === 'none') return command.run(context);
 
-  const db = need('--db', values.db);
+  const db = values.db!;
   const outcome = await command.run(context, db);
   const code = outcome === 'unchanged' ? 0 : outcome;
   if (outcome === 0 && command.database === 'change' && !values['dry-run']) env.warn(`Review database: ${shownPath(db, env.cwd())}\n`);

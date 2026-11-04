@@ -661,13 +661,15 @@ describe('initReviewFile', () => {
       expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n!/.ai/review-with-docs/\n/.ai/review-with-docs/\n');
     });
 
-    it('skips .git/info/exclude when .gitignore already ignores .ai/review-with-docs/, and adds it when .gitignore un-ignores .ai/ to version it', async () => {
+    it('skips .git/info/exclude when .gitignore already ignores .ai/review-with-docs/', async () => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
       await writeFile(join(repo, '.gitignore'), '/.ai/review-with-docs/\n!docs/review.md\n', 'utf8');
       await initReviewFile('PR 42', { cwd, now: NOW });
       expect(existsSync(excludePath)).toBe(false);
+    });
 
-      await rm(join(repo, '.ai'), { recursive: true, force: true });
+    it('adds /.ai/review-with-docs/ to .git/info/exclude when .gitignore un-ignores .ai/ to version it', async () => {
+      const excludePath = join(repo, '.git', 'info', 'exclude');
       await writeFile(join(repo, '.gitignore'), '/.ai/\n!/.ai/\n', 'utf8');
       await initReviewFile('PR 42', { cwd, now: NOW });
       expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n');
