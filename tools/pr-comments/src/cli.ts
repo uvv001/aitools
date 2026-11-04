@@ -563,9 +563,7 @@ async function replyToLinked({ env, args: [ref = ''], values }: Context, db: str
 }
 
 async function renderReview({ env, values }: Context, db: string): Promise<number> {
-  const { report, action } = await renderReportFile(db, {
-    out: values.out,
-  });
+  const { report, action } = await renderReportFile(db, { out: values.out });
   env.print(`${action.padEnd(ACTION_WIDTH)} ${report}\n`);
   return 0;
 }
@@ -964,12 +962,10 @@ const DEFINITIONS: Command[] = [
     summary: 'writes the review report',
     description: [
       'Writes the markdown report of the review, made from the database, and says whether the file was created, updated or',
-      'left unchanged. It writes only the report, never the database, and never over a SQLite file.',
+      'left unchanged. It writes the report only, never the database, and never over a SQLite file.',
     ],
     args: [],
-    options: [
-      { name: 'out', value: '<file.md>', description: 'the report file (default: next to the database, <stem>.md)' },
-    ],
+    options: [{ name: 'out', value: '<file.md>', description: 'the report file (default: next to the database, <stem>.md)' }],
     database: 'readonly',
     example: 'pr-comments report render',
     run: renderReview,
@@ -1255,7 +1251,8 @@ function checkedArguments(command: Command, parsed: ReturnType<typeof parseStric
   const missing = command.args.filter(({ optional: skippable }) => !skippable)[args.length];
   if (missing !== undefined) throw usageError(command, `missing ${missing.name}`);
   if (args.length > command.args.length) throw usageError(command, `unexpected argument "${args[command.args.length]}"`);
-  if (command.options.some(({ name, required }) => name === 'db' && required) && !given.has('db')) {
+  // Checked after positional arguments and oneOf so command-specific argument mistakes are reported first.
+  if (command.database !== 'none' && !given.has('db')) {
     throw usageError(command, '--db is required');
   }
   return args;

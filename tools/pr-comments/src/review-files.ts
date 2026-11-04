@@ -254,6 +254,17 @@ export async function ensureAiGitExcluded(repoRoot: string): Promise<void> {
   }
 }
 
+async function writeReportUntilStable(target: string, initial: string, renderLatest: () => string): Promise<void> {
+  let text = initial;
+  await mkdir(dirname(target), { recursive: true });
+  while (true) {
+    await writeFile(target, text, 'utf8');
+    const latest = renderLatest();
+    if (latest === text) break;
+    text = latest;
+  }
+}
+
 // Creates the database of a new review named `name` (the title of its report): no rounds or findings. It
 // lives at `options.report` (a report or a database path) or, without one, at the default place of a review of that
 // name (`.ai/review-with-docs/` of the repository of `cwd`); `options.db` names another file, which must end in
@@ -285,20 +296,14 @@ export async function initReviewFile(
 
   const created = await createDatabase(dbPath, data, pullRequest);
   if (!created) throw existingDatabase(dbPath);
-  let text = rendered;
-  await mkdir(dirname(reportTarget), { recursive: true });
-  while (true) {
-    await writeFile(reportTarget, text, 'utf8');
+  await writeReportUntilStable(reportTarget, rendered, () => {
     const handle = new DatabaseSync(dbPath, { readOnly: true, timeout: 10_000 });
-    let latest: string;
     try {
-      latest = renderReport(loadReview(handle));
+      return renderReport(loadReview(handle));
     } finally {
       handle.close();
     }
-    if (latest === text) break;
-    text = latest;
-  }
+  });
   return { db: dbPath, report: reportTarget };
 }
 
@@ -352,18 +357,11 @@ export async function renderReportFile(arg: string, options: { out?: string } = 
   await refuseDatabase(target, paths.db);
   const db = openReviewDb(paths.db, 'readonly');
   try {
-    let text = renderReport(loadReview(db));
+    const text = renderReport(loadReview(db));
     const current = await readExisting(target);
-    if (current !== text) text = renderReport(loadReview(db));
     const action: RenderResult['action'] = current === text ? 'unchanged' : current === undefined ? 'created' : 'updated';
     if (action !== 'unchanged') {
-      await mkdir(dirname(target), { recursive: true });
-      while (true) {
-        await writeFile(target, text, 'utf8');
-        const latest = renderReport(loadReview(db));
-        if (latest === text) break;
-        text = latest;
-      }
+      await writeReportUntilStable(target, text, () => renderReport(loadReview(db)));
     }
     return { report: target, action };
   } finally {
@@ -434,13 +432,7 @@ export async function changeReviewState<T>(
     );
     if (rendered !== undefined) {
       try {
-        await mkdir(dirname(paths.report), { recursive: true });
-        while (true) {
-          await writeFile(paths.report, rendered, 'utf8');
-          const latest = renderReport(loadReview(db));
-          if (latest === rendered) break;
-          rendered = latest;
-        }
+        await writeReportUntilStable(paths.report, rendered, () => renderReport(loadReview(db)));
       } catch (error) {
         // The database transaction has already committed; do not report the saved change as failed if the derived
         // report cannot be refreshed right now, but surface the refresh error to the caller so it can warn.

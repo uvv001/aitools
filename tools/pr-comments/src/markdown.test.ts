@@ -508,7 +508,7 @@ describe('renderMarkdown check annotations', () => {
     expect(nobody).toContain('_No comments._');
   });
 
-  it('filters by refs and pending items', () => {
+  it('filters by refs', () => {
     const data = withChecks(checkRun([annotation({ ref: 'a3f9c2d1' }), annotation({ ref: 'b7c8d9e0', startLine: 10, endLine: 10 })]));
     const byRef = renderMarkdown(data, { refs: ['r1001', 'a3f9c2d1'] });
     expect(byRef).toContain('- Filter: only refs `r1001`, `a3f9c2d1`');
@@ -518,7 +518,10 @@ describe('renderMarkdown check annotations', () => {
     expect(byRef).not.toContain('b7c8d9e0');
     expect(byRef).not.toContain('r1004');
     expect(byRef).not.toContain('## Conversation');
+  });
 
+  it('filters by pending items', () => {
+    const data = withChecks(checkRun([annotation({ ref: 'a3f9c2d1' }), annotation({ ref: 'b7c8d9e0', startLine: 10, endLine: 10 })]));
     const byPending = renderMarkdown(data, { pendingRefs: new Set(['c2001', 'r1004', 'b7c8d9e0']) });
     expect(byPending).toContain('- Filter: only pending comments and check annotations');
     expect(byPending).toContain('`c2001`');

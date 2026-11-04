@@ -653,46 +653,41 @@ describe('initReviewFile', () => {
       expect(loaded.paths).toEqual({ db: result.db, report: result.report });
     });
 
-    it('re-appends /.ai/review-with-docs/ to .git/info/exclude when a later negation undoes an earlier rule, allows .ai/ to be versioned, and reports a conflict when .gitignore negates .ai/review-with-docs/', async () => {
+    it('re-appends /.ai/review-with-docs/ to .git/info/exclude when a later negation undoes an earlier rule', async () => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
       await mkdir(dirname(excludePath), { recursive: true });
       await writeFile(excludePath, '/.ai/review-with-docs/\n!/.ai/review-with-docs/\n', 'utf8');
       await initReviewFile('PR 42', { cwd, now: NOW });
       expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n!/.ai/review-with-docs/\n/.ai/review-with-docs/\n');
+    });
 
-      await rm(join(repo, '.ai'), { recursive: true, force: true });
-      await rm(excludePath, { force: true });
+    it('skips .git/info/exclude when .gitignore already ignores .ai/review-with-docs/, and adds it when .gitignore un-ignores .ai/ to version it', async () => {
+      const excludePath = join(repo, '.git', 'info', 'exclude');
       await writeFile(join(repo, '.gitignore'), '/.ai/review-with-docs/\n!docs/review.md\n', 'utf8');
       await initReviewFile('PR 42', { cwd, now: NOW });
       expect(existsSync(excludePath)).toBe(false);
 
-      // Un-ignoring .ai/ itself (!/.ai/) so .ai/ can be versioned adds /.ai/review-with-docs/ to .git/info/exclude without conflict.
       await rm(join(repo, '.ai'), { recursive: true, force: true });
       await writeFile(join(repo, '.gitignore'), '/.ai/\n!/.ai/\n', 'utf8');
       await initReviewFile('PR 42', { cwd, now: NOW });
       expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n');
+    });
 
-      await rm(join(repo, '.ai'), { recursive: true, force: true });
-      await rm(excludePath, { force: true });
-      await writeFile(join(repo, '.gitignore'), '/.ai/\n!/.ai/\n!/.ai/**\n', 'utf8');
+    it.each([
+      ['wildcard negation under .ai/', '/.ai/\n!/.ai/\n!/.ai/**\n'],
+      ['markdown negation under .ai/review-with-docs/', '/.ai/review-with-docs/**\n!/.ai/review-with-docs/*.md\n'],
+      ['child negation before parent !/.ai/', '!/.ai/review-with-docs/\n!/.ai/\n'],
+    ])('reports a conflict when .gitignore exposes .ai/review-with-docs/ via %s', async (_name, gitignoreText) => {
+      const excludePath = join(repo, '.git', 'info', 'exclude');
+      await writeFile(join(repo, '.gitignore'), gitignoreText, 'utf8');
       await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
         `${join(repo, '.gitignore')} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
       );
       expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n');
       expect(existsSync(join(repo, '.ai'))).toBe(false);
-
-      await writeFile(join(repo, '.gitignore'), '/.ai/review-with-docs/**\n!/.ai/review-with-docs/*.md\n', 'utf8');
-      await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
-        `${join(repo, '.gitignore')} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
-      );
-
-      await writeFile(join(repo, '.gitignore'), '!/.ai/review-with-docs/\n!/.ai/\n', 'utf8');
-      await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
-        `${join(repo, '.gitignore')} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
-      );
     });
 
-    it('writes /.ai/review-with-docs/ to the shared common git info/exclude in a linked worktree, or to gitdir/info/exclude when commondir is absent', async () => {
+    it('writes /.ai/review-with-docs/ to the shared common git info/exclude in a linked worktree', async () => {
       const commonGit = join(dir, 'main-repo', '.git');
       const worktreeGit = join(commonGit, 'worktrees', 'wt1');
       const worktreeRoot = join(dir, 'wt1');
@@ -704,8 +699,10 @@ describe('initReviewFile', () => {
       await initReviewFile('PR 42', { cwd: worktreeRoot, now: NOW });
       expect(await readFile(join(commonGit, 'info', 'exclude'), 'utf8')).toBe('/.ai/review-with-docs/\n');
       expect(existsSync(join(worktreeGit, 'info', 'exclude'))).toBe(false);
+    });
 
-      const submoduleGit = join(commonGit, 'modules', 'sub1');
+    it('writes /.ai/review-with-docs/ to gitdir/info/exclude when commondir is absent (as in a submodule)', async () => {
+      const submoduleGit = join(dir, 'main-repo', '.git', 'modules', 'sub1');
       const submoduleRoot = join(dir, 'sub1');
       await mkdir(submoduleGit, { recursive: true });
       await mkdir(submoduleRoot, { recursive: true });
