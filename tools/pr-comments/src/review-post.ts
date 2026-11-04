@@ -119,7 +119,7 @@ export async function postFinding(
         const reason = error instanceof Error ? error.message : String(error);
         const message =
           `${was}, but the pull request could not be refreshed (${reason}); ` +
-          `run "pr-comments pr sync", then ${linkOwnCommand}`;
+          `run "pr-comments pr sync --db ${paths.db}", then ${linkOwnCommand}`;
         return { ...result, action: 'error', message };
       }
       try {

@@ -271,11 +271,9 @@ function warnReportError(env: CliEnvironment, db: string, error: Error | undefin
 
 const countAnnotations = (data: PullRequestData): number => (data.checkRuns ?? []).reduce((total, run) => total + run.annotations.length, 0);
 
-const NO_SNAPSHOT = 'no pull request data in the database; run "pr-comments pr sync" first';
-
 async function snapshotOf(db: string): Promise<PullRequestData> {
   const data = await loadSnapshot(db);
-  if (data === undefined) throw new Error(NO_SNAPSHOT);
+  if (data === undefined) throw new Error(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
   return data;
 }
 
@@ -316,13 +314,13 @@ async function showPullRequest({ env, values }: Context, db: string): Promise<nu
   const { pullRequest } = await loadReviewFile(db);
   if (pullRequest === undefined) {
     if (values.json) printJson(env, { pullRequest: null });
-    else env.print('not connected to a pull request; connect it with "pr-comments pr connect <url>"\n');
+    else env.print(`not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"\n`);
     return 0;
   }
   const data = await loadSnapshot(db);
   if (data === undefined) {
     if (values.json) printJson(env, { pullRequest, synced: false });
-    else env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync"\n`);
+    else env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync --db ${db}"\n`);
     return 0;
   }
   const { fetchedAt, headSha } = data.pullRequest;
@@ -340,7 +338,7 @@ async function showPullRequest({ env, values }: Context, db: string): Promise<nu
 async function syncPullRequest({ env }: Context, db: string): Promise<number> {
   const { pullRequest } = await loadReviewFile(db);
   if (pullRequest === undefined) {
-    throw new Error('the review is not connected to a pull request; connect it first with "pr-comments pr connect <url>"');
+    throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${db} <url>"`);
   }
   const ref = parsePullRequestUrl(pullRequest);
   const { reviews, threads, comments, annotations } = await syncReviewFile(db, await env.getPullRequest(ref));

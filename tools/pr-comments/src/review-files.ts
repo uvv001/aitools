@@ -501,7 +501,7 @@ export async function syncReviewFile(arg: string, data: PullRequestData): Promis
       () => {
         const connected = getMeta(db, PULL_REQUEST);
         if (connected === undefined) {
-          throw new Error('the review is not connected to a pull request; connect it first with "pr-comments pr connect <url>"');
+          throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${paths.db} <url>"`);
         }
         if (!samePullRequest(parsePullRequestUrl(connected), data.pullRequest)) {
           throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(data.pullRequest)}`);

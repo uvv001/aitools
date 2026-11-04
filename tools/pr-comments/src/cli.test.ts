@@ -1124,7 +1124,7 @@ describe('cli', () => {
 
         expect(await step('pr', 'show', '--db', db)).toBe(0);
 
-        expect(printed).toBe('not connected to a pull request; connect it with "pr-comments pr connect <url>"\n');
+        expect(printed).toBe(`not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"\n`);
         expect(warned).toBe('');
         await step('pr', 'show', '--db', db, '--json');
         expect(JSON.parse(printed)).toEqual({ pullRequest: null });
@@ -1136,7 +1136,7 @@ describe('cli', () => {
         await step('pr', 'connect', prUrl, '--db', db);
 
         expect(await step('pr', 'show', '--db', db)).toBe(0);
-        expect(printed).toBe(`${prUrl}\nnot synced yet; run "pr-comments pr sync"\n`);
+        expect(printed).toBe(`${prUrl}\nnot synced yet; run "pr-comments pr sync --db ${db}"\n`);
         await step('pr', 'show', '--db', db, '--json');
         expect(JSON.parse(printed)).toEqual({ pullRequest: prUrl, synced: false });
       });
@@ -1194,7 +1194,7 @@ describe('cli', () => {
         const db = join(docs, 'bare_review.sqlite');
         await step('init', 'Bare', '--db', db);
         await expect(step('pr', 'sync', '--db', db)).rejects.toThrow(
-          'the review is not connected to a pull request; connect it first with "pr-comments pr connect <url>"',
+          `the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${db} <url>"`,
         );
         expect(downloads).toEqual([]);
 
@@ -1754,7 +1754,7 @@ describe('cli', () => {
       const db = join(docs, 'bare_review.sqlite');
       await step('init', 'Bare', '--db', db, '--pr', prUrl);
 
-      await expect(step('link', 'pending', '--db', db)).rejects.toThrow('no pull request data in the database; run "pr-comments pr sync" first');
+      await expect(step('link', 'pending', '--db', db)).rejects.toThrow(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
       await expect(step('link', 'pending', '--db', db, '--json')).rejects.toThrow('no pull request data in the database');
       expect(printed).toBe('');
     });
@@ -1976,7 +1976,7 @@ describe('cli', () => {
         const db = join(docs, 'bare_review.sqlite');
         await step('init', 'Bare', '--db', db, '--pr', prUrl);
 
-        await expect(step('report', 'comments', '--db', db)).rejects.toThrow('no pull request data in the database; run "pr-comments pr sync" first');
+        await expect(step('report', 'comments', '--db', db)).rejects.toThrow(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
         expect(printed).toBe('');
       });
 

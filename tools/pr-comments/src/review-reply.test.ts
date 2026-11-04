@@ -203,7 +203,7 @@ describe('refusals before anything is sent', () => {
       [
         'a duplicate of a finding that has no own comment',
         'r4',
-        (db: string) => `F2 has no own comment yet; post it with "pr-comments finding post --db ${db} F2" or link its comment with "pr-comments link own"`,
+        (db: string) => `F2 has no own comment yet; post it with "pr-comments finding post --db ${db} F2" or link its comment with "pr-comments link own --db ${db} F2 <ref>"`,
       ],
     ])('refuses %s', async (_name, ref, message) => {
       const db = await startReview();
@@ -593,7 +593,7 @@ describe('refreshing the pull request', () => {
       comment: 'r10',
       url: `${PR}#discussion_r10`,
       target: { ref: 'r2', author: 'Reviewer', kind: 'review', resolved: false },
-      message: `${was}, but the pull request could not be refreshed (network down); run "pr-comments pr sync" and run the command again to record it`,
+      message: `${was}, but the pull request could not be refreshed (network down); run "pr-comments pr sync --db ${db}" and run the command again to record it`,
     });
     expect(replied).toMatchObject({ finding: 'F1', own: 'r1', link: OWN_OF_F1, text: `Duplicate of ${OWN_OF_F1}.` });
     await sameBytes(db, before);

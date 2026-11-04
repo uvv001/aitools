@@ -84,7 +84,7 @@ export async function replyToDuplicate(
   const own = linksOf(links, finding).find((link) => link.role === 'own');
   if (own === undefined) {
     throw new Error(
-      `${finding} has no own comment yet; post it with "pr-comments finding post --db ${paths.db} ${finding}" or link its comment with "pr-comments link own"`,
+      `${finding} has no own comment yet; post it with "pr-comments finding post --db ${paths.db} ${finding}" or link its comment with "pr-comments link own --db ${paths.db} ${finding} <ref>"`,
     );
   }
 
@@ -110,7 +110,7 @@ export async function replyToDuplicate(
     snapshot = await deps.refresh(pullRequestRef);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    const message = `${was}, but the pull request could not be refreshed (${reason}); run "pr-comments pr sync" and run the command again to record it`;
+    const message = `${was}, but the pull request could not be refreshed (${reason}); run "pr-comments pr sync --db ${paths.db}" and run the command again to record it`;
     return { ...replied, result: { ...result, action: 'error', message } };
   }
   try {

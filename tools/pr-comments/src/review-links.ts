@@ -37,8 +37,8 @@ export interface ReviewState {
   known: ReadonlySet<string>;
 }
 
-// The review database is the one the command was given (or discovered), which this module does not know: its hints
-// name no database, so they run as written where the review is found by discovery.
+// The review database is the one the command was given, which this pure module does not know: its hints name the
+// subcommand only.
 const REMOVE = 'pr-comments link remove';
 
 function checkedRef(ref: string): void {

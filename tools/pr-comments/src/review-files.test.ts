@@ -1723,7 +1723,7 @@ describe('syncReviewFile', () => {
     const { db: unconnected } = await initReviewFile('Other', { report: join(dir, 'other.md'), now: NOW });
     const before = await readFile(unconnected);
     await expect(syncReviewFile(unconnected, snapshotOf(['r1']))).rejects.toThrow(
-      new Error('the review is not connected to a pull request; connect it first with "pr-comments pr connect <url>"'),
+      new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${unconnected} <url>"`),
     );
     expect((await readFile(unconnected)).equals(before)).toBe(true);
     expect(await loadSnapshot(unconnected)).toBeUndefined();

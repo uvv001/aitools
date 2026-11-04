@@ -83,7 +83,7 @@ async function sync(db: string, data: PullRequestData): Promise<void> {
   await runSource(['pr', 'sync', '--db', db], env);
 }
 
-// A real git repository with one commit: its `.git` is where the search for a review stops, and HEAD resolves.
+// A real git repository with one commit: its `.git` marks the repository root for the default review folder, and HEAD resolves.
 async function makeRepository(dir: string): Promise<string> {
   await mkdir(dir, { recursive: true });
   const git = (...args: string[]) =>
@@ -250,7 +250,7 @@ describe('bundle', () => {
     expect(init.stdout).toBe(
       `Created review.sqlite\nPull request: ${prUrl}\nReport: review.md\n`,
     );
-    expect((await bundled(['pr', 'show', '--db', db], elsewhere)).stdout).toBe(`${prUrl}\nnot synced yet; run "pr-comments pr sync"\n`);
+    expect((await bundled(['pr', 'show', '--db', db], elsewhere)).stdout).toBe(`${prUrl}\nnot synced yet; run "pr-comments pr sync --db ${db}"\n`);
 
     const round = await bundled(['round', 'open', '--db', db, '--no-base'], elsewhere);
     expect(round).toMatchObject({ code: 0, stdout: 'Round 1 opened\n', stderr: 'Review database: review.sqlite\n' });

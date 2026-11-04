@@ -699,7 +699,7 @@ describe('refreshing the pull request', () => {
       lines: '10-12',
       message:
         `${was}, but the pull request could not be refreshed (network down); ` +
-        `run "pr-comments pr sync", then "pr-comments link own --db ${db} F1 ${ref}"`,
+        `run "pr-comments pr sync --db ${db}", then "pr-comments link own --db ${db} F1 ${ref}"`,
     });
     await sameBytes(db, before);
   });
