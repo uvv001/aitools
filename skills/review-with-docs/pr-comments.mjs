@@ -2917,6 +2917,10 @@ const existingReport = (reportPath) => /* @__PURE__ */ new Error(`${reportPath} 
 function mustBeDatabase(dbPath) {
 	if (dbPath !== void 0 && extname(dbPath).toLowerCase() !== ".sqlite") throw new Error(`--db must be a file ending in .sqlite: ${dbPath}`);
 }
+function reportMatchesDatabase(report, db) {
+	if (report === void 0 || db === void 0 || samePath(reviewPaths(report).db, db)) return;
+	throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
+}
 function firstDifference(a, b, path) {
 	if (typeof a === "object" && a !== null && typeof b === "object" && b !== null) for (const key of /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)])) {
 		const [x, y] = [a[key], b[key]];
@@ -3035,6 +3039,7 @@ async function writeReportUntilStable(target, initial, renderLatest) {
 }
 async function initReviewFile(name, options = {}) {
 	mustBeDatabase(options.db);
+	reportMatchesDatabase(options.report, options.db);
 	const cwd = options.cwd ?? process.cwd();
 	const now = options.now ?? /* @__PURE__ */ new Date();
 	const data = newReview(name);
@@ -3043,7 +3048,7 @@ async function initReviewFile(name, options = {}) {
 	const dbPath = options.db ?? paths.db;
 	const targetDir = dirname(resolve(cwd, dbPath));
 	if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
-	const reportTarget = reviewPaths(reviewPaths(options.report !== void 0 && options.db !== void 0 && !samePath(paths.db, dbPath) ? paths.report : reviewPaths(dbPath).report).db).report;
+	const reportTarget = reviewPaths(dbPath).report;
 	await refuseDatabase(reportTarget, dbPath);
 	if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
 	if (options.report !== void 0 && options.report !== reportTarget && !samePath(options.report, dbPath)) {
@@ -3781,7 +3786,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+d47ed2a`;
+	return `pr-comments ${VERSION}+26208fa`;
 }
 //#endregion
 //#region src/cli.ts
@@ -3926,14 +3931,8 @@ async function snapshotOf(db) {
 	if (data === void 0) throw new Error(`no pull request data in the database; run "pr-comments pr sync --db ${quoteCliPath(db)}" first`);
 	return data;
 }
-function reportMatchesDatabase({ report, db }) {
-	if (report === void 0 || db === void 0 || samePath(reviewPaths(report).db, db)) return;
-	throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
-}
 async function initReview({ env, args: [name = ""], values }) {
-	const title = need("the name", name);
-	reportMatchesDatabase(values);
-	const { db, report, reportError } = await initReviewFile(title, {
+	const { db, report, reportError } = await initReviewFile(need("the name", name), {
 		report: values.report,
 		db: values.db,
 		pr: values.pr,
