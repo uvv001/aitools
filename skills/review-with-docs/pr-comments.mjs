@@ -2919,7 +2919,7 @@ function mustBeDatabase(dbPath) {
 }
 function reportMatchesDatabase(report, db) {
 	if (report === void 0 || db === void 0) return;
-	if (samePath(reviewPaths(report).db, reviewPaths(reviewPaths(db).report).db)) return;
+	if (samePath(reviewPaths(reviewPaths(report).report).db, reviewPaths(reviewPaths(db).report).db)) return;
 	throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
 }
 function firstDifference(a, b, path) {
@@ -3787,7 +3787,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+d9df01c`;
+	return `pr-comments ${VERSION}+b3ccc16`;
 }
 //#endregion
 //#region src/cli.ts
