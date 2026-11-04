@@ -22,7 +22,7 @@ const firstWord = (label: string) => label.split(' ')[0] ?? label;
 const stateLabel = (marker: string) => STATES.find((state) => state.marker === marker)?.label ?? marker;
 
 // The marker for a marker, a label (`awaiting triage`) or the first word of a label (`awaiting`).
-export function parseState(text: string): string {
+export function parseState(text: string, prefix = ''): string {
   const wanted = normalise(text);
   const found = STATES.find((state) => [state.marker, state.label, firstWord(state.label)].includes(wanted));
   if (found) return found.marker;
@@ -30,7 +30,7 @@ export function parseState(text: string): string {
     const word = firstWord(label);
     return `${marker} ${word}${word === label ? '' : ` (${label})`}`;
   });
-  throw new Error(`--state "${text}" is not a state; use one of: ${valid.join(', ')}`);
+  throw new Error(`${prefix}"${text}" is not a state; use one of: ${valid.join(', ')}`);
 }
 
 // The marker for a marker or a name (`high`, `medium`, `low`).
@@ -45,7 +45,7 @@ export function parseSeverity(text: string): string {
 
 export function parseFilter(values: { state?: string; severity?: string; unposted?: boolean }): FindingFilter {
   return {
-    state: values.state === undefined ? undefined : parseState(values.state),
+    state: values.state === undefined ? undefined : parseState(values.state, '--state '),
     severity: values.severity === undefined ? undefined : parseSeverity(values.severity),
     unposted: values.unposted,
   };

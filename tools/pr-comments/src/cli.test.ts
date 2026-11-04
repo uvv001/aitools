@@ -1532,6 +1532,7 @@ describe('cli', () => {
     it('refuses a state or a severity that is none', async () => {
       await expect(step('finding', 'list', '--state', 'nonsense')).rejects.toThrow('--state "nonsense" is not a state; use one of:');
       await expect(step('finding', 'list', '--severity', 'critical')).rejects.toThrow('--severity "critical" is not a severity; use one of:');
+      await expect(step('finding', 'set-state', 'F3', 'nonsense')).rejects.toThrow(/^"nonsense" is not a state; use one of:/u);
     });
 
     it('shows a finding with its updates, in any case, and its links', async () => {
@@ -1634,7 +1635,7 @@ describe('cli', () => {
     it('refuses what changes nothing or cannot be done, and leaves the database as it was', async () => {
       await fails(['finding', 'set-state', 'F9', 'approved', '--db', review], 'unknown finding "F9"');
       await fails(['finding', 'set-state', 'F1', 'approved', '--db', review], 'F1 is already ✅ approved');
-      await fails(['finding', 'set-state', 'F3', 'nonsense', '--db', review], '--state "nonsense" is not a state');
+      await fails(['finding', 'set-state', 'F3', 'nonsense', '--db', review], '"nonsense" is not a state');
       await fails(['finding', 'set-state', 'F3', ' ', '--db', review], 'the state must not be empty');
       await fails(['finding', 'set-severity', 'F1', 'high', '--db', review], 'F1 already has severity 🔴');
       await fails(['finding', 'set-severity', 'F1', 'critical', '--db', review], '"critical" is not a severity; use one of: high, medium, low');

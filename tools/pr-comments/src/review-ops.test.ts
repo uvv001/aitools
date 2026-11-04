@@ -451,7 +451,7 @@ describe('setState', () => {
     refuses(
       reviewWith(1),
       (input) => setState(input, 'F1', { state: 'done' }, at()),
-      '--state "done" is not a state; use one of: ⏳ awaiting (awaiting triage), ❓ unverified, ✅ approved, 🔧 fixed, ❌ discarded, 📌 deferred, 🔀 improvement',
+      '"done" is not a state; use one of: ⏳ awaiting (awaiting triage), ❓ unverified, ✅ approved, 🔧 fixed, ❌ discarded, 📌 deferred, 🔀 improvement',
     );
   });
 

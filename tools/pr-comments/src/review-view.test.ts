@@ -52,7 +52,7 @@ describe('parseState', () => {
   it('lists the valid values for anything else', () => {
     expect(() => parseState('done')).toThrow(
       new Error(
-        '--state "done" is not a state; use one of: ⏳ awaiting (awaiting triage), ❓ unverified, ✅ approved, 🔧 fixed, ❌ discarded, 📌 deferred, 🔀 improvement',
+        '"done" is not a state; use one of: ⏳ awaiting (awaiting triage), ❓ unverified, ✅ approved, 🔧 fixed, ❌ discarded, 📌 deferred, 🔀 improvement',
       ),
     );
     expect(() => parseState('triage')).toThrow('is not a state');
