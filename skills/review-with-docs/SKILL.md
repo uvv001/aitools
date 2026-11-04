@@ -26,7 +26,8 @@ where Node is missing or older, it is the user's call — installing Node is
 the expected outcome.
 
 - Options and examples live in `pr-comments <command> --help`; read it before
-  a command's first use.
+  a command's first use. Every command after `init` requires
+  `--db <file.sqlite>` (the path `init` created or the continuation selected).
 - Every title, description, update, and `--note` renders as Markdown in the
   report, so keep `<...>` tokens inside backticks or code fences. Pass
   descriptions as UTF-8 files and text arguments in single quotes: PowerShell
@@ -40,16 +41,14 @@ the expected outcome.
 
 ## Protocol
 
-A review database already in `.ai/`, in the session's `files/` folder, or in
-an earlier session's `files/` folder that the user names means the request
-continues it: where several exist, take the one whose title or `pr show`
-matches the target and pass `--db` on every command; where the host provides
-a session folder, run `report render --session-dir <session-folder>/files`
-first (with `--db <earlier-files>/<stem>.sqlite` when the database is only in
-an earlier session's folder) to bind the session folder and restore `.ai/`;
-then read `finding list` and start at the step the request calls for — a
-verdict is step 5, a publish or sync request step 6, new changes (a moved PR
-head included) step 7, a fix request the paragraph under States.
+A review database already in `<session-folder>/files/review-with-docs/` (or in
+an earlier session's `files/review-with-docs/` folder that the user names, or
+in `.ai/review-with-docs/` when the host provides no session folder) means the
+request continues it: where several exist, take the one whose title or
+`pr show --db <file.sqlite>` matches the target; pass `--db <file.sqlite>` on
+every command, read `finding list`, and start at the step the request calls
+for — a verdict is step 5, a publish or sync request step 6, new changes (a
+moved PR head included) step 7, a fix request the paragraph under States.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions — so where the target is not in a
@@ -62,15 +61,17 @@ head included) step 7, a fix request the paragraph under States.
    call — a wrong base silently changes the changeset under review.
    `init <name>` creates the database — `<name>` the report's title, derived
    from the review context (PR number, PR author, feature name) — with
-   `--session-dir <session-folder>/files` when the host provides a session
-   folder and `--pr <url>` where the target is a pull request. That first
-   pass — fleet briefs included — reads the changeset without the PR's
-   existing comments, so they cannot frame it; the user asks for the sync, and
-   even when requested up front, the comments enrich the report only after the
-   pass ([pull-request.md](pull-request.md)).
-   **Ready when:** the database exists in `.ai/` and in the session's `files/`
-   folder when the host provides one, the reviewed revision and its base (or
-   none) are pinned, on a pull request target `pr show` names that pull
+   `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite`
+   when the host provides a session folder (or in `.ai/review-with-docs/` by
+   default when it does not) and `--pr <url>` where the target is a pull
+   request. That first pass — fleet briefs included — reads the changeset
+   without the PR's existing comments, so they cannot frame it; the user asks
+   for the sync, and even when requested up front, the comments enrich the
+   report only after the pass ([pull-request.md](pull-request.md)).
+   **Ready when:** the database and report exist in
+   `<session-folder>/files/review-with-docs/` (or `.ai/review-with-docs/` when
+   the host provides no session folder), the reviewed revision and its base
+   (or none) are pinned, on a pull request target `pr show` names that pull
    request, and the user's target and base were confirmed or unambiguous.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
