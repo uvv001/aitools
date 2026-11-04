@@ -2707,6 +2707,7 @@ async function refuseDatabase(target, db) {
 	if (await isDatabaseFile(target)) throw new Error(`refusing to overwrite the SQLite database ${target} with a report`);
 	if (/\.sqlite(?::[^\\/]*)?$/iu.test(target)) throw new Error("--out must be a report file, not a database");
 }
+const quoteCliPath = (path) => /[\s']/u.test(path) ? `'${path.replaceAll("'", "''")}'` : path;
 function reviewPaths(arg) {
 	const extension = extname(arg);
 	const stem = arg.slice(0, arg.length - extension.length);
@@ -2973,7 +2974,7 @@ async function changeReviewState(arg, change, options = {}) {
 			try {
 				result = await change(before);
 			} catch (error) {
-				if (error instanceof Error && error.message.includes("--db <file.sqlite>")) throw new Error(error.message.replaceAll("--db <file.sqlite>", `--db ${paths.db}`));
+				if (error instanceof Error && error.message.includes("--db <file.sqlite>")) throw new Error(error.message.replaceAll("--db <file.sqlite>", `--db ${quoteCliPath(paths.db)}`));
 				throw error;
 			}
 			const { state } = result;
@@ -3032,7 +3033,7 @@ async function syncReviewFile(arg, data) {
 	try {
 		inTransaction(db, () => {
 			const connected = getMeta(db, PULL_REQUEST);
-			if (connected === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${paths.db} <url>"`);
+			if (connected === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(paths.db)} <url>"`);
 			if (!samePullRequest(parsePullRequestUrl(connected), data.pullRequest)) throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(data.pullRequest)}`);
 			savePullRequest(db, data);
 		}, { immediate: true });
@@ -3601,11 +3602,13 @@ function extractComment(report, findingId, options = {}) {
 //#endregion
 //#region src/review-post.ts
 function linkAdvice(reason, ref, db) {
-	return `remove the link with "pr-comments link remove --db ${db} ${ref}" and post again (that creates a new comment${reason === "moved" ? `; ${ref} stays on GitHub until you delete it` : ""})`;
+	const stays = reason === "moved" ? `; ${ref} stays on GitHub until you delete it` : "";
+	return `remove the link with "pr-comments link remove --db ${quoteCliPath(db)} ${ref}" and post again (that creates a new comment${stays})`;
 }
 async function postFinding(arg, findingId, options, deps) {
 	const { data, links, pullRequest, paths } = await loadReviewFile(arg);
-	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${paths.db} <url>"`);
+	const quotedDb = quoteCliPath(paths.db);
+	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
 	const ref = parsePullRequestUrl(pullRequest);
 	const extracted = extractComment(parseReport(renderReport(data), paths.report), findingId, {
 		anchor: options.anchor,
@@ -3633,12 +3636,12 @@ async function postFinding(arg, findingId, options, deps) {
 		if (options.dryRun || posted === void 0) return result;
 		const action = result.action;
 		const was = action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
-		const linkOwnCommand = `"pr-comments link own --db ${paths.db} ${id} ${posted}"`;
+		const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
 		let snapshot;
 		try {
 			snapshot = await deps.refresh(ref);
 		} catch (error) {
-			const message = `${was}, but the pull request could not be refreshed (${error instanceof Error ? error.message : String(error)}); run "pr-comments pr sync --db ${paths.db}", then ${linkOwnCommand}`;
+			const message = `${was}, but the pull request could not be refreshed (${error instanceof Error ? error.message : String(error)}); run "pr-comments pr sync --db ${quotedDb}", then ${linkOwnCommand}`;
 			return {
 				...result,
 				action: "error",
@@ -3681,18 +3684,19 @@ async function postFinding(arg, findingId, options, deps) {
 async function replyToDuplicate(arg, ref, options, deps) {
 	if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation; there is nothing to reply to`);
 	const { links, pullRequest, paths } = await loadReviewFile(arg);
-	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${paths.db} <url>"`);
+	const quotedDb = quoteCliPath(paths.db);
+	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
 	const linked = links.find((link) => link.ref === ref);
-	if (linked === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db ${paths.db} <finding> ${ref}"`);
+	if (linked === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db ${quotedDb} <finding> ${ref}"`);
 	if (linked.role === "note") throw new Error(`${ref} is recorded as a note, not as a duplicate of a finding`);
 	const finding = linked.finding;
 	if (linked.role === "own") throw new Error(`${ref} is linked as the own comment of ${finding}, not as a duplicate; only a duplicate is answered`);
 	const own = linksOf(links, finding).find((link) => link.role === "own");
-	if (own === void 0) throw new Error(`${finding} has no own comment yet; post it with "pr-comments finding post --db ${paths.db} ${finding}" or link its comment with "pr-comments link own --db ${paths.db} ${finding} <ref>"`);
+	if (own === void 0) throw new Error(`${finding} has no own comment yet; post it with "pr-comments finding post --db ${quotedDb} ${finding}" or link its comment with "pr-comments link own --db ${quotedDb} ${finding} <ref>"`);
 	const link = commentUrl(pullRequest, own.ref);
 	const body = composeBody(`Duplicate of ${link}.`, options.byAgent);
 	const gone = own.ref.startsWith("r") ? "was your pending review discarded?" : "was it deleted?";
-	const missing = `comment ${own.ref}, the own comment of ${finding}, no longer exists in this pull request (${gone}); remove the link with "pr-comments link remove --db ${paths.db} ${own.ref}" and post ${finding} again with "pr-comments finding post --db ${paths.db} ${finding}"`;
+	const missing = `comment ${own.ref}, the own comment of ${finding}, no longer exists in this pull request (${gone}); remove the link with "pr-comments link remove --db ${quotedDb} ${own.ref}" and post ${finding} again with "pr-comments finding post --db ${quotedDb} ${finding}"`;
 	const request = {
 		commentRef: ref,
 		body,
@@ -3720,7 +3724,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 	try {
 		snapshot = await deps.refresh(pullRequestRef);
 	} catch (error) {
-		const message = `${was}, but the pull request could not be refreshed (${error instanceof Error ? error.message : String(error)}); run "pr-comments pr sync --db ${paths.db}" and run the command again to record it`;
+		const message = `${was}, but the pull request could not be refreshed (${error instanceof Error ? error.message : String(error)}); run "pr-comments pr sync --db ${quotedDb}" and run the command again to record it`;
 		return {
 			...replied,
 			result: {
@@ -3755,7 +3759,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+599d147`;
+	return `pr-comments ${VERSION}+448a2ff`;
 }
 //#endregion
 //#region src/cli.ts
@@ -3892,13 +3896,13 @@ function warnReportError(env, db, error, report = reviewPaths(db).report) {
 	if (error === void 0) return;
 	const shownDb = shownPath(db, env.cwd());
 	const shownReport = shownPath(report, env.cwd());
-	const outFlag = report === reviewPaths(db).report ? "" : ` --out ${shownReport}`;
-	env.warn(`Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${shownDb}${outFlag}"\n`);
+	const outFlag = report === reviewPaths(db).report ? "" : ` --out ${quoteCliPath(shownReport)}`;
+	env.warn(`Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${quoteCliPath(shownDb)}${outFlag}"\n`);
 }
 const countAnnotations = (data) => (data.checkRuns ?? []).reduce((total, run) => total + run.annotations.length, 0);
 async function snapshotOf(db) {
 	const data = await loadSnapshot(db);
-	if (data === void 0) throw new Error(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
+	if (data === void 0) throw new Error(`no pull request data in the database; run "pr-comments pr sync --db ${quoteCliPath(db)}" first`);
 	return data;
 }
 function reportMatchesDatabase({ report, db }) {
@@ -3937,7 +3941,7 @@ async function showPullRequest({ env, values }, db) {
 	const { pullRequest } = await loadReviewFile(db);
 	if (pullRequest === void 0) {
 		if (values.json) printJson(env, { pullRequest: null });
-		else env.print(`not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"\n`);
+		else env.print(`not connected to a pull request; connect it with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"\n`);
 		return 0;
 	}
 	const data = await loadSnapshot(db);
@@ -3946,7 +3950,7 @@ async function showPullRequest({ env, values }, db) {
 			pullRequest,
 			synced: false
 		});
-		else env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync --db ${db}"\n`);
+		else env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync --db ${quoteCliPath(db)}"\n`);
 		return 0;
 	}
 	const { fetchedAt, headSha } = data.pullRequest;
@@ -3972,7 +3976,7 @@ async function showPullRequest({ env, values }, db) {
 }
 async function syncPullRequest({ env }, db) {
 	const { pullRequest } = await loadReviewFile(db);
-	if (pullRequest === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${db} <url>"`);
+	if (pullRequest === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"`);
 	const ref = parsePullRequestUrl(pullRequest);
 	const { reviews, threads, comments, annotations } = await syncReviewFile(db, await env.getPullRequest(ref));
 	env.print(`Synced ${ref.owner}/${ref.repo}#${ref.number}: ${reviews} reviews, ${threads} threads, ${comments} comments, ${annotations} annotations\n`);
