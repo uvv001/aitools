@@ -3795,7 +3795,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+836d56f`;
+	return `pr-comments ${VERSION}+b562d9d`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4182,7 +4182,9 @@ async function changeLinks(env, db, change) {
 	env.print(`${result}\n`);
 	return 0;
 }
-async function linkOwnComment({ env, args: [id = "", ref = ""], values }, db) {
+const normalizeCliRef = (ref) => isLinkRef(ref.toLowerCase()) ? ref.toLowerCase() : ref;
+async function linkOwnComment({ env, args: [id = "", rawRef = ""], values }, db) {
+	const ref = normalizeCliRef(rawRef);
 	const note = optional("--note", values.note);
 	return changeLinks(env, db, (current) => {
 		const { id: finding } = findFinding$1(current.data, id);
@@ -4192,7 +4194,8 @@ async function linkOwnComment({ env, args: [id = "", ref = ""], values }, db) {
 		};
 	});
 }
-async function linkDuplicateComment({ env, args: [id = "", ref = ""], values }, db) {
+async function linkDuplicateComment({ env, args: [id = "", rawRef = ""], values }, db) {
+	const ref = normalizeCliRef(rawRef);
 	const note = optional("--note", values.note);
 	return changeLinks(env, db, (current) => {
 		const { id: finding } = findFinding$1(current.data, id);
@@ -4202,13 +4205,15 @@ async function linkDuplicateComment({ env, args: [id = "", ref = ""], values }, 
 		};
 	});
 }
-async function linkNoteComment({ env, args: [ref = "", text = ""] }, db) {
+async function linkNoteComment({ env, args: [rawRef = "", text = ""] }, db) {
+	const ref = normalizeCliRef(rawRef);
 	return changeLinks(env, db, (current) => ({
 		state: linkNote(current, ref, text),
 		line: `${ref}: noted`
 	}));
 }
-async function unlinkComment({ env, args: [ref = ""], values }, db) {
+async function unlinkComment({ env, args: [rawRef = ""], values }, db) {
+	const ref = normalizeCliRef(rawRef);
 	const note = optional("--note", values.note);
 	return changeLinks(env, db, (current) => ({
 		state: unlink$1(current, ref, env.now(), note),
@@ -4224,7 +4229,8 @@ function repliedPlace(target) {
 function answeredLine({ ref, author, kind, resolved }) {
 	return `answers ${ref} (${author}${kind === "review" && resolved !== void 0 ? `, thread ${resolved ? "resolved" : "open"}` : ""})`;
 }
-async function replyToLinked({ env, args: [ref = ""], values }, db) {
+async function replyToLinked({ env, args: [rawRef = ""], values }, db) {
+	const ref = normalizeCliRef(rawRef);
 	const options = {
 		now: values.now ?? false,
 		byAgent: values["by-agent"] ?? false,
