@@ -1,8 +1,7 @@
 # Fleet
 
-Reached once the changeset outgrows a handful of files or a few hundred
-changed lines and validation dispatches a fleet: the agents and their briefs,
-the files they write, and the index the orchestrator holds.
+The agents a review dispatches — rule, `recheck`, and PR-comment agents —
+their briefs, the files they write, and the index the orchestrator holds.
 
 ## Briefs
 
