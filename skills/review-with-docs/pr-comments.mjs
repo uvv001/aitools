@@ -2707,7 +2707,10 @@ async function refuseDatabase(target, db) {
 	if (await isDatabaseFile(target)) throw new Error(`refusing to overwrite the SQLite database ${target} with a report`);
 	if (/\.sqlite(?::[^\\/]*)?$/iu.test(target)) throw new Error("--out must be a report file, not a database");
 }
-const quoteCliPath = (path) => /[\s']/u.test(path) ? `'${path.replaceAll("'", "''")}'` : path;
+function quoteCliPath(path, platform = process.platform) {
+	if (!/[^\w@%+=:,./\\-]/u.test(path)) return path;
+	return `'${platform === "win32" ? path.replaceAll("'", "''") : path.replaceAll("'", "'\\''")}'`;
+}
 function reviewPaths(arg) {
 	const extension = extname(arg);
 	const stem = arg.slice(0, arg.length - extension.length);
@@ -3767,7 +3770,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+ccbf793`;
+	return `pr-comments ${VERSION}+a1cc585`;
 }
 //#endregion
 //#region src/cli.ts
