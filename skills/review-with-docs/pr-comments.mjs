@@ -2757,6 +2757,7 @@ async function createDatabase(path, data, pullRequest) {
 	}
 }
 const existingDatabase = (dbPath) => /* @__PURE__ */ new Error(`${dbPath} already exists; the database is the source of truth and must not be overwritten. If you really want to start this review again, delete the database deliberately first. To start another review, choose another name or location with --report.`);
+const existingReport = (reportPath) => /* @__PURE__ */ new Error(`${reportPath} already exists; init will not overwrite an existing report file. Choose another name or location with --db or --report, or remove the file first.`);
 function mustBeDatabase(dbPath) {
 	if (dbPath !== void 0 && extname(dbPath).toLowerCase() !== ".sqlite") throw new Error(`--db must be a file ending in .sqlite: ${dbPath}`);
 }
@@ -2883,6 +2884,7 @@ async function initReviewFile(name, options = {}) {
 	if (await exists(dbPath)) throw existingDatabase(dbPath);
 	const reportTarget = options.report !== void 0 || options.db === void 0 ? paths.report : reviewPaths(dbPath).report;
 	await refuseDatabase(reportTarget, dbPath);
+	if (await exists(reportTarget)) throw existingReport(reportTarget);
 	const rendered = assertRenders(data, reportTarget);
 	const repoRoot = findRepoRoot(targetDir);
 	if (repoRoot !== void 0 && isInsideReviewFolder(targetDir, repoRoot)) await ensureAiGitExcluded(repoRoot);
@@ -3765,7 +3767,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+3fe9d7a`;
+	return `pr-comments ${VERSION}+ccbf793`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4318,7 +4320,7 @@ const DEFINITIONS = [
 		summary: "creates the review database",
 		description: [
 			"Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.",
-			"It never replaces an existing database. The report (markdown) is written next to the database and updated on every change.",
+			"It never replaces an existing database or report file. The report (markdown) is written next to the database and updated on every change.",
 			"The report is always next to the database with the same name, so --report and --db may both be given only if they agree."
 		],
 		args: [{
