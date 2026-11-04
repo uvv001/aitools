@@ -501,7 +501,10 @@ async function changeLinks(
   return 0;
 }
 
-async function linkOwnComment({ env, args: [id = '', ref = ''], values }: Context, db: string): Promise<number> {
+const normalizeCliRef = (ref: string): string => (isLinkRef(ref.toLowerCase()) ? ref.toLowerCase() : ref);
+
+async function linkOwnComment({ env, args: [id = '', rawRef = ''], values }: Context, db: string): Promise<number> {
+  const ref = normalizeCliRef(rawRef);
   const note = optional('--note', values.note);
   return changeLinks(env, db, (current) => {
     const { id: finding } = findFinding(current.data, id);
@@ -509,7 +512,8 @@ async function linkOwnComment({ env, args: [id = '', ref = ''], values }: Contex
   });
 }
 
-async function linkDuplicateComment({ env, args: [id = '', ref = ''], values }: Context, db: string): Promise<number> {
+async function linkDuplicateComment({ env, args: [id = '', rawRef = ''], values }: Context, db: string): Promise<number> {
+  const ref = normalizeCliRef(rawRef);
   const note = optional('--note', values.note);
   return changeLinks(env, db, (current) => {
     const { id: finding } = findFinding(current.data, id);
@@ -517,11 +521,13 @@ async function linkDuplicateComment({ env, args: [id = '', ref = ''], values }: 
   });
 }
 
-async function linkNoteComment({ env, args: [ref = '', text = ''] }: Context, db: string): Promise<number> {
+async function linkNoteComment({ env, args: [rawRef = '', text = ''] }: Context, db: string): Promise<number> {
+  const ref = normalizeCliRef(rawRef);
   return changeLinks(env, db, (current) => ({ state: linkNote(current, ref, text), line: `${ref}: noted` }));
 }
 
-async function unlinkComment({ env, args: [ref = ''], values }: Context, db: string): Promise<number> {
+async function unlinkComment({ env, args: [rawRef = ''], values }: Context, db: string): Promise<number> {
+  const ref = normalizeCliRef(rawRef);
   const note = optional('--note', values.note);
   return changeLinks(env, db, (current) => ({ state: unlink(current, ref, env.now(), note), line: `${ref} unlinked` }));
 }
@@ -540,7 +546,8 @@ function answeredLine({ ref, author, kind, resolved }: ReplyTarget): string {
   return `answers ${ref} (${author}${thread})`;
 }
 
-async function replyToLinked({ env, args: [ref = ''], values }: Context, db: string): Promise<number> {
+async function replyToLinked({ env, args: [rawRef = ''], values }: Context, db: string): Promise<number> {
+  const ref = normalizeCliRef(rawRef);
   const options = { now: values.now ?? false, byAgent: values['by-agent'] ?? false, dryRun: values['dry-run'] ?? false };
   const deps = { reply: env.reply, now: env.now, refresh: env.getPullRequest };
   const { finding, own, link, text, result, reportError } = await replyToDuplicate(db, ref, options, deps);

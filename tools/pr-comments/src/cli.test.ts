@@ -1664,6 +1664,17 @@ describe('cli', () => {
       );
     });
 
+    it('accepts upper-case comment and annotation refs across link commands', async () => {
+      expect(await step('link', 'own', 'F1', 'R1001')).toBe(0);
+      expect(printed).toBe('F1: own comment r1001 linked\n');
+      expect(await step('link', 'duplicate', 'F1', ELSE_IF_REF.toUpperCase())).toBe(0);
+      expect(printed).toBe(`F1: duplicate ${ELSE_IF_REF} linked\n`);
+      expect(await step('link', 'note', 'C2001', 'a note')).toBe(0);
+      expect(printed).toBe('c2001: noted\n');
+      expect(await step('link', 'remove', 'C2001')).toBe(0);
+      expect(printed).toBe('c2001 unlinked\n');
+    });
+
     it('links duplicates, comments and check annotations, as many as there are, in the order they were made', async () => {
       await step('link', 'duplicate', 'F1', 'r1004');
       expect(printed).toBe('F1: duplicate r1004 linked\n');
