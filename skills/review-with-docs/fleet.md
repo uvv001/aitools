@@ -61,11 +61,12 @@ The files persist beside the report, in the round's folder —
 `<report-stem>/round-<n>/<rule>/<slug>.md` for each finding — where
 `<report-stem>` is the report's path without `.md` and `<rule>` a short
 slug of the rule — `purpose-fit` and `best-practices` for the two agents no
-rule covers, `recheck` for the re-check of a later round, `pr-comments` for
-the PR-comment agents of [pull-request.md](pull-request.md) — e.g.
-`<review-folder>/2026-09-16_pr157_review/round-1/agents-self-sufficiency.md`;
-create the folders as needed. They hold the text as raised; the database holds
-its current version.
+rule covers, `recheck` for the re-check of a later round — e.g.
+`<review-folder>/2026-09-16_pr157_review/round-1/agents-self-sufficiency.md`.
+The PR-comment agents of [pull-request.md](pull-request.md) write no coverage
+file: each writes `<report-stem>/round-<n>/pr-comments/<ref>.md` per new
+finding. Create the folders as needed. They hold the text as raised; the
+database holds its current version.
 
 ## Hold the index, not the findings
 

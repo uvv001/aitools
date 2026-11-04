@@ -45,11 +45,11 @@ given its model, the shared brief, and the read-only contract per
 `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
 in the reviewed repository, read the comments against the findings the review
 carries (listed as in the Later rounds of [fleet.md](fleet.md)), the user's
-login, and the table and the paragraph above, write a description file at
-`<report-stem>/round-<n>/pr-comments/<ref>.md` for each concern no finding
-covers yet, a refuted one included, and reply with one classification per ref
-(`own <F>`, `duplicate <F>`, `note '<reason>'`, or the new finding's reply
-line per [fleet.md](fleet.md)) for the orchestrator to record.
+login, and the table and the paragraph above, write a description file per
+[fleet.md](fleet.md) for each concern no finding covers yet, a refuted one
+included, and reply with one classification per ref (`own <F>`,
+`duplicate <F>`, `note '<reason>'`, or the new finding's reply line per
+[fleet.md](fleet.md)) for the orchestrator to record.
 
 ## Publish
 
