@@ -57,7 +57,7 @@ Pull request: https://github.com/acme/widgets/pull/42
 Report: .ai/review-with-docs/2026-10-29_pr-42-tenant-registry_review.md
 ```
 
-Both the database and the report are created, and every change updates the report after the database change commits (if writing the report file fails afterwards, the database change stays saved, the command exits `0`, and `stderr` prints `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"`). Without `--report` or `--db`, the files go to `.ai/review-with-docs/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root, and `/.ai/review-with-docs/` is added to `.git/info/exclude` when not already ignored (while `.ai/` itself can remain versioned). Pass `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` when storing the review in a session folder. Every subsequent command takes `--db <file.sqlite>` (`$DB` below). If the pull request does not exist yet, leave out `--pr`, and connect it later:
+Both the database and the report are created, and every change updates the report after the database change commits (if writing the report file fails afterwards, the database change stays saved, the command exits `0`, and `stderr` prints `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"`). Without `--report` or `--db`, the files go to `.ai/review-with-docs/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root; whenever `init` places a review under `.ai/review-with-docs/` (subfolders included), it checks with `git check-ignore`, adds `/.ai/review-with-docs/` to `.git/info/exclude` when not already ignored (while `.ai/` itself can remain versioned), and fails if a `.gitignore` rule still exposes the folder. Pass `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` when storing the review in a session folder. Every subsequent command takes `--db <file.sqlite>` (`$DB` below). If the pull request does not exist yet, leave out `--pr`, and connect it later:
 
 ```
 pr-comments pr connect https://github.com/acme/widgets/pull/42 --db $DB
@@ -197,7 +197,7 @@ F2: ✅ → 🔧
 - The finding state `fixed` has nothing to do with a resolved thread. A finding changes state only with `finding set-state`.
 - It never submits your pending review.
 - It writes to GitHub in two commands only: `finding post` and `link reply`. `pr sync` only reads. The links are records in your database, and nothing is written to GitHub when you make them.
-- It creates a database only with `init`, and never replaces an existing one.
+- It creates a database only with `init`, and never replaces an existing database or report file.
 
 ## Command reference
 
@@ -205,7 +205,7 @@ Every command also has `pr-comments <command> --help` (or `pr-comments help <com
 
 ### Start a review
 
-**`init`**: creates the review database. It never replaces an existing one.
+**`init`**: creates the review database. It never replaces an existing database or report file.
 
 ```
 pr-comments init <name> [--pr <url>] [--report <file.md>] [--db <file.sqlite>]
