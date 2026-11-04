@@ -44,13 +44,13 @@ the expected outcome.
 
 ## Protocol
 
-A review database already in the review folder, in `.ai/review-with-docs/`, or
-in an earlier session's `files/review-with-docs/` folder that the user names
-means the request continues it: where several exist, take the one whose title
-or `pr show --db <file.sqlite>` matches the target, read `finding list`, and
-start at the step the request calls for — a verdict is step 5, a publish or
-sync request step 6, new changes (a moved PR head included) step 7, a fix
-request the paragraph under States.
+A review database whose title or `pr show --db <file.sqlite>` matches the
+target — in the review folder, in `.ai/review-with-docs/`, or in an earlier
+session's `files/review-with-docs/` folder that the user names — means the
+request continues it: read `finding list` and start at the step the request
+calls for — a verdict is step 5, a publish or sync request step 6, new changes
+(a moved PR head included) step 7, a fix request the paragraph under States.
+With no match, step 1 starts a new review; a doubtful match is the user's call.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions — so where the target is not in a
