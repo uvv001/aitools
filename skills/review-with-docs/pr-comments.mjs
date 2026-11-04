@@ -3593,6 +3593,7 @@ async function postFinding(arg, findingId, options, deps) {
 		commentRef: own.ref
 	};
 	const body = composeBody(comment.body, options.byAgent);
+	let reportError;
 	const hooks = { onResult: async (result) => {
 		if (result.action === "error") {
 			const { reason, ...plain } = result;
@@ -3620,10 +3621,10 @@ async function postFinding(arg, findingId, options, deps) {
 			};
 		}
 		try {
-			await changeReviewState(arg, (state) => ({
+			reportError = (await changeReviewState(arg, (state) => ({
 				state: recordPosted(state, id, posted, action, result.state, deps.now()),
 				result: void 0
-			}), { snapshot });
+			}), { snapshot })).reportError;
 			return result;
 		} catch (error) {
 			const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); record it with ${linkOwnCommand}`;
@@ -3646,7 +3647,8 @@ async function postFinding(arg, findingId, options, deps) {
 		chosen: extracted.chosen,
 		warnings: extracted.warnings,
 		unlinked: extracted.unlinked,
-		body
+		body,
+		...reportError === void 0 ? {} : { reportError }
 	};
 }
 //#endregion
@@ -3704,11 +3706,14 @@ async function replyToDuplicate(arg, ref, options, deps) {
 		};
 	}
 	try {
-		await changeReviewState(arg, (state) => ({
+		const { reportError } = await changeReviewState(arg, (state) => ({
 			state: recordReplied(state, ref, replyRef, result.state, deps.now()),
 			result: void 0
 		}), { snapshot });
-		return replied;
+		return reportError === void 0 ? replied : {
+			...replied,
+			reportError
+		};
 	} catch (error) {
 		const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); run the command again to record it`;
 		return {
@@ -3725,7 +3730,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+cb4042a`;
+	return `pr-comments ${VERSION}+4924df7`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4081,6 +4086,7 @@ async function postReviewFinding({ env, args: [id = ""], values }, db) {
 		now: env.now,
 		refresh: env.getPullRequest
 	});
+	warnReportError(env, db, posted.reportError);
 	for (const warning of posted.warnings) env.warn(`Warning: ${warning}\n`);
 	if (values.json) printJson(env, postedJson(posted));
 	else {
@@ -4165,11 +4171,12 @@ async function replyToLinked({ env, args: [ref = ""], values }, db) {
 		byAgent: values["by-agent"] ?? false,
 		dryRun: values["dry-run"] ?? false
 	};
-	const { finding, own, link, text, result } = await replyToDuplicate(db, ref, options, {
+	const { finding, own, link, text, result, reportError } = await replyToDuplicate(db, ref, options, {
 		reply: env.reply,
 		now: env.now,
 		refresh: env.getPullRequest
 	});
+	warnReportError(env, db, reportError);
 	if (values.json) printJson(env, {
 		finding,
 		own,
