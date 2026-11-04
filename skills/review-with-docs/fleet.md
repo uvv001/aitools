@@ -18,15 +18,16 @@ and for the PR-comment agents of [pull-request.md](pull-request.md). Where
 the orchestrator wrote the fixes, `recheck` runs on a family other than
 the orchestrator's.
 
-Every brief carries the rule verbatim, the paths in its scope, the pinned
-revision, its base (or none) and the dirty-tree remark, the changeset's
-purpose as its author states it, the Evidence section and the Validation
-rule-collision and severity rules of [SKILL.md](SKILL.md), and its output:
-one file per finding — the description exactly as `finding add` takes it —
-and a **coverage file** naming the rule, the paths checked, the assumptions
-it set aside with the reason, and the outcome, `no findings` included; it
-replies with one line per finding — file, severity, title, anchor, and ❓
-for an unverified one — or `no findings`.
+Every brief — rule, `recheck`, and PR-comment agents alike — carries the
+pinned revision, its base (or none) and the dirty-tree remark, and the
+Evidence section and the Validation rule-collision and severity rules of
+[SKILL.md](SKILL.md). A rule agent's brief also carries the rule verbatim,
+the paths in its scope, the changeset's purpose as its author states it, and
+its output: one file per finding — the description exactly as `finding add`
+takes it — and a **coverage file** naming the rule, the paths checked, the
+assumptions it set aside with the reason, and the outcome, `no findings`
+included; it replies with one line per finding — file, severity, title,
+anchor, and ❓ for an unverified one — or `no findings`.
 
 The orchestrator alone runs commands that change the review, so every
 dispatched agent — rule, `recheck`, and PR-comment agents alike — writes
