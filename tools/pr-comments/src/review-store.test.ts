@@ -573,6 +573,19 @@ describe('inTransaction and inTransactionAsync', () => {
     expect(loadReview(db)).toStrictEqual(sample());
     db.close();
   });
+
+  it('surfaces the original error when SQLite has already rolled the transaction back (e.g. SQLITE_FULL)', async () => {
+    const db = openNew();
+    db.exec('PRAGMA max_page_count = 20');
+    const fill = () => {
+      for (let index = 0; index < 100; index += 1) {
+        setMeta(db, `k${index}`, 'x'.repeat(2048));
+      }
+    };
+    expect(() => inTransaction(db, fill)).toThrow('database or disk is full');
+    await expect(inTransactionAsync(db, async () => fill())).rejects.toThrow('database or disk is full');
+    db.close();
+  });
 });
 
 function random(seed: number): () => number {

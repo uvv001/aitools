@@ -201,7 +201,7 @@ export function inTransaction<T>(db: DatabaseSync, work: () => T, options: Trans
     db.exec('COMMIT');
     return result;
   } catch (error) {
-    db.exec('ROLLBACK');
+    if (db.isTransaction) db.exec('ROLLBACK');
     throw error;
   }
 }
@@ -216,7 +216,7 @@ export async function inTransactionAsync<T>(db: DatabaseSync, work: () => Promis
     db.exec('COMMIT');
     return result;
   } catch (error) {
-    db.exec('ROLLBACK');
+    if (db.isTransaction) db.exec('ROLLBACK');
     throw error;
   }
 }
