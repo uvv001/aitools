@@ -2782,9 +2782,9 @@ function assertRenders(data, report) {
 	return rendered;
 }
 const PULL_REQUEST = "pull_request";
-const AI_PARENT_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
+const AI_PARENT_IGNORE_LINE = /^[ \t]*\/?\.ai\/?[ \t]*$/u;
 const AI_PARENT_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/?[ \t]*$/u;
-const AI_CHILD_IGNORE_LINE = /^[ \t]*\/?\.ai\/review-with-docs(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
+const AI_CHILD_IGNORE_LINE = /^[ \t]*\/?\.ai\/(?:(?:\*\*|\*)|review-with-docs(?:\/(?:\*\*|\*)?)?)[ \t]*$/u;
 const AI_NEGATE_LINE = /^[ \t]*!(?:\/?\.ai\/(?:\*\*|\*)|\/?\.ai\/review-with-docs(?:\/[^\r\n]*)?|\*+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
 function aiIgnoreState(content) {
 	let parentIgnored = false;
@@ -3736,7 +3736,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+0ff046c`;
+	return `pr-comments ${VERSION}+f6f1147`;
 }
 //#endregion
 //#region src/cli.ts
@@ -3869,11 +3869,12 @@ function shownPath(path, cwd) {
 	const below = relative(cwd, path);
 	return below !== "" && !below.startsWith("..") && !isAbsolute(below) ? below : path;
 }
-function warnReportError(env, db, error) {
+function warnReportError(env, db, error, report = reviewPaths(db).report) {
 	if (error === void 0) return;
 	const shownDb = shownPath(db, env.cwd());
-	const shownReport = shownPath(reviewPaths(db).report, env.cwd());
-	env.warn(`Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${shownDb}"\n`);
+	const shownReport = shownPath(report, env.cwd());
+	const outFlag = report === reviewPaths(db).report ? "" : ` --out ${shownReport}`;
+	env.warn(`Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${shownDb}${outFlag}"\n`);
 }
 const countAnnotations = (data) => (data.checkRuns ?? []).reduce((total, run) => total + run.annotations.length, 0);
 async function snapshotOf(db) {
@@ -3899,7 +3900,7 @@ async function initReview({ env, args: [name = ""], values }) {
 	env.print(`Created ${shown}\n`);
 	if (values.pr !== void 0) env.print(`Pull request: ${formatPullRequestUrl(parsePullRequestUrl(values.pr))}\n`);
 	if (reportError === void 0) env.print(`Report: ${shownPath(report, env.cwd())}\n`);
-	else warnReportError(env, db, reportError);
+	else warnReportError(env, db, reportError, report);
 	return 0;
 }
 async function connectReview({ env, args: [url = ""] }, db) {
