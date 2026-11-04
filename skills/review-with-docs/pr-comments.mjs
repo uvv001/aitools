@@ -2971,14 +2971,19 @@ async function changeReviewState(arg, change, options = {}) {
 				if (latest === rendered) break;
 				rendered = latest;
 			}
-		} catch {}
+		} catch (error) {
+			return {
+				...changed,
+				reportError: error instanceof Error ? error : new Error(String(error))
+			};
+		}
 		return changed;
 	} finally {
 		db.close();
 	}
 }
 async function mutateReviewFile(arg, mutate) {
-	const { state, result } = await changeReviewState(arg, async (current) => {
+	const { state, result, reportError } = await changeReviewState(arg, async (current) => {
 		const changed = await mutate(current.data);
 		return {
 			state: {
@@ -2988,7 +2993,11 @@ async function mutateReviewFile(arg, mutate) {
 			result: changed.result
 		};
 	});
-	return {
+	return reportError ? {
+		data: state.data,
+		result,
+		reportError
+	} : {
 		data: state.data,
 		result
 	};
@@ -3718,7 +3727,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+5ab9d07`;
+	return `pr-comments ${VERSION}+cfbce90`;
 }
 //#endregion
 //#region src/cli.ts
@@ -3838,16 +3847,24 @@ async function readDescription(env, file) {
 	if (text === "") throw new Error(`the description in ${name} is empty`);
 	return text;
 }
-async function edit(db, change) {
-	return (await mutateReviewFile(db, (data) => ({
-		data: change(data),
+async function edit(env, db, change) {
+	const { data, reportError } = await mutateReviewFile(db, (current) => ({
+		data: change(current),
 		result: void 0
-	}))).data;
+	}));
+	warnReportError(env, db, reportError);
+	return data;
 }
 function shownPath(path, cwd) {
 	if (!isAbsolute(path)) return path;
 	const below = relative(cwd, path);
 	return below !== "" && !below.startsWith("..") && !isAbsolute(below) ? below : path;
+}
+function warnReportError(env, db, error) {
+	if (error === void 0) return;
+	const shownDb = shownPath(db, env.cwd());
+	const shownReport = shownPath(reviewPaths(db).report, env.cwd());
+	env.warn(`Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${shownDb}"\n`);
 }
 const countAnnotations = (data) => (data.checkRuns ?? []).reduce((total, run) => total + run.annotations.length, 0);
 const NO_SNAPSHOT = "no pull request data in the database; run \"pr-comments pr sync\" first";
@@ -3937,7 +3954,7 @@ async function openReviewRound({ env, values }, db) {
 	const note = optional("--note", values.note);
 	const revision = await env.resolveRevision(need("--revision", values.revision ?? "HEAD"));
 	const base = values["no-base"] ? null : await env.resolveRevision(need("--base", values.base));
-	const data = await edit(db, (current) => openRound(current, {
+	const data = await edit(env, db, (current) => openRound(current, {
 		revision,
 		base,
 		note
@@ -3948,7 +3965,7 @@ async function openReviewRound({ env, values }, db) {
 async function updateReviewRound({ env, args: [text = ""], values }, db) {
 	const note = need("the text", text);
 	const round = parsePositive("round", values.round);
-	const data = await edit(db, (current) => updateRound(current, {
+	const data = await edit(env, db, (current) => updateRound(current, {
 		text: note,
 		round
 	}));
@@ -3963,13 +3980,14 @@ async function addReviewFinding({ env, values }, db) {
 		note: optional("--note", values.note),
 		description: await readDescription(env, need("--description-file", values["description-file"]))
 	};
-	const { result } = await mutateReviewFile(db, (data) => {
+	const { result, reportError } = await mutateReviewFile(db, (data) => {
 		const { data: changed, id } = addFinding(data, input, env.now());
 		return {
 			data: changed,
 			result: id
 		};
 	});
+	warnReportError(env, db, reportError);
 	if (values.json) printJson(env, { id: result });
 	else env.print(`Added ${result}\n`);
 	return 0;
@@ -3995,7 +4013,7 @@ const changeOf = (values) => ({
 	round: parsePositive("round", values.round)
 });
 async function changeFinding(env, db, id, change, describe) {
-	const { result } = await mutateReviewFile(db, (data) => {
+	const { result, reportError } = await mutateReviewFile(db, (data) => {
 		const before = findFinding$1(data, id);
 		const changed = change(data, before.id);
 		return {
@@ -4003,6 +4021,7 @@ async function changeFinding(env, db, id, change, describe) {
 			result: `${before.id}: ${describe(before, findFinding$1(changed, before.id))}`
 		};
 	});
+	warnReportError(env, db, reportError);
 	env.print(`${result}\n`);
 	return 0;
 }
@@ -4089,13 +4108,14 @@ async function listPending({ env, values }, db) {
 	return 0;
 }
 async function changeLinks(env, db, change) {
-	const { result } = await changeReviewState(db, (current) => {
+	const { result, reportError } = await changeReviewState(db, (current) => {
 		const { state, line } = change(current);
 		return {
 			state,
 			result: line
 		};
 	});
+	warnReportError(env, db, reportError);
 	env.print(`${result}\n`);
 	return 0;
 }
