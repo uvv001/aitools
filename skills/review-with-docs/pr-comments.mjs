@@ -3010,16 +3010,6 @@ function resolveGitDir(repoRoot) {
 		return;
 	}
 }
-function findConflictingGitignore(repoRoot, targetPaths) {
-	const candidates = [
-		...targetPaths.map((target) => join(dirname(resolve(repoRoot, target)), ".gitignore")),
-		join(repoRoot, REVIEW_FOLDER, ".gitignore"),
-		join(repoRoot, ".ai", ".gitignore"),
-		join(repoRoot, ".gitignore")
-	];
-	const existing = [...new Set(candidates)].filter((candidate) => existsSync(candidate));
-	return existing.find((candidate) => /^[ \t]*!/mu.test(readFileSync(candidate, "utf8"))) ?? existing[0] ?? join(repoRoot, ".gitignore");
-}
 async function ensureAiGitExcluded(repoRoot, targetPaths = []) {
 	const relTargets = targetPaths.map((target) => relative(repoRoot, target).replaceAll("\\", "/"));
 	if (await isReviewIgnoredByGit(repoRoot, relTargets)) return;
@@ -3033,10 +3023,7 @@ async function ensureAiGitExcluded(repoRoot, targetPaths = []) {
 			await writeFile(excludePath, `${current}${prefix}${EXCLUDE_RULE}\n`, "utf8");
 		}
 	}
-	if (!await isReviewIgnoredByGit(repoRoot, relTargets)) {
-		const gitignorePath = findConflictingGitignore(repoRoot, targetPaths);
-		throw new Error(`${gitignorePath} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`);
-	}
+	if (!await isReviewIgnoredByGit(repoRoot, relTargets)) throw new Error("a .gitignore rule negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git");
 }
 async function writeReportUntilStable(target, initial, renderLatest) {
 	let text = initial;
@@ -3797,7 +3784,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+273976e`;
+	return `pr-comments ${VERSION}+058de7a`;
 }
 //#endregion
 //#region src/cli.ts
