@@ -488,7 +488,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 
 ## Git
 
-By default, reviews live in `<session-folder>/files/review-with-docs/` (when the host provides a session folder) or `.ai/review-with-docs/` (excluded via `.git/info/exclude`, while `.ai/` itself can be versioned), so they stay out of Git commits. When `--report` or `--db` places a review in a tracked folder instead, commit the database next to the report.
+By default `init` puts reviews in `.ai/review-with-docs/` (excluded via `.git/info/exclude`, while `.ai/` itself can be versioned), so they stay out of Git commits; pass `--db` to keep one elsewhere, for example in a session folder. When `--report` or `--db` places a review in a tracked folder instead, commit the database next to the report.
 
 The database is a binary file, so `git diff` cannot show what changed in it. `report dump` turns it into text. Tell git to use it:
 
@@ -506,7 +506,7 @@ git config diff.review.textconv "pr-comments report dump --db"
 
 - One writer at a time. A binary file cannot be merged. After a conflict, take one side (`git checkout --theirs <file>` or `--ours`) and redo the other changes with the commands.
 - The repository that holds tracked databases must not git-ignore `*.sqlite`.
-- The database is one file (`journal_mode = DELETE`, `cache_spill = OFF`). A `-journal` file exists only while a command commits (or after an abrupt crash until the next command reconciles it).
+- The database is one file. A `-journal` file exists only while a command writes.
 
 ## Development
 
