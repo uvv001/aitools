@@ -2735,7 +2735,7 @@ function inTransaction(db, work, options = {}) {
 		db.exec("COMMIT");
 		return result;
 	} catch (error) {
-		db.exec("ROLLBACK");
+		if (db.isTransaction) db.exec("ROLLBACK");
 		throw error;
 	}
 }
@@ -2747,7 +2747,7 @@ async function inTransactionAsync(db, work, options = {}) {
 		db.exec("COMMIT");
 		return result;
 	} catch (error) {
-		db.exec("ROLLBACK");
+		if (db.isTransaction) db.exec("ROLLBACK");
 		throw error;
 	}
 }
@@ -3771,7 +3771,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+c875048`;
+	return `pr-comments ${VERSION}+977fece`;
 }
 //#endregion
 //#region src/cli.ts
