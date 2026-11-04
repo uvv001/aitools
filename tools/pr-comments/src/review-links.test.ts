@@ -20,13 +20,13 @@ const PATH = 'r.md';
 const START = '2026-10-08 09:05';
 const PR = 'https://github.com/acme/widgets/pull/42';
 
-const REMOVE = 'pr-comments link remove';
+const REMOVE = 'pr-comments link remove --db <file.sqlite>';
 const FORMS = 'expected r544830, c623843 or a3f9c2d1e';
 const ANNOTATION = 'a3f9c2d1e';
 const ONLY_DUPLICATE = `${ANNOTATION} is a check annotation: it can only be linked as a duplicate of a finding (the tool does not publish it, and every check item has to be tied to a finding)`;
-const NOT_A_NOTE = `${ANNOTATION} is a check annotation: every check item has to be tied to a finding, so it cannot be recorded as a note; link it to a finding (add one with "pr-comments finding add" when none covers it)`;
+const NOT_A_NOTE = `${ANNOTATION} is a check annotation: every check item has to be tied to a finding, so it cannot be recorded as a note; link it to a finding (add one with "pr-comments finding add --db <file.sqlite>" when none covers it)`;
 const NO_REPLY = `${ANNOTATION} is a check annotation; there is nothing to reply to`;
-const unknownRef = (ref: string): string => `${ref} is not in the database; run "pr-comments pr sync" first, or check the id`;
+const unknownRef = (ref: string): string => `${ref} is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id`;
 
 // `minutes` after the start of the test review: 2026-10-08 09:05, local time.
 const at = (minutes = 0): Date => new Date(2026, 9, 8, 9, 5 + minutes);
@@ -186,7 +186,7 @@ describe('linkOwn', () => {
 
   it('refuses a ref that is not in the database, after the finding and the ref syntax and before the link rules', () => {
     const input = stateWith([own('r1', 'F1')]);
-    refuses(input, (state) => linkOwn(state, 'F2', 'r999', at(5)), 'r999 is not in the database; run "pr-comments pr sync" first, or check the id');
+    refuses(input, (state) => linkOwn(state, 'F2', 'r999', at(5)), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
     refuses(input, (state) => linkOwn(state, 'f2', 'c999', at(5), 'a note'), unknownRef('c999'));
     // The finding and the syntax come first.
     refuses(input, (state) => linkOwn(state, 'F9', 'r999', at(5)), 'unknown finding "F9"; the report has F1, F2, F3');
@@ -249,7 +249,7 @@ describe('linkDuplicate', () => {
 
   it('refuses a ref that is not in the database, after the finding and the ref syntax and before the link rules', () => {
     const input = stateWith([own('r1', 'F1'), note('c3', 'a question')]);
-    refuses(input, (state) => linkDuplicate(state, 'F2', 'r999', at(5)), 'r999 is not in the database; run "pr-comments pr sync" first, or check the id');
+    refuses(input, (state) => linkDuplicate(state, 'F2', 'r999', at(5)), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
     refuses(input, (state) => linkDuplicate(state, 'f2', 'c999', at(5), 'same crash'), unknownRef('c999'));
     refuses(input, (state) => linkDuplicate(state, 'F9', 'r999', at(5)), 'unknown finding "F9"; the report has F1, F2, F3');
     refuses(input, (state) => linkDuplicate(state, 'F2', 'x999', at(5)), `"x999" is not a PR comment ref; ${FORMS}`);
@@ -283,7 +283,7 @@ describe('linkNote', () => {
 
   it('refuses a ref that is not in the database, after the ref syntax and before the text and the link rules', () => {
     const input = stateWith([note('c3', 'a question')]);
-    refuses(input, (state) => linkNote(state, 'r999', 'why'), 'r999 is not in the database; run "pr-comments pr sync" first, or check the id');
+    refuses(input, (state) => linkNote(state, 'r999', 'why'), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
     refuses(input, (state) => linkNote(state, 'r999', ''), unknownRef('r999'));
     refuses(input, (state) => linkNote(state, 'x999', 'why'), `"x999" is not a PR comment ref; ${FORMS}`);
     refuses(without(input, 'c3'), (state) => linkNote(state, 'c3', 'a question'), unknownRef('c3'));
@@ -521,7 +521,7 @@ describe('recordPosted', () => {
     const input = stateWith([...others(), own('r1', 'F1')]);
     for (const action of ACTIONS) {
       for (const where of WHERE) {
-        refuses(input, (state) => recordPosted(state, 'F2', 'r999', action, where, at(5)), 'r999 is not in the database; run "pr-comments pr sync" first, or check the id');
+        refuses(input, (state) => recordPosted(state, 'F2', 'r999', action, where, at(5)), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
         // The own comment of F1 is not the one asked for: the database is asked before the link rules.
         refuses(input, (state) => recordPosted(state, 'F1', 'r999', action, where, at(5)), unknownRef('r999'));
         refuses(without(input, 'r1'), (state) => recordPosted(state, 'F1', 'r1', action, where, at(5)), unknownRef('r1'));
@@ -628,14 +628,14 @@ describe('recordReplied', () => {
   });
 
   it('refuses a comment that is not linked, with the way to link it', () => {
-    const message = (ref: string) => `${ref} is not linked in this review; link it first with "pr-comments link duplicate <finding> ${ref}"`;
+    const message = (ref: string) => `${ref} is not linked in this review; link it first with "pr-comments link duplicate --db <file.sqlite> <finding> ${ref}"`;
     refuses(input(), reply('r9', 'r10', 'pending'), message('r9'));
     refuses(stateWith(), reply('r2', 'r10', 'pending'), message('r2'));
-    refuses(stateWith(), reply('r2', 'r10', 'pending'), 'r2 is not linked in this review; link it first with "pr-comments link duplicate <finding> r2"');
+    refuses(stateWith(), reply('r2', 'r10', 'pending'), 'r2 is not linked in this review; link it first with "pr-comments link duplicate --db <file.sqlite> <finding> r2"');
   });
 
   it('refuses a ref that is not in the database, after the ref syntax and before the link rules', () => {
-    refuses(input(), reply('r999', 'r10', 'pending'), 'r999 is not in the database; run "pr-comments pr sync" first, or check the id');
+    refuses(input(), reply('r999', 'r10', 'pending'), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
     refuses(without(input(), 'r2'), reply('r2', 'r10', 'pending'), unknownRef('r2'));
     refuses(without(input(), 'r1', 'c5'), reply('r1', 'r10', 'pending'), unknownRef('r1'));
     refuses(input(), reply('9', 'r10', 'pending'), `"9" is not a PR comment ref; ${FORMS}`);
@@ -710,7 +710,7 @@ describe('connectPullRequest', () => {
     refuses(
       input,
       (state) => connectPullRequest(state, 'https://github.com/acme/widgets/pull/43'),
-      `the review is connected to ${PR} and its 2 PR comment link(s) point there; remove them first with "pr-comments link remove <ref>" before connecting https://github.com/acme/widgets/pull/43`,
+      `the review is connected to ${PR} and its 2 PR comment link(s) point there; remove them first with "${REMOVE} <ref>" before connecting https://github.com/acme/widgets/pull/43`,
     );
     refuses(
       input,
@@ -809,7 +809,7 @@ describe('check annotations', () => {
   });
 
   it('refuses an annotation that is not in the database, as a comment', () => {
-    refuses(stateWith(), (state) => linkDuplicate(state, 'F1', 'a00000000', at(5)), 'a00000000 is not in the database; run "pr-comments pr sync" first, or check the id');
+    refuses(stateWith(), (state) => linkDuplicate(state, 'F1', 'a00000000', at(5)), 'a00000000 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
     refuses(without(stateWith(), ANNOTATION), (state) => linkDuplicate(state, 'F1', ANNOTATION, at(5)), unknownRef(ANNOTATION));
   });
 

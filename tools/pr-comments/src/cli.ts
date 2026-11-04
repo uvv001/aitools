@@ -716,7 +716,7 @@ const DEFINITIONS: Command[] = [
     summary: 'connects the review to its pull request',
     description: [
       'Another pull request is refused once the review has links to the comments of this one.',
-      'Connecting the review to a different pull request drops the downloaded data of the old one; run "pr-comments pr sync" next.',
+      'Connecting the review to a different pull request drops the downloaded data of the old one; run "pr-comments pr sync --db <file.sqlite>" next.',
     ],
     args: [{ name: '<url>', description: 'the URL of the pull request' }],
     options: [],

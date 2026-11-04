@@ -37,9 +37,9 @@ export interface ReviewState {
   known: ReadonlySet<string>;
 }
 
-// The review database is the one the command was given, which this pure module does not know: its hints name the
-// subcommand only.
-const REMOVE = 'pr-comments link remove';
+// The review database is the one the command was given, which this pure module does not know: its hints use the
+// `<file.sqlite>` placeholder, and `changeReviewState` substitutes the database path at the file boundary.
+const REMOVE = 'pr-comments link remove --db <file.sqlite>';
 
 function checkedRef(ref: string): void {
   if (!isLinkRef(ref)) {
@@ -48,7 +48,7 @@ function checkedRef(ref: string): void {
 }
 
 function knownRef(state: ReviewState, ref: string): void {
-  if (!state.known.has(ref)) throw new Error(`${ref} is not in the database; run "pr-comments pr sync" first, or check the id`);
+  if (!state.known.has(ref)) throw new Error(`${ref} is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id`);
 }
 
 // A check annotation is no comment: where only a comment will do, it is refused with the reason (`why` follows its ref).
@@ -56,7 +56,7 @@ const ONLY_DUPLICATE =
   ': it can only be linked as a duplicate of a finding (the tool does not publish it, and every check item has to be tied to a finding)';
 const NOT_A_NOTE =
   ': every check item has to be tied to a finding, so it cannot be recorded as a note; link it to a finding ' +
-  '(add one with "pr-comments finding add" when none covers it)';
+  '(add one with "pr-comments finding add --db <file.sqlite>" when none covers it)';
 const NOTHING_TO_REPLY = '; there is nothing to reply to';
 
 function refuseAnnotation(ref: string, why: string): void {
@@ -227,7 +227,7 @@ export function recordReplied(
   knownRef(state, ref);
   const link = linkOf(state.links, ref);
   if (link === undefined) {
-    throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate <finding> ${ref}"`);
+    throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db <file.sqlite> <finding> ${ref}"`);
   }
   if (link.role !== 'duplicate') {
     throw new Error(

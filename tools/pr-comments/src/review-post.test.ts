@@ -751,7 +751,7 @@ describe('a comment that could not be recorded', () => {
       message:
         'the comment was posted as r2, but it could not be recorded in the review ' +
         '(a posted comment cannot move: F1 already has its own comment r1; remove that link first with ' +
-        '"pr-comments link remove r1"); ' +
+        `"pr-comments link remove --db ${db} r1"); ` +
         LINK_OWN(db, 'r2'),
     });
     expect((await loadReviewFile(db)).known.has('r2')).toBe(false);
@@ -771,7 +771,7 @@ describe('a comment that could not be recorded', () => {
       comment: 'r2',
       message:
         'the comment was posted as r2, but it could not be recorded in the review ' +
-        '(r2 is already linked as the own comment of F4; remove that link first with "pr-comments link remove r2"); ' +
+        `(r2 is already linked as the own comment of F4; remove that link first with "pr-comments link remove --db ${db} r2"); ` +
         LINK_OWN(db, 'r2'),
     });
     await sameBytes(db, before);
@@ -800,7 +800,7 @@ describe('a comment that could not be recorded', () => {
       comment: 'r2',
       message:
         'the comment was posted as r2, but it could not be recorded in the review ' +
-        '(r2 is not in the database; run "pr-comments pr sync" first, or check the id); ' +
+        `(r2 is not in the database; run "pr-comments pr sync --db ${db}" first, or check the id); ` +
         LINK_OWN(db, 'r2'),
     });
     await sameBytes(db, before);
@@ -822,7 +822,7 @@ describe('a comment that could not be recorded', () => {
       comment: 'r2',
       message:
         'the comment was posted as r2, but it could not be recorded in the review ' +
-        '(r2 is already linked as the own comment of F4; remove that link first with "pr-comments link remove r2"); ' +
+        `(r2 is already linked as the own comment of F4; remove that link first with "pr-comments link remove --db ${db} r2"); ` +
         LINK_OWN(db, 'r2'),
     });
     await sameBytes(db, during!);

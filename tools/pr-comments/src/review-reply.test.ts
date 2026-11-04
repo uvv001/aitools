@@ -647,7 +647,7 @@ describe('a reply that could not be recorded', () => {
       target: { ref: 'r2', author: 'Reviewer', kind: 'review', resolved: false },
       message:
         'the reply was posted as r10, but it could not be recorded in the review ' +
-        '(r2 is not linked in this review; link it first with "pr-comments link duplicate <finding> r2"); ' +
+        `(r2 is not linked in this review; link it first with "pr-comments link duplicate --db ${db} <finding> r2"); ` +
         'run the command again to record it',
     });
     expect(replied).toMatchObject({ finding: 'F1', own: 'r1', link: OWN_OF_F1, text: `Duplicate of ${OWN_OF_F1}.` });
@@ -665,7 +665,7 @@ describe('a reply that could not be recorded', () => {
     expect(replied.result).toMatchObject({ action: 'error', comment: 'r10' });
     expect(replied.result.message).toBe(
       'the reply already exists as r10, but it could not be recorded in the review ' +
-        '(r2 is not linked in this review; link it first with "pr-comments link duplicate <finding> r2"); ' +
+        `(r2 is not linked in this review; link it first with "pr-comments link duplicate --db ${db} <finding> r2"); ` +
         'run the command again to record it',
     );
   });
@@ -683,7 +683,7 @@ describe('a reply that could not be recorded', () => {
       comment: 'r10',
       message:
         'the reply was posted as r10, but it could not be recorded in the review ' +
-        '(r2 is not in the database; run "pr-comments pr sync" first, or check the id); ' +
+        `(r2 is not in the database; run "pr-comments pr sync --db ${db}" first, or check the id); ` +
         'run the command again to record it',
     });
     await sameBytes(db, before);

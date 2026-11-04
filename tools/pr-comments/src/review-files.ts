@@ -417,7 +417,15 @@ export async function changeReviewState<T>(
       async () => {
         if (options.snapshot !== undefined) savePullRequest(db, options.snapshot);
         const before = loadState(db);
-        const result = await change(before);
+        let result: StateChange<T>;
+        try {
+          result = await change(before);
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('--db <file.sqlite>')) {
+            throw new Error(error.message.replaceAll('--db <file.sqlite>', `--db ${paths.db}`));
+          }
+          throw error;
+        }
         const { state } = result;
         if (state !== before) {
           if (state.data !== before.data) {

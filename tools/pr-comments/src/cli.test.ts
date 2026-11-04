@@ -1607,7 +1607,7 @@ describe('cli', () => {
 
   describe('link', () => {
     const linksOf = async () => (await loaded()).links;
-    const remove = (ref: string) => `remove that link first with "pr-comments link remove ${ref}"`;
+    const remove = (ref: string) => `remove that link first with "pr-comments link remove --db ${review} ${ref}"`;
 
     it('links an existing comment as the own comment of a finding, logs it under Updates and prints one line', async () => {
       expect(await step('link', 'own', 'f3', 'r1001', '--note', 'written by hand')).toBe(0);
@@ -1671,7 +1671,7 @@ describe('cli', () => {
     });
 
     it('refuses a comment that is not in the database, and an id that is no comment', async () => {
-      await fails(['link', 'own', 'F1', 'r999', '--db', review], 'r999 is not in the database; run "pr-comments pr sync" first, or check the id');
+      await fails(['link', 'own', 'F1', 'r999', '--db', review], `r999 is not in the database; run "pr-comments pr sync --db ${review}" first, or check the id`);
       await fails(['link', 'duplicate', 'F1', 'c999', '--db', review], 'c999 is not in the database');
       await fails(['link', 'duplicate', 'F1', 'a00000000', '--db', review], 'a00000000 is not in the database');
       await fails(['link', 'note', 'r999', 'text', '--db', review], 'r999 is not in the database');
