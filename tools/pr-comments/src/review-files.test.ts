@@ -553,9 +553,9 @@ describe('initReviewFile', () => {
     expect(listing()).toEqual([]);
   });
 
-  it('accepts a database path in upper case', async () => {
+  it('accepts a database path in upper case, alone or paired with --report', async () => {
     const db = join(dir, 'NAMED.SQLITE');
-    expect((await initReviewFile('PR 42', { now: NOW, db })).db).toBe(db);
+    expect((await initReviewFile('PR 42', { report: db, now: NOW, db })).db).toBe(db);
     expect(listing()).toEqual(['NAMED.SQLITE', 'NAMED.md']);
   });
 

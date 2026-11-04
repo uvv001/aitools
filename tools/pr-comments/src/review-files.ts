@@ -163,7 +163,7 @@ function mustBeDatabase(dbPath: string | undefined): void {
 // The report is always next to the database with the same name, so naming both is fine only when they agree.
 function reportMatchesDatabase(report: string | undefined, db: string | undefined): void {
   if (report === undefined || db === undefined) return;
-  if (samePath(reviewPaths(report).db, reviewPaths(reviewPaths(db).report).db)) return;
+  if (samePath(reviewPaths(reviewPaths(report).report).db, reviewPaths(reviewPaths(db).report).db)) return;
   throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
 }
 
