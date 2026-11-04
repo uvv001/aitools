@@ -466,6 +466,7 @@ async function postReviewFinding({ env, args: [id = ''], values }: Context, db: 
     commit: values.commit,
   };
   const posted = await postFinding(db, id, options, { publish: env.publish, now: env.now, refresh: env.getPullRequest });
+  warnReportError(env, db, posted.reportError);
   for (const warning of posted.warnings) env.warn(`Warning: ${warning}\n`);
   if (values.json) {
     printJson(env, postedJson(posted));
@@ -549,7 +550,8 @@ function answeredLine({ ref, author, kind, resolved }: ReplyTarget): string {
 async function replyToLinked({ env, args: [ref = ''], values }: Context, db: string): Promise<number> {
   const options = { now: values.now ?? false, byAgent: values['by-agent'] ?? false, dryRun: values['dry-run'] ?? false };
   const deps = { reply: env.reply, now: env.now, refresh: env.getPullRequest };
-  const { finding, own, link, text, result } = await replyToDuplicate(db, ref, options, deps);
+  const { finding, own, link, text, result, reportError } = await replyToDuplicate(db, ref, options, deps);
+  warnReportError(env, db, reportError);
   if (values.json) {
     printJson(env, { finding, own, link, text, result });
   } else {

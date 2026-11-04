@@ -32,6 +32,7 @@ export interface RepliedDuplicate {
   link: string;
   text: string;
   result: ReplyResult;
+  reportError?: Error;
 }
 
 // Answers a PR comment that the review has linked as a duplicate of a finding with "Duplicate of <link to the
@@ -113,12 +114,12 @@ export async function replyToDuplicate(
     return { ...replied, result: { ...result, action: 'error', message } };
   }
   try {
-    await changeReviewState(
+    const { reportError } = await changeReviewState(
       arg,
       (state) => ({ state: recordReplied(state, ref, replyRef, result.state, deps.now()), result: undefined }),
       { snapshot },
     );
-    return replied;
+    return reportError === undefined ? replied : { ...replied, reportError };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     const message = `${was}, but it could not be recorded in the review (${reason}); run the command again to record it`;

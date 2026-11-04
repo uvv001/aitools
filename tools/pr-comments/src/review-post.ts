@@ -50,6 +50,7 @@ export interface PostedFinding {
   unlinked: number;
   // The exact text that is (or would be) posted, the disclaimer included.
   body: string;
+  reportError?: Error;
 }
 
 // The finding is tied to its own comment by a link, so that is where the way on starts.
@@ -96,6 +97,7 @@ export async function postFinding(
   const comment = own === undefined ? extracted.comment : { ...extracted.comment, commentRef: own.ref };
   const body = composeBody(comment.body, options.byAgent);
 
+  let reportError: Error | undefined;
   const hooks: PublishHooks = {
     onResult: async (result) => {
       if (result.action === 'error') {
@@ -121,11 +123,12 @@ export async function postFinding(
         return { ...result, action: 'error', message };
       }
       try {
-        await changeReviewState(
+        const changed = await changeReviewState(
           arg,
           (state) => ({ state: recordPosted(state, id, posted, action, result.state, deps.now()), result: undefined }),
           { snapshot },
         );
+        reportError = changed.reportError;
         return result;
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -145,5 +148,6 @@ export async function postFinding(
     warnings: extracted.warnings,
     unlinked: extracted.unlinked,
     body,
+    ...(reportError === undefined ? {} : { reportError }),
   };
 }
