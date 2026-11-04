@@ -221,22 +221,22 @@ pr-comments init "PR 42 tenant registry" --pr https://github.com/acme/widgets/pu
 **`pr connect`**: connects the review to its pull request. The same pull request again changes nothing. Another one is refused once links exist.
 
 ```
-pr-comments pr connect <url> [--db <file.sqlite>]
-pr-comments pr connect https://github.com/acme/widgets/pull/42
+pr-comments pr connect <url> --db <file.sqlite>
+pr-comments pr connect https://github.com/acme/widgets/pull/42 --db $DB
 ```
 
 **`pr show`**: shows the connected pull request, when it was synced, its head commit, and how much of it the database holds. `--json` prints the same as JSON.
 
 ```
-pr-comments pr show [--json] [--db <file.sqlite>]
-pr-comments pr show
+pr-comments pr show [--json] --db <file.sqlite>
+pr-comments pr show --db $DB
 ```
 
 **`pr sync`**: downloads the connected pull request into the database. A comment that a link names stays in the database, marked as gone, when GitHub no longer has it. Needs a token.
 
 ```
-pr-comments pr sync [--db <file.sqlite>]
-pr-comments pr sync
+pr-comments pr sync --db <file.sqlite>
+pr-comments pr sync --db $DB
 ```
 
 ### Rounds
@@ -244,8 +244,8 @@ pr-comments pr sync
 **`round open`**: opens a round: the revision reviewed and the base it is compared with.
 
 ```
-pr-comments round open [--revision <rev>] (--base <rev> | --no-base) [--note <text>] [--db <file.sqlite>]
-pr-comments round open --base origin/main --note "scope: src/tenants only"
+pr-comments round open [--revision <rev>] (--base <rev> | --no-base) [--note <text>] --db <file.sqlite>
+pr-comments round open --base origin/main --note "scope: src/tenants only" --db $DB
 ```
 
 - `--revision <rev>` is `HEAD` by default.
@@ -255,8 +255,8 @@ pr-comments round open --base origin/main --note "scope: src/tenants only"
 **`round update`**: adds a note (such as `no findings`) to a round under **Reviewed**.
 
 ```
-pr-comments round update <text> [--round <n>] [--db <file.sqlite>]
-pr-comments round update "no findings"
+pr-comments round update <text> [--round <n>] --db <file.sqlite>
+pr-comments round update "no findings" --db $DB
 ```
 
 - `--round <n>` updates that round instead of the latest one.
@@ -266,8 +266,8 @@ pr-comments round update "no findings"
 **`finding add`**: adds a finding. A round must be open. It prints `Added F7`, or with `--json` the object `{ "id": "F7" }`.
 
 ```
-pr-comments finding add --severity <high|medium|low> --title <text> --description-file <file|-> [--unverified] [--note <text>] [--json] [--db <file.sqlite>]
-pr-comments finding add --severity high --title "Missing timeout" --description-file description.md
+pr-comments finding add --severity <high|medium|low> --title <text> --description-file <file|-> [--unverified] [--note <text>] [--json] --db <file.sqlite>
+pr-comments finding add --severity high --title "Missing timeout" --description-file description.md --db $DB
 ```
 
 - `--description-file -` reads standard input. The file must be UTF-8.
@@ -276,8 +276,8 @@ pr-comments finding add --severity high --title "Missing timeout" --description-
 **`finding list`**: one line per finding, then how many there are. The options are combined with "and".
 
 ```
-pr-comments finding list [--state <state>] [--severity <severity>] [--unposted] [--json] [--db <file.sqlite>]
-pr-comments finding list --state approved --unposted
+pr-comments finding list [--state <state>] [--severity <severity>] [--unposted] [--json] --db <file.sqlite>
+pr-comments finding list --state approved --unposted --db $DB
 ```
 
 - `--state` takes one of the states below. `--severity` takes `high`, `medium` or `low`.
@@ -286,15 +286,15 @@ pr-comments finding list --state approved --unposted
 **`finding show`**: the finding, the comments linked to it (`Linked: own r544861, duplicate r544900`), the description, and the Updates. `--json` adds the evidence (the anchors) and the links.
 
 ```
-pr-comments finding show <finding> [--json] [--db <file.sqlite>]
-pr-comments finding show F7
+pr-comments finding show <finding> [--json] --db <file.sqlite>
+pr-comments finding show F7 --db $DB
 ```
 
 **`finding set-state`**: moves a finding to another state. A finding can go to any state, except the one it is in.
 
 ```
-pr-comments finding set-state <finding> <state> [--revision <rev>] [--note <text>] [--round <n>] [--db <file.sqlite>]
-pr-comments finding set-state F7 fixed --revision HEAD
+pr-comments finding set-state <finding> <state> [--revision <rev>] [--note <text>] [--round <n>] --db <file.sqlite>
+pr-comments finding set-state F7 fixed --revision HEAD --db $DB
 ```
 
 - `fixed` needs `--revision`.
@@ -303,26 +303,26 @@ pr-comments finding set-state F7 fixed --revision HEAD
 **`finding set-severity`**, **`set-title`**, **`set-description`**: change the severity, the title and the description. Each logs an Updates entry. The description always holds the latest version.
 
 ```
-pr-comments finding set-severity <finding> <severity> [--note <text>] [--round <n>] [--db <file.sqlite>]
-pr-comments finding set-title <finding> <title> [--note <text>] [--round <n>] [--db <file.sqlite>]
-pr-comments finding set-description <finding> --description-file <file|-> [--note <text>] [--round <n>] [--db <file.sqlite>]
-pr-comments finding set-severity F7 medium
-pr-comments finding set-title F7 "Missing retry timeout"
-pr-comments finding set-description F7 --description-file -
+pr-comments finding set-severity <finding> <severity> [--note <text>] [--round <n>] --db <file.sqlite>
+pr-comments finding set-title <finding> <title> [--note <text>] [--round <n>] --db <file.sqlite>
+pr-comments finding set-description <finding> --description-file <file|-> [--note <text>] [--round <n>] --db <file.sqlite>
+pr-comments finding set-severity F7 medium --db $DB
+pr-comments finding set-title F7 "Missing retry timeout" --db $DB
+pr-comments finding set-description F7 --description-file - --db $DB
 ```
 
 **`finding update`**: adds a free-form entry to the Updates: a question, a verdict, a note.
 
 ```
-pr-comments finding update <finding> <text> [--round <n>] [--db <file.sqlite>]
-pr-comments finding update F7 "Asked the author" --round 1
+pr-comments finding update <finding> <text> [--round <n>] --db <file.sqlite>
+pr-comments finding update F7 "Asked the author" --round 1 --db $DB
 ```
 
 **`finding post`**: publishes the comment of a finding, in any state, to the connected pull request, and links it to the finding as its own comment. Run again, it updates that comment. Needs a token with write permission.
 
 ```
-pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] [--json] [--db <file.sqlite>]
-pr-comments finding post F7 --dry-run
+pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] [--json] --db <file.sqlite>
+pr-comments finding post F7 --dry-run --db $DB
 ```
 
 - The comment is `<severity> **<id> — <title>**` and the description, e.g. `🔴 **F7 — Missing timeout**`. The id is the one of the review document, so a person can match the comment with the finding. It is local to the review: the pull request author does not know it. A comment posted before the id was added is updated with it by running `finding post` again (it counts as an update). Only the description goes to GitHub, never the Updates. Links in it that point into the review (relative links) are replaced by their text.
@@ -339,43 +339,43 @@ A link ties a comment or a check annotation of the pull request to the review. I
 **`link pending`**: the to-do list. One line per comment or check annotation that no link names (ref, author or app, place, state or level, excerpt). Nothing is printed when everything is handled. It exits with 0 whenever it ran. Before the first `pr sync` there is nothing to list, and it is an error (exit 1). `--json` prints an array (`[]` when none).
 
 ```
-pr-comments link pending [--json] [--db <file.sqlite>]
-pr-comments link pending
+pr-comments link pending [--json] --db <file.sqlite>
+pr-comments link pending --db $DB
 ```
 
 **`link own`**: links an existing comment as the own comment of a finding (as if the tool had posted it).
 
 ```
-pr-comments link own <finding> <ref> [--note <text>] [--db <file.sqlite>]
-pr-comments link own F7 r544861
+pr-comments link own <finding> <ref> [--note <text>] --db <file.sqlite>
+pr-comments link own F7 r544861 --db $DB
 ```
 
 **`link duplicate`**: links a comment or a check annotation about the same issue as the finding.
 
 ```
-pr-comments link duplicate <finding> <ref> [--note <text>] [--db <file.sqlite>]
-pr-comments link duplicate F7 c623843
+pr-comments link duplicate <finding> <ref> [--note <text>] --db <file.sqlite>
+pr-comments link duplicate F7 c623843 --db $DB
 ```
 
 **`link note`**: records that a comment is no finding, and why. A check annotation cannot be a note.
 
 ```
-pr-comments link note <ref> <text> [--db <file.sqlite>]
-pr-comments link note c623843 "a bot, not a finding"
+pr-comments link note <ref> <text> --db <file.sqlite>
+pr-comments link note c623843 "a bot, not a finding" --db $DB
 ```
 
 **`link remove`**: removes the link, whatever its role. The comment is pending again.
 
 ```
-pr-comments link remove <ref> [--note <text>] [--db <file.sqlite>]
-pr-comments link remove r544861
+pr-comments link remove <ref> [--note <text>] --db <file.sqlite>
+pr-comments link remove r544861 --db $DB
 ```
 
 **`link reply`**: answers a comment that is linked as a duplicate with `Duplicate of <link to the own comment of the finding>.` The finding must have an own comment. Needs a token with write permission.
 
 ```
-pr-comments link reply <ref> [--by-agent] [--now] [--dry-run] [--json] [--db <file.sqlite>]
-pr-comments link reply c623843 --dry-run
+pr-comments link reply <ref> [--by-agent] [--now] [--dry-run] [--json] --db <file.sqlite>
+pr-comments link reply c623843 --dry-run --db $DB
 ```
 
 - A reply in a review thread always goes into your pending review. `--now` has no effect on it.
@@ -389,6 +389,7 @@ pr-comments link reply c623843 --dry-run
 
 ```
 pr-comments report render [--out <file.md>] --db <file.sqlite>
+pr-comments report render --db $DB
 ```
 
 The default file is next to the database (`<name>.md`). `--out` writes it elsewhere.
@@ -396,8 +397,8 @@ The default file is next to the database (`<name>.md`). `--out` writes it elsewh
 **`report comments`**: writes the downloaded pull request as markdown: the description, the conversation, the review threads with code, and the check annotations. It goes to the screen unless `--out` is given. Run `pr sync` first.
 
 ```
-pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] [--db <file.sqlite>]
-pr-comments report comments --author alice --out pr-42.md
+pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] --db <file.sqlite>
+pr-comments report comments --author alice --out pr-42.md --db $DB
 ```
 
 `--author` and `--ref` may be repeated, or take a comma-separated list. `--author` keeps the comments and reviews of that user and the check runs of that app. `--ref` keeps only the listed comments (with their thread) and check annotations; an unknown ref gives a warning, and a malformed ref is an error. `--pending` keeps only comments and check annotations that no link names yet. With `--ref` or `--pending`, review bodies are not shown. On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.
@@ -405,8 +406,8 @@ pr-comments report comments --author alice --out pr-42.md
 **`report dump`**: prints the review as text, for `git diff` (see [Git](#git)). It lists the findings, the rounds, the links and the pull request URL, not the downloaded comments.
 
 ```
-pr-comments report dump [--db <file.sqlite>]
-pr-comments report dump
+pr-comments report dump --db <file.sqlite>
+pr-comments report dump --db $DB
 ```
 
 ### Help and version
