@@ -1,9 +1,7 @@
 # aitools
 
 A library of skill, prompt, and agent definitions. Each skill lives in its own
-directory under `skills/`; tools that a skill ships live under `tools/`
-(`pnpm build` in `tools/pr-comments/` writes the generated
-`skills/review-with-docs/pr-comments.mjs`).
+directory under `skills/`; tools that a skill ships live under `tools/`.
 
 ## Skill authoring
 
