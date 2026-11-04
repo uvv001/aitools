@@ -44,13 +44,13 @@ given its model and read-only contract per [fleet.md](fleet.md)) that run
 `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
 in the reviewed repository, read the comments against the findings the review
 carries (listed as in the Later rounds of [fleet.md](fleet.md)), the pinned
-revision, its base, and the dirty-tree remark, the Evidence rules of
-[SKILL.md](SKILL.md), the user's login, and the table and the paragraph above,
-write a description file at `<report-stem>/round-<n>/pr-comments/<ref>.md` for
-each concern no finding covers yet, a refuted one included, and reply with one
-classification per ref (`own <F>`, `duplicate <F>`, `note '<reason>'`, or the
-new finding's reply line per [fleet.md](fleet.md)) for the orchestrator to
-record.
+revision, its base, and the dirty-tree remark, the Evidence section and the
+Validation rule-collision and severity rules of [SKILL.md](SKILL.md), the
+user's login, and the table and the paragraph above, write a description file
+at `<report-stem>/round-<n>/pr-comments/<ref>.md` for each concern no finding
+covers yet, a refuted one included, and reply with one classification per ref
+(`own <F>`, `duplicate <F>`, `note '<reason>'`, or the new finding's reply
+line per [fleet.md](fleet.md)) for the orchestrator to record.
 
 ## Publish
 
