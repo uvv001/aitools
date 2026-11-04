@@ -750,8 +750,12 @@ describe('initReviewFile', () => {
       const commonGit = join(dir, 'main-repo', '.git');
       const worktreeGit = join(commonGit, 'worktrees', 'wt1');
       const worktreeRoot = join(dir, 'wt1');
+      await mkdir(join(commonGit, 'refs'), { recursive: true });
+      await mkdir(join(commonGit, 'objects'), { recursive: true });
+      await writeFile(join(commonGit, 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
       await mkdir(worktreeGit, { recursive: true });
       await mkdir(worktreeRoot, { recursive: true });
+      await writeFile(join(worktreeGit, 'HEAD'), 'ref: refs/heads/wt1\n', 'utf8');
       await writeFile(join(worktreeRoot, '.git'), `gitdir: ../main-repo/.git/worktrees/wt1\n`, 'utf8');
       await writeFile(join(worktreeGit, 'commondir'), '../..\n', 'utf8');
 
@@ -763,12 +767,23 @@ describe('initReviewFile', () => {
     it('writes /.ai/review-with-docs/ to gitdir/info/exclude when commondir is absent (as in a submodule)', async () => {
       const submoduleGit = join(dir, 'main-repo', '.git', 'modules', 'sub1');
       const submoduleRoot = join(dir, 'sub1');
-      await mkdir(submoduleGit, { recursive: true });
+      await mkdir(join(submoduleGit, 'refs'), { recursive: true });
+      await mkdir(join(submoduleGit, 'objects'), { recursive: true });
+      await writeFile(join(submoduleGit, 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
       await mkdir(submoduleRoot, { recursive: true });
       await writeFile(join(submoduleRoot, '.git'), `gitdir: ../main-repo/.git/modules/sub1\n`, 'utf8');
 
       await initReviewFile('PR 42', { cwd: submoduleRoot, now: NOW });
       expect(await readFile(join(submoduleGit, 'info', 'exclude'), 'utf8')).toBe('/.ai/review-with-docs/\n');
+    });
+
+    it('fails closed when git check-ignore cannot verify exclusion in an invalid .git directory', async () => {
+      const brokenRepo = join(dir, 'broken-repo');
+      await mkdir(join(brokenRepo, '.git'), { recursive: true });
+      await expect(initReviewFile('PR 42', { cwd: brokenRepo, now: NOW })).rejects.toThrow(
+        `git check-ignore failed in ${brokenRepo}:`,
+      );
+      expect(existsSync(join(brokenRepo, '.ai'))).toBe(false);
     });
 
     it('makes the file name of a name with markup and punctuation', async () => {

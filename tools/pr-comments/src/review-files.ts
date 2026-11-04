@@ -216,7 +216,7 @@ function isInsideReviewFolder(targetDir: string, repoRoot: string): boolean {
   return normTarget === normFolder || normTarget.startsWith(`${normFolder}${sep}`);
 }
 
-async function checkReviewIgnored(repoRoot: string, extraPaths: string[] = []): Promise<'ignored' | 'exposed' | 'unavailable'> {
+async function isReviewIgnoredByGit(repoRoot: string, extraPaths: string[] = []): Promise<boolean> {
   const probes = [...new Set([...IGNORE_PROBES, ...extraPaths])];
   try {
     const { stdout } = await runGit('git', ['check-ignore', '--no-index', ...probes], {
@@ -224,10 +224,15 @@ async function checkReviewIgnored(repoRoot: string, extraPaths: string[] = []): 
       env: { ...process.env, LC_ALL: 'C', GIT_CEILING_DIRECTORIES: dirname(repoRoot) },
     });
     const matched = stdout.trim().split(/\r?\n/u).filter(Boolean).length;
-    return matched === probes.length ? 'ignored' : 'exposed';
+    return matched === probes.length;
   } catch (error) {
-    const code = (error as { code?: number | string }).code;
-    return code === 1 ? 'exposed' : 'unavailable';
+    const failure = error as { code?: number | string; stderr?: string; message?: string };
+    if (failure.code === 1) return false;
+    if (failure.code === 'ENOENT') {
+      throw new Error(`git could not be started (is it installed and on the PATH?): ${failure.message ?? String(error)}`);
+    }
+    const detail = (failure.stderr ?? failure.message ?? String(error)).trim().split(/\r?\n/u)[0] ?? 'unknown git error';
+    throw new Error(`git check-ignore failed in ${repoRoot}: ${detail}`);
   }
 }
 
@@ -270,8 +275,7 @@ function resolveGitDir(repoRoot: string): string | undefined {
 // when needed, and verifies with `git check-ignore` that no `.gitignore` rule still exposes the review artifacts.
 export async function ensureAiGitExcluded(repoRoot: string, targetPaths: string[] = []): Promise<void> {
   const relTargets = targetPaths.map((target) => relative(repoRoot, target).replaceAll('\\', '/'));
-  const before = await checkReviewIgnored(repoRoot, relTargets);
-  if (before === 'ignored') return;
+  if (await isReviewIgnoredByGit(repoRoot, relTargets)) return;
   const gitDir = resolveGitDir(repoRoot);
   if (gitDir !== undefined && existsSync(gitDir)) {
     const excludePath = join(gitDir, 'info', 'exclude');
@@ -282,7 +286,7 @@ export async function ensureAiGitExcluded(repoRoot: string, targetPaths: string[
       await writeFile(excludePath, `${current}${prefix}${EXCLUDE_RULE}\n`, 'utf8');
     }
   }
-  if (before === 'exposed' && (await checkReviewIgnored(repoRoot, relTargets)) !== 'ignored') {
+  if (!(await isReviewIgnoredByGit(repoRoot, relTargets))) {
     const gitignorePath = join(repoRoot, '.gitignore');
     throw new Error(
       `${gitignorePath} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,

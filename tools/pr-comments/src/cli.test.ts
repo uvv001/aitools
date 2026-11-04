@@ -784,7 +784,9 @@ describe('cli', () => {
 
       it('is not asked for by init, which creates a database in .ai/review-with-docs/', async () => {
         const repo = join(work, 'repo');
-        await mkdir(join(repo, '.git'), { recursive: true });
+        await mkdir(join(repo, '.git', 'refs'), { recursive: true });
+        await mkdir(join(repo, '.git', 'objects'), { recursive: true });
+        await writeFile(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
         env.cwd = () => repo;
 
         expect(await run(['init', 'PR 44'], env)).toBe(0);
@@ -1038,7 +1040,9 @@ describe('cli', () => {
 
     it('creates .ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite at the git root without --report, shown relative to the working directory', async () => {
       const repo = join(work, 'repo');
-      await mkdir(join(repo, '.git'), { recursive: true });
+      await mkdir(join(repo, '.git', 'refs'), { recursive: true });
+      await mkdir(join(repo, '.git', 'objects'), { recursive: true });
+      await writeFile(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
       env.cwd = () => repo;
 
       expect(await step('init', 'PR 42 — tenant registry')).toBe(0);
