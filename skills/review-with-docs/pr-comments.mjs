@@ -3010,6 +3010,14 @@ function resolveGitDir(repoRoot) {
 		return;
 	}
 }
+function findConflictingGitignore(repoRoot, targetPaths) {
+	return [
+		...targetPaths.map((target) => join(dirname(resolve(repoRoot, target)), ".gitignore")),
+		join(repoRoot, REVIEW_FOLDER, ".gitignore"),
+		join(repoRoot, ".ai", ".gitignore"),
+		join(repoRoot, ".gitignore")
+	].find((candidate) => existsSync(candidate)) ?? join(repoRoot, ".gitignore");
+}
 async function ensureAiGitExcluded(repoRoot, targetPaths = []) {
 	const relTargets = targetPaths.map((target) => relative(repoRoot, target).replaceAll("\\", "/"));
 	if (await isReviewIgnoredByGit(repoRoot, relTargets)) return;
@@ -3024,7 +3032,7 @@ async function ensureAiGitExcluded(repoRoot, targetPaths = []) {
 		}
 	}
 	if (!await isReviewIgnoredByGit(repoRoot, relTargets)) {
-		const gitignorePath = join(repoRoot, ".gitignore");
+		const gitignorePath = findConflictingGitignore(repoRoot, targetPaths);
 		throw new Error(`${gitignorePath} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`);
 	}
 }
@@ -3787,7 +3795,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+a3f8811`;
+	return `pr-comments ${VERSION}+a25dcb1`;
 }
 //#endregion
 //#region src/cli.ts
