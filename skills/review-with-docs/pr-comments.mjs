@@ -1707,7 +1707,7 @@ const SEVERITY_NAMES$1 = [
 const normalise = (text) => text.trim().replace(/\s+/gu, " ").toLowerCase();
 const firstWord = (label) => label.split(" ")[0] ?? label;
 const stateLabel = (marker) => STATES.find((state) => state.marker === marker)?.label ?? marker;
-function parseState(text) {
+function parseState(text, prefix = "") {
 	const wanted = normalise(text);
 	const found = STATES.find((state) => [
 		state.marker,
@@ -1719,7 +1719,7 @@ function parseState(text) {
 		const word = firstWord(label);
 		return `${marker} ${word}${word === label ? "" : ` (${label})`}`;
 	});
-	throw new Error(`--state "${text}" is not a state; use one of: ${valid.join(", ")}`);
+	throw new Error(`${prefix}"${text}" is not a state; use one of: ${valid.join(", ")}`);
 }
 function parseSeverity(text) {
 	const wanted = normalise(text);
@@ -1731,7 +1731,7 @@ function parseSeverity(text) {
 }
 function parseFilter(values) {
 	return {
-		state: values.state === void 0 ? void 0 : parseState(values.state),
+		state: values.state === void 0 ? void 0 : parseState(values.state, "--state "),
 		severity: values.severity === void 0 ? void 0 : parseSeverity(values.severity),
 		unposted: values.unposted
 	};
@@ -3795,7 +3795,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+a25dcb1`;
+	return `pr-comments ${VERSION}+836d56f`;
 }
 //#endregion
 //#region src/cli.ts
