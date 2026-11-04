@@ -2911,7 +2911,7 @@ async function createDatabase(path, data, pullRequest) {
 		});
 	}
 }
-const existingDatabase = (dbPath) => /* @__PURE__ */ new Error(`${dbPath} already exists; the database is the source of truth and must not be overwritten. If you really want to start this review again, delete the database deliberately first. To start another review, choose another name or location with --report.`);
+const existingDatabase = (dbPath) => /* @__PURE__ */ new Error(`${dbPath} already exists; the database is the source of truth and must not be overwritten. If you really want to start this review again, delete the database deliberately first. To start another review, choose another name or location with --db or --report.`);
 const existingReport = (reportPath) => /* @__PURE__ */ new Error(`${reportPath} already exists; init will not overwrite an existing report file. Choose another name or location with --db or --report, or remove the file first.`);
 function mustBeDatabase(dbPath) {
 	if (dbPath !== void 0 && extname(dbPath).toLowerCase() !== ".sqlite") throw new Error(`--db must be a file ending in .sqlite: ${dbPath}`);
@@ -3771,7 +3771,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+a8e9eda`;
+	return `pr-comments ${VERSION}+1c43e36`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4698,7 +4698,7 @@ const DEFINITIONS = [
 	{
 		words: "report comments",
 		summary: "writes the pull request conversation as markdown",
-		description: ["Writes the downloaded pull request (description, reviews, threads, comments and the Checks section) as markdown, to the", "screen unless --out is given. Run \"pr-comments pr sync\" first."],
+		description: ["Writes the downloaded pull request (description, reviews, threads, comments and the Checks section) as markdown, to the", "screen unless --out is given. Run \"pr-comments pr sync --db <file.sqlite>\" first."],
 		args: [],
 		options: [
 			{
