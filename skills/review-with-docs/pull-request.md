@@ -40,9 +40,10 @@ user to triage. A doubtful classification is the user's call
 ([SKILL.md](SKILL.md)); `link remove <ref>` undoes a link.
 
 Past a handful of pending items, slice the refs across parallel agents (each
-given its model and read-only contract per [fleet.md](fleet.md)) that read
-`report comments --ref <slice> --db <file.sqlite>` against the pinned
-revision, its base, and the dirty-tree remark, `finding list`, the Evidence
+given its model and read-only contract per [fleet.md](fleet.md)) that run
+`node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
+and `finding list --db <file.sqlite>` in the reviewed repository, read them
+against the pinned revision, its base, and the dirty-tree remark, the Evidence
 rules of [SKILL.md](SKILL.md), the user's login, and the table and the
 paragraph above, write a description file at
 `<report-stem>/round-<n>/pr-comments/<ref>.md` for each concern no finding
