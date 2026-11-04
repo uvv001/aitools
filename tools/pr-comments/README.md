@@ -51,23 +51,23 @@ This is one complete review of a pull request, in order. The example reviews pul
 **1. Start the review.** `init` creates the database. The name is the title of the report.
 
 ```
-pr-comments init "PR 42 tenant registry" --session-dir <session-folder>/files --pr https://github.com/acme/widgets/pull/42
-Created .ai/2026-10-29_pr-42-tenant-registry_review.sqlite
+pr-comments init "PR 42 tenant registry" --pr https://github.com/acme/widgets/pull/42
+Created .ai/review-with-docs/2026-10-29_pr-42-tenant-registry_review.sqlite
 Pull request: https://github.com/acme/widgets/pull/42
-Report: .ai/2026-10-29_pr-42-tenant-registry_review.md
+Report: .ai/review-with-docs/2026-10-29_pr-42-tenant-registry_review.md
 ```
 
-Both the database and the report are created, and every change updates the report. Without `--report`, the files go to `.ai/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root, and `.ai/` is added to `.git/info/exclude` when not already ignored. With `--session-dir <dir>`, the primary files live in `<dir>` and are hard-linked into `.ai/` on every database change and `report render`. If the pull request does not exist yet, leave out `--pr`, and connect it later:
+Both the database and the report are created, and every change updates the report. Without `--report` or `--db`, the files go to `.ai/review-with-docs/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root, and `/.ai/review-with-docs/` is added to `.git/info/exclude` when not already ignored (while `.ai/` itself can remain versioned). Pass `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` when storing the review in a session folder. Every subsequent command takes `--db <file.sqlite>` (`$DB` below). If the pull request does not exist yet, leave out `--pr`, and connect it later:
 
 ```
-pr-comments pr connect https://github.com/acme/widgets/pull/42
+pr-comments pr connect https://github.com/acme/widgets/pull/42 --db $DB
 Connected to https://github.com/acme/widgets/pull/42
 ```
 
 **2. Open a round.** A round is one pass over a revision, compared with a base. `--note` is optional: write the scope of the review (or any other context) there. It goes onto the Reviewed line of the report.
 
 ```
-pr-comments round open --base origin/main --note "scope: src/tenants only"
+pr-comments round open --base origin/main --note "scope: src/tenants only" --db $DB
 Round 1 opened
 ```
 
@@ -76,9 +76,9 @@ The revision is `HEAD` unless you say `--revision`. The tool stores the 8-charac
 **3. Raise findings.** The description is a markdown file (or `-` for standard input). A line that holds only `` `path:lines` `` is an anchor. It says where the comment goes in the pull request.
 
 ```
-pr-comments finding add --severity high --title "Tenant lookup never gives up" --description-file notes/retry.md
+pr-comments finding add --severity high --title "Tenant lookup never gives up" --description-file notes/retry.md --db $DB
 Added F1
-pr-comments finding add --severity medium --title "Failed lookups are swallowed" --description-file -
+pr-comments finding add --severity medium --title "Failed lookups are swallowed" --description-file - --db $DB
 Added F2
 ```
 
@@ -87,16 +87,16 @@ Here `notes/retry.md` starts with `` `src/tenants/registry.ts:22-32` ``, then th
 **4. Triage.** Look at the findings, and decide.
 
 ```
-pr-comments finding list
+pr-comments finding list --db $DB
 F1  ⏳ 🔴  Tenant lookup never gives up
 F2  ⏳ 🟡  Failed lookups are swallowed
 2 of 2 findings
-pr-comments finding show F1
-pr-comments finding set-state F1 approved --note "the user agreed"
+pr-comments finding show F1 --db $DB
+pr-comments finding set-state F1 approved --note "the user agreed" --db $DB
 F1: ⏳ → ✅
-pr-comments finding set-state F2 approved
+pr-comments finding set-state F2 approved --db $DB
 F2: ⏳ → ✅
-pr-comments finding update F2 "Asked the author about the log level" --round 1
+pr-comments finding update F2 "Asked the author about the log level" --round 1 --db $DB
 F2: note added
 ```
 
@@ -105,8 +105,8 @@ F2: note added
 **5. Download the pull request.** `pr sync` reads the comments, reviews, threads and check annotations from GitHub into the same database. It prints `Synced <owner>/<repo>#<n>: <r> reviews, <t> threads, <c> comments, <a> annotations`. Run it again after every push: it replaces what the last sync stored.
 
 ```
-pr-comments pr sync
-pr-comments pr show
+pr-comments pr sync --db $DB
+pr-comments pr show --db $DB
 ```
 
 `pr show` tells when the data was downloaded, the head commit, and how much the database holds.
@@ -114,7 +114,7 @@ pr-comments pr show
 **6. Deal with what others wrote.** `link pending` is the to-do list. It prints every comment and every check annotation of the pull request that no link names yet.
 
 ```
-pr-comments link pending
+pr-comments link pending --db $DB
   r544861  erin  src/tenants/registry.ts:22  thread open, 0 replies — "The tenant lookup never gives up: add an upper bound."
   r544900  bob   src/tenants/registry.ts:25  thread open, 1 reply — "This loop has no limit. A dead tenant blocks the worker."
   c623843  dave  conversation                "Can we also log the retry count?"
@@ -130,17 +130,17 @@ Go through the list. Each line gets a link:
 - A new issue: first `finding add`, then link it to that finding. A check annotation is always linked as a duplicate of a finding. It is never a note.
 
 ```
-pr-comments link own F1 r544861 --note "written by hand"
+pr-comments link own F1 r544861 --note "written by hand" --db $DB
 F1: own comment r544861 linked
-pr-comments link duplicate F1 r544900
+pr-comments link duplicate F1 r544900 --db $DB
 F1: duplicate r544900 linked
-pr-comments link note c623843 "a wish, not a finding"
+pr-comments link note c623843 "a wish, not a finding" --db $DB
 c623843: noted
-pr-comments finding add --severity low --title "Cognitive complexity of Registry.resolve" --description-file -
+pr-comments finding add --severity low --title "Cognitive complexity of Registry.resolve" --description-file - --db $DB
 Added F3
-pr-comments link duplicate F3 a126305ce
+pr-comments link duplicate F3 a126305ce --db $DB
 F3: duplicate a126305ce linked
-pr-comments link duplicate F2 a8d5d4a2a
+pr-comments link duplicate F2 a8d5d4a2a --db $DB
 F2: duplicate a8d5d4a2a linked
 ```
 
@@ -149,11 +149,11 @@ When `link pending` prints nothing, every comment and annotation is handled. Emp
 **7. Post the findings.** `finding list --unposted` shows the findings that have no comment of their own yet, in any state; `--state approved` narrows it to the approved ones. First look at what would happen, then post:
 
 ```
-pr-comments finding list --state approved --unposted
+pr-comments finding list --state approved --unposted --db $DB
 F2  ✅ 🟡  Failed lookups are swallowed
 1 of 3 findings
-pr-comments finding post F2 --dry-run
-pr-comments finding post F2
+pr-comments finding post F2 --dry-run --db $DB
+pr-comments finding post F2 --db $DB
 ```
 
 `--dry-run` checks everything and prints the exact text and the place, and writes nothing. A real post adds the comment to your **pending review**. Nobody else sees it until you submit that review. The tool links the comment to the finding as its own comment. `--now` publishes at once instead, but GitHub allows that only when you have no pending review. A finding without a `path:lines` anchor becomes a general comment, which needs `--now`. A finding in any state can be posted, for example one that is already ✅ approved or 🔧 fixed: the state is not part of the comment.
@@ -161,8 +161,8 @@ pr-comments finding post F2
 **8. Answer the duplicates.** A comment that duplicates a finding can be answered with `Duplicate of <link to the own comment>.` The answer goes into the same pending review.
 
 ```
-pr-comments link reply r544900 --dry-run
-pr-comments link reply r544900
+pr-comments link reply r544900 --dry-run --db $DB
+pr-comments link reply r544900 --db $DB
 ```
 
 `F1` has the own comment `r544861`, so the reply to the duplicate `r544900` points to it. A conversation comment (`c…`) can only be answered at once, so it needs `--now`. Check annotations are never answered.
@@ -172,9 +172,9 @@ pr-comments link reply r544900
 **10. Make the reports.**
 
 ```
-pr-comments report render
-pr-comments report comments --author bob --out .ai/pr-42_comments.md
-Wrote .ai/pr-42_comments.md
+pr-comments report render --db $DB
+pr-comments report comments --author bob --out .ai/review-with-docs/pr-42_comments.md --db $DB
+Wrote .ai/review-with-docs/pr-42_comments.md
 ```
 
 `report render` writes the review report next to the database, and prints `created`, `updated` or `unchanged` and the path. `report comments` writes the pull request as markdown (description, reviews, threads, check annotations), to the screen or to a file.
@@ -182,10 +182,10 @@ Wrote .ai/pr-42_comments.md
 **11. Next round.** The author pushes. Sync again, open a new round, and see what is new:
 
 ```
-pr-comments pr sync
-pr-comments link pending
-pr-comments round open --base origin/main
-pr-comments finding set-state F2 fixed --revision HEAD --note "retry now logs"
+pr-comments pr sync --db $DB
+pr-comments link pending --db $DB
+pr-comments round open --base origin/main --db $DB
+pr-comments finding set-state F2 fixed --revision HEAD --note "retry now logs" --db $DB
 F2: ✅ → 🔧
 ```
 
@@ -201,21 +201,20 @@ F2: ✅ → 🔧
 
 ## Command reference
 
-Every command also has `pr-comments <command> --help` (or `pr-comments help <command>`) with its options, and an example. This section does not repeat every option. `[--db <file.sqlite>]` is on every command except `init` (see [The review database](#the-review-database-and---db)).
+Every command also has `pr-comments <command> --help` (or `pr-comments help <command>`) with its options, and an example. This section does not repeat every option. `--db <file.sqlite>` is required on every command except `init` (see [The review database](#the-review-database-and---db)).
 
 ### Start a review
 
 **`init`**: creates the review database. It never replaces an existing one.
 
 ```
-pr-comments init <name> [--pr <url>] [--session-dir <dir>] [--report <file.md>] [--db <file.sqlite>]
+pr-comments init <name> [--pr <url>] [--report <file.md>] [--db <file.sqlite>]
 pr-comments init "PR 42 tenant registry" --pr https://github.com/acme/widgets/pull/42
 ```
 
 - `--pr <url>` connects the review to a pull request.
-- `--session-dir <dir>` stores the primary review files in `<dir>` and hard-links them into `.ai/`.
 - `--report <file.md>` names the report. The database is created next to it, with the same name and `.sqlite`. A `.sqlite` path works too.
-- `--db <file.sqlite>` puts the database somewhere else.
+- `--db <file.sqlite>` puts the database somewhere else (and the report next to it).
 
 ### The pull request
 
@@ -389,11 +388,10 @@ pr-comments link reply c623843 --dry-run
 **`report render`**: writes the markdown report of the review, made from the database. It prints `created`, `updated` or `unchanged` and the path. It overwrites the report each time: change the review with the commands, never in the markdown. It never writes over a SQLite file.
 
 ```
-pr-comments report render [--out <file.md>] [--session-dir <dir>] [--db <file.sqlite>]
-pr-comments report render
+pr-comments report render [--out <file.md>] --db <file.sqlite>
 ```
 
-The default file is next to the database (`<name>.md`). `--out` writes it elsewhere. `--session-dir <dir>` connects or updates the session directory and hard-links the database, report and round folders between `<dir>` and `.ai/`.
+The default file is next to the database (`<name>.md`). `--out` writes it elsewhere.
 
 **`report comments`**: writes the downloaded pull request as markdown: the description, the conversation, the review threads with code, and the check annotations. It goes to the screen unless `--out` is given. Run `pr sync` first.
 
@@ -465,11 +463,10 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 ### The review database and `--db`
 
 - Every command except `init` works on an existing review database. A missing file is an error, and nothing is created.
-- `--db <file.sqlite>` names it. The name must end in `.sqlite`.
-- Without `--db`, the tool searches the git repository that contains the working directory (the working directory itself outside a repository) for a file whose name ends in `review.sqlite` and that really is a review database. Exactly one must be found. None, or several, is an error (several are listed). So the commands work from any folder of the repository.
+- `--db <file.sqlite>` is required on every command except `init`. The name must end in `.sqlite`.
 - A command that changes the database prints `Review database: <path>` on stderr after it succeeded, so you can see which review it changed. A dry run does not, and neither does `pr connect` to the pull request the review is already connected to.
-- `init` uses `--db` to name the file it creates.
-- Several commands at once are safe: they wait for each other, up to 10 seconds. The read commands (`finding list`, `finding show`, `link pending`, `pr show`, and the `report` commands, unless `report render --session-dir` updates the stored session or workspace directory) open the file read-only and change nothing in it.
+- `init` uses `--db` (or `--report`) to name the file it creates, defaulting to `.ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` at the git root.
+- Several commands at once are safe: they wait for each other, up to 10 seconds. The read commands (`finding list`, `finding show`, `link pending`, `pr show`, and the `report` commands) open the file read-only and change nothing in it.
 
 ### Strict arguments, help, `--json`
 
@@ -478,7 +475,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
   ```
   pr-comments finding list --bogus
   unknown option --bogus
-  Usage: pr-comments finding list [--state <state>] [--severity <severity>] [--unposted] [--json] [--db <file.sqlite>]
+  Usage: pr-comments finding list [--state <state>] [--severity <severity>] [--unposted] [--json] --db <file.sqlite>
   Run "pr-comments finding list --help" for details.
   ```
 
@@ -490,7 +487,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 
 ## Git
 
-By default, reviews live in `.ai/` (excluded via `.git/info/exclude`) and `--session-dir` hard-links them into the session folder, so they stay out of Git commits. When `--report` places a review in a tracked folder instead, commit the database next to the report.
+By default, reviews live in `<session-folder>/files/review-with-docs/` (when the host provides a session folder) or `.ai/review-with-docs/` (excluded via `.git/info/exclude`, while `.ai/` itself can be versioned), so they stay out of Git commits. When `--report` or `--db` places a review in a tracked folder instead, commit the database next to the report.
 
 The database is a binary file, so `git diff` cannot show what changed in it. `report dump` turns it into text. Tell git to use it:
 

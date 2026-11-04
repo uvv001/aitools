@@ -1,7 +1,7 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, linkSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
-import { link, mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -23,9 +23,9 @@ import {
 } from './review-files.ts';
 import { dumpReview } from './review-dump.ts';
 import type { CommentLink, ReviewState } from './review-links.ts';
-import { linkDuplicate, linkNote, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
+import { linkDuplicate, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
-import { newReview, openRound, updateRound } from './review-ops.ts';
+import { newReview } from './review-ops.ts';
 import { readReport } from './review-read.ts';
 import { renderReport } from './review-render.ts';
 import { REVIEW_SCHEMA_VERSION, getMeta, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
@@ -48,7 +48,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     ...actual,
     link: vi.fn(actual.link),
     rename: vi.fn(actual.rename),
-    stat: vi.fn(actual.stat),
     writeFile: vi.fn(actual.writeFile),
   };
 });
@@ -633,7 +632,7 @@ describe('initReviewFile', () => {
     // repository lives; `cwd` is a folder inside it.
     let repo: string;
     let cwd: string;
-    const ai = (file: string): string => join(repo, '.ai', file);
+    const ai = (file: string): string => join(repo, '.ai', 'review-with-docs', file);
 
     beforeEach(async () => {
       repo = join(dir, 'repo');
@@ -642,46 +641,53 @@ describe('initReviewFile', () => {
       await mkdir(cwd, { recursive: true });
     });
 
-    it('creates the review in .ai/ of the repository, named from the date and the name, creates .ai/, and excludes it in .git/info/exclude', async () => {
+    it('creates the review in .ai/review-with-docs/ of the repository, named from the date and the name, and excludes /.ai/review-with-docs/ in .git/info/exclude', async () => {
       expect(existsSync(join(repo, '.ai'))).toBe(false);
       const result = await initReviewFile('PR 42', { cwd, now: NOW });
       expect(result).toEqual({ db: ai('2026-10-09_pr-42_review.sqlite'), report: ai('2026-10-09_pr-42_review.md') });
-      expect(readdirSync(join(repo, '.ai'))).toEqual(['2026-10-09_pr-42_review.md', '2026-10-09_pr-42_review.sqlite']);
-      expect(await readFile(join(repo, '.git', 'info', 'exclude'), 'utf8')).toBe('/.ai/\n');
+      expect(readdirSync(join(repo, '.ai', 'review-with-docs'))).toEqual(['2026-10-09_pr-42_review.md', '2026-10-09_pr-42_review.sqlite']);
+      expect(await readFile(join(repo, '.git', 'info', 'exclude'), 'utf8')).toBe('/.ai/review-with-docs/\n');
       expect(readdirSync(cwd)).toEqual([]);
       const loaded = await loadReviewFile(result.report);
       expect(loaded.data).toStrictEqual(NEW_REVIEW);
       expect(loaded.paths).toEqual({ db: result.db, report: result.report });
     });
 
-    it('re-appends /.ai/ to .git/info/exclude when a later negation undoes an earlier rule, and reports a conflict when .gitignore negates .ai/', async () => {
+    it('re-appends /.ai/review-with-docs/ to .git/info/exclude when a later negation undoes an earlier rule, allows .ai/ to be versioned, and reports a conflict when .gitignore negates .ai/review-with-docs/', async () => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
       await mkdir(dirname(excludePath), { recursive: true });
-      await writeFile(excludePath, '/.ai/\n!/.ai/\n', 'utf8');
+      await writeFile(excludePath, '/.ai/review-with-docs/\n!/.ai/review-with-docs/\n', 'utf8');
       await initReviewFile('PR 42', { cwd, now: NOW });
-      expect(await readFile(excludePath, 'utf8')).toBe('/.ai/\n!/.ai/\n/.ai/\n');
+      expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n!/.ai/review-with-docs/\n/.ai/review-with-docs/\n');
 
       await rm(join(repo, '.ai'), { recursive: true, force: true });
       await rm(excludePath, { force: true });
-      await writeFile(join(repo, '.gitignore'), '/.ai/\n!docs/review.md\n', 'utf8');
+      await writeFile(join(repo, '.gitignore'), '/.ai/review-with-docs/\n!docs/review.md\n', 'utf8');
       await initReviewFile('PR 42', { cwd, now: NOW });
       expect(existsSync(excludePath)).toBe(false);
 
+      // Un-ignoring .ai/ itself (!/.ai/) so .ai/ can be versioned adds /.ai/review-with-docs/ to .git/info/exclude without conflict.
       await rm(join(repo, '.ai'), { recursive: true, force: true });
+      await writeFile(join(repo, '.gitignore'), '/.ai/\n!/.ai/\n', 'utf8');
+      await initReviewFile('PR 42', { cwd, now: NOW });
+      expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n');
+
+      await rm(join(repo, '.ai'), { recursive: true, force: true });
+      await rm(excludePath, { force: true });
       await writeFile(join(repo, '.gitignore'), '/.ai/\n!/.ai/\n!/.ai/**\n', 'utf8');
       await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
-        `${join(repo, '.gitignore')} negates .ai/, which overrides .git/info/exclude and exposes .ai/ to git`,
+        `${join(repo, '.gitignore')} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
       );
-      expect(await readFile(excludePath, 'utf8')).toBe('/.ai/\n');
+      expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n');
       expect(existsSync(join(repo, '.ai'))).toBe(false);
 
-      await writeFile(join(repo, '.gitignore'), '/.ai/**\n!/.ai/*.md\n', 'utf8');
+      await writeFile(join(repo, '.gitignore'), '/.ai/review-with-docs/**\n!/.ai/review-with-docs/*.md\n', 'utf8');
       await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
-        `${join(repo, '.gitignore')} negates .ai/, which overrides .git/info/exclude and exposes .ai/ to git`,
+        `${join(repo, '.gitignore')} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
       );
     });
 
-    it('writes /.ai/ to the shared common git info/exclude in a linked worktree, or to gitdir/info/exclude when commondir is absent', async () => {
+    it('writes /.ai/review-with-docs/ to the shared common git info/exclude in a linked worktree, or to gitdir/info/exclude when commondir is absent', async () => {
       const commonGit = join(dir, 'main-repo', '.git');
       const worktreeGit = join(commonGit, 'worktrees', 'wt1');
       const worktreeRoot = join(dir, 'wt1');
@@ -691,7 +697,7 @@ describe('initReviewFile', () => {
       await writeFile(join(worktreeGit, 'commondir'), '../..\n', 'utf8');
 
       await initReviewFile('PR 42', { cwd: worktreeRoot, now: NOW });
-      expect(await readFile(join(commonGit, 'info', 'exclude'), 'utf8')).toBe('/.ai/\n');
+      expect(await readFile(join(commonGit, 'info', 'exclude'), 'utf8')).toBe('/.ai/review-with-docs/\n');
       expect(existsSync(join(worktreeGit, 'info', 'exclude'))).toBe(false);
 
       const submoduleGit = join(commonGit, 'modules', 'sub1');
@@ -701,7 +707,7 @@ describe('initReviewFile', () => {
       await writeFile(join(submoduleRoot, '.git'), `gitdir: ../main-repo/.git/modules/sub1\n`, 'utf8');
 
       await initReviewFile('PR 42', { cwd: submoduleRoot, now: NOW });
-      expect(await readFile(join(submoduleGit, 'info', 'exclude'), 'utf8')).toBe('/.ai/\n');
+      expect(await readFile(join(submoduleGit, 'info', 'exclude'), 'utf8')).toBe('/.ai/review-with-docs/\n');
     });
 
     it('makes the file name of a name with markup and punctuation', async () => {
@@ -741,7 +747,7 @@ describe('initReviewFile', () => {
       const before = await readFile(ai('2026-10-09_pr-42_review.sqlite'));
       await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(/already exists.*source of truth.*another name or location with --report/u);
       expect((await readFile(ai('2026-10-09_pr-42_review.sqlite'))).equals(before)).toBe(true);
-      expect(readdirSync(join(repo, '.ai'))).toEqual(['2026-10-09_pr-42_review.md', '2026-10-09_pr-42_review.sqlite']);
+      expect(readdirSync(join(repo, '.ai', 'review-with-docs'))).toEqual(['2026-10-09_pr-42_review.md', '2026-10-09_pr-42_review.sqlite']);
     });
 
     it('creates nothing for a name that no file name can be made of, a blank one, or a bad pull request', async () => {
@@ -749,333 +755,6 @@ describe('initReviewFile', () => {
       await expect(initReviewFile('  ', { cwd, now: NOW })).rejects.toThrow('target is empty');
       await expect(initReviewFile('PR 42', { cwd, now: NOW, pr: 'nope' })).rejects.toThrow('Not a valid URL');
       expect(existsSync(join(repo, '.ai'))).toBe(false);
-    });
-
-    describe('with a session folder', () => {
-      let sessionDir: string;
-      let db: string;
-      let report: string;
-      let sessionDb: string;
-      let sessionReport: string;
-      let wsRoundFile: string;
-      let sessRoundFile: string;
-
-      beforeEach(async () => {
-        sessionDir = join(dir, 'session', 'files');
-        ({ db, report } = await initReviewFile('PR 42', { cwd, now: NOW, sessionDir }));
-        sessionDb = join(sessionDir, '2026-10-09_pr-42_review.sqlite');
-        sessionReport = join(sessionDir, '2026-10-09_pr-42_review.md');
-        wsRoundFile = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
-        sessRoundFile = join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md');
-        await mkdir(dirname(wsRoundFile), { recursive: true });
-        await writeFile(wsRoundFile, 'coverage\n', 'utf8');
-      });
-
-      it('creates the primary database in sessionDir, syncs round files (skipping only hex-suffixed temp files), and restores .ai/ after cleanup', async () => {
-        expect(existsSync(sessionDb)).toBe(true);
-        expect(existsSync(db)).toBe(true);
-
-        const wsTmpNote = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'notes.tmp');
-        const wsInternalTmp = join(repo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md.deadbeef.tmp');
-        await writeFile(wsTmpNote, 'user tmp note\n', 'utf8');
-        await writeFile(wsInternalTmp, 'in-flight link temp\n', 'utf8');
-        await rm(sessionDb);
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 updated' }, result: null }));
-        expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 updated');
-        expect(await readFile(sessRoundFile, 'utf8')).toBe('coverage\n');
-        expect(await readFile(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'notes.tmp'), 'utf8')).toBe('user tmp note\n');
-        expect(existsSync(join(sessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md.deadbeef.tmp'))).toBe(false);
-        await rm(wsInternalTmp);
-
-        await renderReportFile(db, { cwd });
-        expect(await readFile(sessionReport, 'utf8')).toContain('# Review — PR 42 updated');
-
-        await rm(join(repo, '.ai'), { recursive: true, force: true });
-        expect(existsSync(join(repo, '.ai'))).toBe(false);
-        await mutateReviewFile(sessionDb, (data) => ({ data: { ...data, target: 'PR 42 restored' }, result: null }));
-        expect((await loadReviewFile(db)).data.target).toBe('PR 42 restored');
-        expect(existsSync(report)).toBe(true);
-        expect(await readFile(wsRoundFile, 'utf8')).toBe('coverage\n');
-      });
-
-      it('preserves a newer detached round file and always syncs the database from activeDb', async () => {
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 initial' }, result: null }));
-        await rm(sessRoundFile);
-        await writeFile(sessRoundFile, 'newer session coverage\n', 'utf8');
-        const future = new Date(Date.now() + 10_000);
-        await utimes(sessRoundFile, future, future);
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
-        expect(await readFile(wsRoundFile, 'utf8')).toBe('newer session coverage\n');
-
-        const detachedBytes = await readFile(sessionDb);
-        await rm(sessionDb);
-        await writeFile(sessionDb, detachedBytes);
-        await utimes(sessionDb, future, future);
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 active wins' }, result: null }));
-        expect((await loadReviewFile(db)).data.target).toBe('PR 42 active wins');
-        expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 active wins');
-      });
-
-      it('updates workspace_dir and targets the new workspace report when restoring from sessionDir in a new worktree', async () => {
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
-        await rm(repo, { recursive: true, force: true });
-
-        // Mutating sessionDb after the old worktree was removed does not recreate the deleted worktree folder.
-        await mutateReviewFile(sessionDb, (data) => ({ data: { ...data, target: 'PR 42 headless session' }, result: null }));
-        expect(existsSync(repo)).toBe(false);
-        expect(await readFile(sessionReport, 'utf8')).toContain('# Review — PR 42 headless session');
-
-        const newRepo = join(dir, 'new-worktree');
-        await mkdir(join(newRepo, '.git'), { recursive: true });
-        expect(await renderReportFile(sessionDb, { sessionDir, cwd: newRepo })).toEqual({
-          report: join(newRepo, '.ai', '2026-10-09_pr-42_review.md'),
-          action: 'created',
-          databaseChanged: true,
-        });
-        expect(existsSync(repo)).toBe(false);
-        expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);
-        expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.md'))).toBe(true);
-        expect(await readFile(join(newRepo, '.ai', '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
-
-        // Continuing in a new session after .ai/ was cleaned (passing --db <earlier-session>/<stem>.sqlite and
-        // --session-dir <new-session>/files) restores .ai/ and links the new session folder.
-        await rm(join(newRepo, '.ai'), { recursive: true, force: true });
-        const newSessionDir = join(dir, 'session-2', 'files');
-        expect(await renderReportFile(sessionDb, { sessionDir: newSessionDir, cwd: newRepo })).toEqual({
-          report: join(newRepo, '.ai', '2026-10-09_pr-42_review.md'),
-          action: 'created',
-          databaseChanged: true,
-        });
-        expect(existsSync(join(newRepo, '.ai', '2026-10-09_pr-42_review.sqlite'))).toBe(true);
-        expect(existsSync(join(newSessionDir, '2026-10-09_pr-42_review.sqlite'))).toBe(true);
-        expect(await readFile(join(newSessionDir, '2026-10-09_pr-42_review', 'round-1', 'purpose-fit.md'), 'utf8')).toBe('coverage\n');
-
-        // An explicit --report directory in the same repository is preserved when renderReportFile runs on sessionDb.
-        const customReport = join(newRepo, 'docs', 'custom_review.md');
-        const customSessionDb = join(newSessionDir, 'custom_review.sqlite');
-        await initReviewFile('Custom PR', { report: customReport, sessionDir: newSessionDir, cwd: newRepo, now: NOW });
-        expect(await renderReportFile(customSessionDb, { sessionDir: newSessionDir, cwd: newRepo })).toEqual({
-          report: customReport,
-          action: 'unchanged',
-        });
-        await mutateReviewFile(customSessionDb, (data) => ({ data: { ...data, target: 'Custom PR updated' }, result: null }));
-        expect(await readFile(customReport, 'utf8')).toContain('# Review — Custom PR updated');
-      });
-
-      it('compares 64-bit NTFS ino values as bigints', async () => {
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
-        await rm(wsRoundFile);
-        await writeFile(wsRoundFile, 'fresh workspace coverage\n', 'utf8');
-        const newerStill = new Date(Date.now() + 20_000);
-        await utimes(wsRoundFile, newerStill, newerStill);
-        const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-        const inoByPath = new Map<string, bigint>([
-          [wsRoundFile, 17169973581500551n],
-          [sessRoundFile, 17169973581500552n],
-        ]);
-        vi.mocked(stat).mockImplementation((async (targetPath, options) => {
-          const fakeIno = inoByPath.get(String(targetPath));
-          if (options?.bigint) {
-            const info = await actualFs.stat(targetPath, { bigint: true });
-            return fakeIno === undefined ? info : Object.assign(info, { dev: 1n, ino: fakeIno });
-          }
-          const info = await actualFs.stat(targetPath);
-          return fakeIno === undefined ? info : Object.assign(info, { dev: 1, ino: Number(fakeIno) });
-        }) as typeof stat);
-        try {
-          await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 bigint ino' }, result: null }));
-        } finally {
-          vi.mocked(stat).mockImplementation(actualFs.stat);
-        }
-        expect(await readFile(sessRoundFile, 'utf8')).toBe('fresh workspace coverage\n');
-      });
-
-      it('preserves divergent equal-timestamp copies and re-links identical equal-timestamp copies', async () => {
-        const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 synced' }, result: null }));
-        await rm(wsRoundFile);
-        await rm(sessRoundFile);
-        await writeFile(wsRoundFile, 'workspace tie content\n', 'utf8');
-        await writeFile(sessRoundFile, 'session tie content\n', 'utf8');
-        const tiedTime = new Date(Date.now() + 30_000);
-        await utimes(wsRoundFile, tiedTime, tiedTime);
-        await utimes(sessRoundFile, tiedTime, tiedTime);
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 tied mtime' }, result: null }));
-        expect(await readFile(wsRoundFile, 'utf8')).toBe('workspace tie content\n');
-        expect(await readFile(sessRoundFile, 'utf8')).toBe('session tie content\n');
-
-        await writeFile(sessRoundFile, 'workspace tie content\n', 'utf8');
-        await utimes(wsRoundFile, tiedTime, tiedTime);
-        await utimes(sessRoundFile, tiedTime, tiedTime);
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 tied identical' }, result: null }));
-        const [wsStatAfter, sessStatAfter] = await Promise.all([
-          actualFs.stat(wsRoundFile, { bigint: true }),
-          actualFs.stat(sessRoundFile, { bigint: true }),
-        ]);
-        expect(wsStatAfter.ino).toBe(sessStatAfter.ino);
-      });
-
-      it('falls back to in-place copyFile when rename fails with EPERM or EBUSY', async () => {
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 initial' }, result: null }));
-        await rm(sessRoundFile);
-        await writeFile(sessRoundFile, 'stale open viewer copy\n', 'utf8');
-        await writeFile(wsRoundFile, 'updated while viewer open\n', 'utf8');
-        const future = new Date(Date.now() + 10_000);
-        await utimes(wsRoundFile, future, future);
-        vi.mocked(rename).mockRejectedValueOnce(failure('EPERM')).mockRejectedValueOnce(failure('EBUSY'));
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 open viewer fallback' }, result: null }));
-        expect(await readFile(sessRoundFile, 'utf8')).toBe('updated while viewer open\n');
-      });
-
-      it('uses VACUUM INTO on cross-volume EXDEV fallback so uncommitted cache-spilled pages are not copied', async () => {
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'PR 42 committed' }, result: null }));
-        await rm(sessionDb);
-        // DatabaseSync VACUUM INTO blocks the parent thread in sqlite3 busy_timeout until the child releases its lock.
-        const spillScript = `
-          const { DatabaseSync } = require('node:sqlite');
-          const h = new DatabaseSync(process.argv[1]);
-          h.exec('BEGIN IMMEDIATE');
-          h.exec("UPDATE review SET target = 'Uncommitted spilled target'");
-          h.exec("INSERT INTO meta (key, value) VALUES ('spill', hex(zeroblob(2000000)))");
-          console.log('spilled');
-          setTimeout(() => {
-            h.exec('ROLLBACK');
-            h.close();
-          }, 50);
-        `;
-        let spillerExited: Promise<unknown> | undefined;
-        vi.mocked(link).mockImplementationOnce(async () => {
-          const spiller = spawn(process.execPath, [...NODE_FLAGS, '-e', spillScript, db], { stdio: ['ignore', 'pipe', 'inherit'] });
-          spillerExited = once(spiller, 'exit');
-          await once(spiller.stdout, 'data');
-          throw failure('EXDEV');
-        });
-        try {
-          await renderReportFile(db, { sessionDir, cwd });
-        } finally {
-          await spillerExited;
-        }
-        expect((await loadReviewFile(sessionDb)).data.target).toBe('PR 42 committed');
-      });
-
-      it.each(['ENOTSUP', 'EOPNOTSUPP', 'EMLINK', 'EINVAL', 'UNKNOWN'])(
-        'falls back to copying and snapshot when link fails with %s',
-        async (code) => {
-          await rm(sessionDb);
-          await writeFile(wsRoundFile, `fallback ${code}\n`, 'utf8');
-          vi.mocked(link).mockRejectedValueOnce(failure(code)).mockRejectedValueOnce(failure(code));
-          await renderReportFile(db, { sessionDir, cwd });
-          expect(await readFile(sessRoundFile, 'utf8')).toBe(`fallback ${code}\n`);
-        },
-      );
-
-      it('re-snapshots on cross-volume VACUUM INTO when a delayed syncReviewFile finishes after a newer changeReviewState', async () => {
-        const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-        await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
-        await rm(sessionDb);
-        let releaseFirstRename!: () => void;
-        const firstRenamePaused = new Promise<void>((resolve) => {
-          releaseFirstRename = resolve;
-        });
-        let firstRenameSeen!: () => void;
-        const reachedFirstRename = new Promise<void>((resolve) => {
-          firstRenameSeen = resolve;
-        });
-        let pausedOnce = false;
-        vi.mocked(link).mockImplementation(async (src, dst) => {
-          if (String(src).endsWith('.sqlite') || String(dst).includes('.sqlite')) throw failure('EXDEV');
-          return actualFs.link(src, dst);
-        });
-        vi.mocked(rename).mockImplementation(async (oldPath, newPath) => {
-          if (!pausedOnce && String(newPath) === sessionDb) {
-            pausedOnce = true;
-            firstRenameSeen();
-            await firstRenamePaused;
-          }
-          return actualFs.rename(oldPath, newPath);
-        });
-        try {
-          const syncPromise = syncReviewFile(db, snapshotOf(['c1', 'c2']));
-          await reachedFirstRename;
-          await changeReviewState(db, (state) => ({ state: linkNote(state, 'c2', 'Keep this classification'), result: null }));
-          releaseFirstRename();
-          await syncPromise;
-        } finally {
-          vi.mocked(link).mockImplementation(actualFs.link);
-          vi.mocked(rename).mockImplementation(actualFs.rename);
-        }
-        expect((await loadReviewFile(sessionDb)).links).toEqual([{ ref: 'c2', role: 'note', note: 'Keep this classification' }]);
-      });
-
-      it('routes cross-volume sessionDb mutations to workspaceDb so concurrent updates serialize on one lock', async () => {
-        const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-        await rm(sessionDb);
-        vi.mocked(link).mockImplementation(async (src, dst) => {
-          if (String(src).endsWith('.sqlite') || String(dst).includes('.sqlite')) throw failure('EXDEV');
-          return actualFs.link(src, dst);
-        });
-        try {
-          await mutateReviewFile(db, (data) => ({
-            data: openRound(data, { revision: '11111111', base: null }),
-            result: null,
-          }));
-          const [wsResult, sessResult] = await Promise.all([
-            mutateReviewFile(db, (data) => ({
-              data: updateRound(data, { text: 'Workspace accepted note' }),
-              result: null,
-            })),
-            mutateReviewFile(sessionDb, (data) => ({
-              data: updateRound(data, { text: 'Session accepted note' }),
-              result: null,
-            })),
-          ]);
-          expect([wsResult.result, sessResult.result]).toEqual([null, null]);
-        } finally {
-          vi.mocked(link).mockImplementation(actualFs.link);
-        }
-        const finalWsText = (await loadReviewFile(db)).data.intro.reviewed.items[0]?.text ?? '';
-        const finalSessText = (await loadReviewFile(sessionDb)).data.intro.reviewed.items[0]?.text ?? '';
-        expect(finalWsText).toContain('Workspace accepted note');
-        expect(finalWsText).toContain('Session accepted note');
-        expect(finalSessText).toBe(finalWsText);
-      });
-
-      it('prevents uncommitted cache spill on openReviewDb writers when a writer crashes and .ai/ is deleted', async () => {
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Committed target' }, result: null }));
-        const openDbCrash = `
-          const [storeUrl, targetDb] = process.argv.slice(1);
-          const { openReviewDb } = await import(storeUrl);
-          const h = openReviewDb(targetDb, 'existing');
-          h.exec('BEGIN IMMEDIATE');
-          h.exec("UPDATE review SET target = 'Uncommitted target'");
-          h.exec("INSERT INTO meta (key, value) VALUES ('big', '" + 'x'.repeat(4 * 1024 * 1024) + "')");
-          process.exit(9);
-        `;
-        const storeUrl = new URL('./review-store.ts', import.meta.url).href;
-        await runNode(['--input-type=module', '-e', openDbCrash, storeUrl, db]);
-        await rm(join(repo, '.ai'), { recursive: true, force: true });
-        await renderReportFile(sessionDb, { sessionDir, cwd });
-        expect((await loadReviewFile(db)).data.target).toBe('Committed target');
-        expect((await loadReviewFile(sessionDb)).data.target).toBe('Committed target');
-      });
-
-      it('reconciles a peer hot rollback journal left by an external raw SQLite crash before mutating the other path', async () => {
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Committed target' }, result: null }));
-        const rawCrash = `
-          const { DatabaseSync } = require('node:sqlite');
-          const h = new DatabaseSync(process.argv[1]);
-          h.exec('BEGIN IMMEDIATE');
-          h.exec("UPDATE review SET target = 'Uncommitted raw target'");
-          h.exec("INSERT INTO meta (key, value) VALUES ('rawbig', '" + 'y'.repeat(8 * 1024 * 1024) + "')");
-          process.exit(9);
-        `;
-        await runNode(['-e', rawCrash, sessionDb]);
-        expect(existsSync(`${sessionDb}-journal`)).toBe(true);
-        await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Next committed target' }, result: null }));
-        expect(existsSync(`${sessionDb}-journal`)).toBe(false);
-        expect((await loadReviewFile(sessionDb)).data.target).toBe('Next committed target');
-        expect((await loadReviewFile(db)).data.target).toBe('Next committed target');
-      });
     });
   });
 
@@ -1105,14 +784,6 @@ describe('initReviewFile', () => {
       await expect(initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW })).rejects.toThrow('source of truth');
       expect(await readFile(join(dir, 'r.sqlite'), 'utf8')).toBe('precious');
       expect(listing()).toEqual(['r.sqlite']);
-
-      await rm(join(dir, 'r.sqlite'));
-      const sessionDir = join(dir, 'session');
-      await rivalAppearsWhileBuilding();
-      await expect(initReviewFile('PR 42', { report: join(dir, 'r.md'), sessionDir, now: NOW })).rejects.toThrow('source of truth');
-      expect(await readFile(join(dir, 'r.sqlite'), 'utf8')).toBe('precious');
-      expect(existsSync(join(sessionDir, 'r.sqlite'))).toBe(false);
-      expect(existsSync(join(dir, 'r.md'))).toBe(false);
     });
 
     it('publishes with a rename where the file system has no hard links', async () => {

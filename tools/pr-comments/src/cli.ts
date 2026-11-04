@@ -14,7 +14,6 @@ import type { PublishAction, PublishComment, PublishHooks, PublishOptions, Publi
 import { replyToComment } from './reply.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult, ReplyTarget } from './reply.ts';
 import type { Anchor } from './report-extract.ts';
-import { discoverReview } from './review-discover.ts';
 import {
   changeReviewState,
   dumpReviewFile,
@@ -113,7 +112,6 @@ interface Values {
   db?: string;
   report?: string;
   pr?: string;
-  'session-dir'?: string;
   out?: string;
   author?: string[];
   ref?: string[];
@@ -283,7 +281,6 @@ async function initReview({ env, args: [name = ''], values }: Context): Promise<
     report: values.report,
     db: values.db,
     pr: values.pr,
-    sessionDir: optional('--session-dir', values['session-dir']),
     now: env.now(),
     cwd: env.cwd(),
   });
@@ -552,13 +549,10 @@ async function replyToLinked({ env, args: [ref = ''], values }: Context, db: str
 }
 
 async function renderReview({ env, values }: Context, db: string): Promise<number> {
-  const { report, action, databaseChanged } = await renderReportFile(db, {
+  const { report, action } = await renderReportFile(db, {
     out: values.out,
-    sessionDir: optional('--session-dir', values['session-dir']),
-    cwd: env.cwd(),
   });
   env.print(`${action.padEnd(ACTION_WIDTH)} ${report}\n`);
-  if (databaseChanged) env.warn(`Review database: ${shownPath(db, env.cwd())}\n`);
   return 0;
 }
 
@@ -696,8 +690,7 @@ const DEFINITIONS: Command[] = [
     args: [{ name: '<name>', description: 'what is under review; the title of the report (a slug of it names the files by default)' }],
     options: [
       { name: 'pr', value: '<url>', description: 'connect the review to this pull request' },
-      { name: 'session-dir', value: '<dir>', description: 'store the primary review files in this session folder and hard-link them into .ai/' },
-      { name: 'report', value: '<file.md>', description: 'the report (.md) or the database (.sqlite) to create (default: .ai/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)' },
+      { name: 'report', value: '<file.md>', description: 'the report (.md) or the database (.sqlite) to create (default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)' },
       { name: 'db', value: '<file.sqlite>', description: 'the database to create (default: next to the report)' },
     ],
     database: 'none',
@@ -957,12 +950,11 @@ const DEFINITIONS: Command[] = [
     summary: 'writes the review report',
     description: [
       'Writes the markdown report of the review, made from the database, and says whether the file was created, updated or',
-      'left unchanged. It writes the report (updating the database only when --session-dir changes the session or workspace directory), and never over a SQLite file.',
+      'left unchanged. It writes only the report, never the database, and never over a SQLite file.',
     ],
     args: [],
     options: [
       { name: 'out', value: '<file.md>', description: 'the report file (default: next to the database, <stem>.md)' },
-      { name: 'session-dir', value: '<dir>', description: 'store the primary review files in this session folder and hard-link them into .ai/' },
     ],
     database: 'readonly',
     example: 'pr-comments report render',
@@ -1017,12 +1009,15 @@ const DEFINITIONS: Command[] = [
 const DB_OPTION: OptionSpec = {
   name: 'db',
   value: '<file.sqlite>',
-  description: 'the review database (default: the only one found under the git root)',
+  description: 'the review database',
+  required: true,
 };
 
 // Every command but the one that creates the database takes `--db`.
 export const COMMANDS: Command[] = DEFINITIONS.map((command) =>
-  command.database === 'none' ? command : { ...command, options: [...command.options, DB_OPTION] },
+  command.database === 'none'
+    ? command
+    : { ...command, options: [...command.options, DB_OPTION], example: `${command.example} --db review.sqlite` },
 );
 
 const GROUPS: Record<string, string> = {
@@ -1131,8 +1126,7 @@ function overviewHelp(): string {
     '',
     ...sections.flatMap(([title, commands]) => [title, ...rows(commands), '']),
     'Run "pr-comments <command> --help" (or "pr-comments help <command>") for the options and an example of a command.',
-    'Every command but init works on the review database named by --db <file.sqlite>, or else on the one found',
-    'under the git root. "pr-comments --version" prints the version.',
+    'Every command but init works on the review database named by --db <file.sqlite>. "pr-comments --version" prints the version.',
   ].join('\n')}\n`;
 }
 
@@ -1216,7 +1210,7 @@ function parseStrictly(command: Command | Helping, argv: string[]) {
 
 // The options that were given, once they were checked against the command: each one is accepted, none is repeated
 // unless it may be, and the required ones are there.
-function checkedOptions(command: Command | Helping, parsed: ReturnType<typeof parseStrictly>): void {
+function checkedOptions(command: Command | Helping, parsed: ReturnType<typeof parseStrictly>): Set<string> {
   const given = new Set<string>();
   for (const token of parsed.tokens) {
     if (token.kind !== 'option') continue;
@@ -1226,7 +1220,7 @@ function checkedOptions(command: Command | Helping, parsed: ReturnType<typeof pa
     given.add(token.name);
   }
   for (const { name, required } of command.options) {
-    if (required && !given.has(name)) throw usageError(command, `--${name} is required`);
+    if (required && name !== 'db' && !given.has(name)) throw usageError(command, `--${name} is required`);
   }
   if (command.oneOf) {
     const [first, second] = command.oneOf;
@@ -1237,15 +1231,19 @@ function checkedOptions(command: Command | Helping, parsed: ReturnType<typeof pa
       throw usageError(command, `${text(first)} or ${text(second)} is required`);
     }
   }
+  return given;
 }
 
 // The positional arguments after the words of the command, once the options and arguments were checked against it.
 function checkedArguments(command: Command, parsed: ReturnType<typeof parseStrictly>): string[] {
-  checkedOptions(command, parsed);
+  const given = checkedOptions(command, parsed);
   const args = parsed.positionals.slice(command.words.split(' ').length);
   const missing = command.args.filter(({ optional: skippable }) => !skippable)[args.length];
   if (missing !== undefined) throw usageError(command, `missing ${missing.name}`);
   if (args.length > command.args.length) throw usageError(command, `unexpected argument "${args[command.args.length]}"`);
+  if (command.options.some(({ name, required }) => name === 'db' && required) && !given.has('db')) {
+    throw usageError(command, '--db is required');
+  }
   return args;
 }
 
@@ -1259,7 +1257,7 @@ async function execute(command: Command, argv: string[], env: CliEnvironment): P
   const context = { env, args, values };
   if (command.database === 'none') return command.run(context);
 
-  const db = values.db ?? (await discoverReview(env.cwd(), optional('--session-dir', values['session-dir'])));
+  const db = need('--db', values.db);
   const outcome = await command.run(context, db);
   const code = outcome === 'unchanged' ? 0 : outcome;
   if (outcome === 0 && command.database === 'change' && !values['dry-run']) env.warn(`Review database: ${shownPath(db, env.cwd())}\n`);

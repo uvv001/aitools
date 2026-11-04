@@ -265,24 +265,17 @@ describe('bundle', () => {
     expect(text).toContain(`Round 1 — \`${head}\`, base none`);
   });
 
-  it('finds the one review of the working tree when --db is not given', async () => {
+  it('requires --db on commands that work on an existing review', async () => {
     const tree = join(work, 'tree');
     await makeRepository(tree);
-    await mkdir(join(tree, 'docs'), { recursive: true });
-    await bundled(['init', 'Demo', '--report', join(tree, 'docs', 'demo_review.md'), '--pr', prUrl], tree);
+    await bundled(['init', 'Demo', '--pr', prUrl], tree);
 
-    const found = await bundled(['pr', 'show'], tree);
-    expect(found).toMatchObject({ code: 0, stdout: `${prUrl}\nnot synced yet; run "pr-comments pr sync"\n`, stderr: '' });
-
-    const round = await bundled(['round', 'open', '--no-base'], tree);
-    expect(round).toMatchObject({ code: 0, stdout: 'Round 1 opened\n', stderr: `Review database: ${join('docs', 'demo_review.sqlite')}\n` });
-
-    await bundled(['init', 'Another', '--report', join(tree, 'docs', 'another_review.md')], tree);
-    const several = await bundled(['finding', 'list'], tree);
-    expect(several.code).toBe(1);
-    expect(several.stdout).toBe('');
-    expect(several.stderr).toContain('several review databases found under');
-    expect(several.stderr).toContain('  docs/another_review.sqlite\n  docs/demo_review.sqlite\n');
+    for (const args of [['pr', 'show'], ['round', 'open', '--no-base'], ['finding', 'list'], ['report', 'render']]) {
+      const result = await bundled(args, tree);
+      expect(result.code, args.join(' ')).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('--db is required');
+    }
   });
 
   it('fails with the message and exit code 1 on a database that does not exist, creating nothing', async () => {

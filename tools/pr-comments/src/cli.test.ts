@@ -221,7 +221,15 @@ describe('cli', () => {
   const step = async (...args: string[]) => {
     printed = '';
     warned = '';
-    return run(args, env);
+    const hasDb = args.some((arg) => arg === '--db' || arg.startsWith('--db=') || arg === '--help' || arg === '-h');
+    const needsDb =
+      !hasDb &&
+      args[0] !== 'help' &&
+      DATABASE_COMMANDS.some((words) => {
+        const parts = words.split(' ');
+        return parts.every((part, idx) => args[idx] === part);
+      });
+    return run(needsDb ? ['--db', review, ...args] : args, env);
   };
   const exists = (path: string) => access(path).then(() => true, () => false);
   const bytes = () => readFile(review);
@@ -315,15 +323,38 @@ describe('cli', () => {
       }
     });
 
-    it('declares only --author and --ref as repeatable, only the finding texts as required, and the base of a round as one of two', () => {
+    it('declares only --author and --ref as repeatable, the finding texts and --db as required, and the base of a round as one of two', () => {
       const flagged = (key: 'repeatable' | 'required') =>
         COMMANDS.flatMap(({ words, options }) => options.filter((option) => option[key]).map(({ name }) => `${words} --${name}`));
       expect(flagged('repeatable')).toEqual(['report comments --author', 'report comments --ref']);
       expect(flagged('required')).toEqual([
+        'pr connect --db',
+        'pr show --db',
+        'pr sync --db',
+        'round open --db',
+        'round update --db',
         'finding add --severity',
         'finding add --title',
         'finding add --description-file',
+        'finding add --db',
+        'finding list --db',
+        'finding show --db',
+        'finding set-state --db',
+        'finding set-severity --db',
+        'finding set-title --db',
         'finding set-description --description-file',
+        'finding set-description --db',
+        'finding update --db',
+        'finding post --db',
+        'link pending --db',
+        'link own --db',
+        'link duplicate --db',
+        'link note --db',
+        'link remove --db',
+        'link reply --db',
+        'report render --db',
+        'report comments --db',
+        'report dump --db',
       ]);
       expect(COMMANDS.filter(({ oneOf }) => oneOf).map(({ words, oneOf }) => [words, oneOf])).toEqual([['round open', ['base', 'no-base']]]);
     });
@@ -341,22 +372,22 @@ describe('cli', () => {
 
     it('writes the usage line of a command from its table entry', () => {
       expect(synopsis(command('init'))).toBe(
-        'pr-comments init <name> [--pr <url>] [--session-dir <dir>] [--report <file.md>] [--db <file.sqlite>]',
+        'pr-comments init <name> [--pr <url>] [--report <file.md>] [--db <file.sqlite>]',
       );
       expect(synopsis(command('round open'))).toBe(
-        'pr-comments round open [--revision <rev>] (--base <rev> | --no-base) [--note <text>] [--db <file.sqlite>]',
+        'pr-comments round open [--revision <rev>] (--base <rev> | --no-base) [--note <text>] --db <file.sqlite>',
       );
       expect(synopsis(command('finding add'))).toBe(
-        'pr-comments finding add --severity <high|medium|low> --title <text> --description-file <file|-> [--unverified] [--note <text>] [--json] [--db <file.sqlite>]',
+        'pr-comments finding add --severity <high|medium|low> --title <text> --description-file <file|-> [--unverified] [--note <text>] [--json] --db <file.sqlite>',
       );
       expect(synopsis(command('finding set-state'))).toBe(
-        'pr-comments finding set-state <finding> <state> [--revision <rev>] [--note <text>] [--round <n>] [--db <file.sqlite>]',
+        'pr-comments finding set-state <finding> <state> [--revision <rev>] [--note <text>] [--round <n>] --db <file.sqlite>',
       );
       expect(synopsis(command('finding post'))).toBe(
-        'pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] [--json] [--db <file.sqlite>]',
+        'pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] [--json] --db <file.sqlite>',
       );
       expect(synopsis(command('report comments'))).toBe(
-        'pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] [--db <file.sqlite>]',
+        'pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] --db <file.sqlite>',
       );
     });
 
@@ -427,7 +458,7 @@ describe('cli', () => {
     it('says the default of init in the words of what it does: a slug of the name', async () => {
       await step('init', '--help');
 
-      expect(printed).toContain('(default: .ai/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)');
+      expect(printed).toContain('(default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)');
       expect(printed).toContain('the title of the report (a slug of it names the files by default)');
       expect(printed).toContain('--report and --db may both be given only if they agree');
       for (const { words, args, options, summary, description } of COMMANDS) {
@@ -729,100 +760,28 @@ describe('cli', () => {
     });
 
     describe('without --db', () => {
-      let repo: string;
-      let found: string;
+      it.each(DATABASE_COMMANDS)('requires --db for %s, and changes nothing', async (words) => {
+        const before = await bytes();
+        const listing = await tree();
+        printed = '';
+        warned = '';
 
-      // A folder with a `.git` is the git root, below the one of `work`, so the search stays inside it.
-      const tree = async () => (await readdir(repo, { recursive: true })).sort();
-
-      beforeEach(async () => {
-        repo = join(work, 'repo');
-        found = join(repo, 'docs', 'chain_review.sqlite');
-        await mkdir(join(repo, '.git'), { recursive: true });
-        await mkdir(join(repo, 'docs'));
-        await mkdir(join(repo, 'src'));
-        await copyFile(template, found);
-        env.cwd = () => repo;
-      });
-
-      it('uses the one review of the working tree, for the commands that change it and the ones that read it', async () => {
-        await step('finding', 'update', 'F3', 'a note');
-        expect(printed).toBe('F3: note added\n');
-        expect(warned).toBe(`Review database: ${join('docs', 'chain_review.sqlite')}\n`);
-
-        await step('finding', 'list', '--state', 'approved');
-        expect(printed).toBe('F1  ✅ 🔴  Missing timeout\nF2  ✅ 🟡  Remark\n2 of 3 findings\n');
-        expect(warned).toBe('');
-        await step('report', 'dump');
-        expect(printed).toBe(await dumpReviewFile(found));
-        await step('report', 'render');
-        expect(printed).toBe(`unchanged ${join(repo, 'docs', 'chain_review.md')}\n`);
-        const { data } = await loadReviewFile(found);
-        expect(data.findings.find(({ id }) => id === 'F3')?.updates.at(-1)?.text).toBe(`${STAMP} — a note`);
-      });
-
-      it('finds it from a folder below the root, and names it by its absolute path when that is not below the working directory', async () => {
-        env.cwd = () => join(repo, 'src');
-
-        await step('finding', 'update', 'F3', 'a note');
-
-        expect(warned).toBe(`Review database: ${found}\n`);
-      });
-
-      it('does not count a file that is no review database, or a name that is no review', async () => {
-        await writeFile(join(repo, 'docs', 'junk_review.sqlite'), 'not a database', 'utf8');
-        await writeFile(join(repo, 'docs', 'preview.sqlite'), 'not a database', 'utf8');
-
-        expect(await step('finding', 'list')).toBe(0);
-
-        expect(printed).toContain('3 of 3 findings');
-      });
-
-      it.each(DATABASE_COMMANDS)('is an error for %s when there is no review database, and nothing is created', async (words) => {
-        await rm(found);
-        const before = await tree();
-
-        await expect(step(...valid(words))).rejects.toThrow(
-          `no review database found under ${repo}; start one with "pr-comments init <name>" or name it with --db <file.sqlite>`,
-        );
+        await expect(run(valid(words), env)).rejects.toThrow(mistake(words, '--db is required'));
 
         expect(printed).toBe('');
         expect(warned).toBe('');
-        expect(await tree()).toEqual(before);
-      });
-
-      it.each(DATABASE_COMMANDS)('is an error for %s when there are several, and changes nothing', async (words) => {
-        const other = join(repo, 'docs', 'other_review.sqlite');
-        await copyFile(template, other);
-        const before = [await readFile(found), await readFile(other)];
-        const listing = await tree();
-
-        await expect(step(...valid(words))).rejects.toThrow(
-          `several review databases found under ${repo}; choose one with --db <file.sqlite>:\n  docs/chain_review.sqlite\n  docs/other_review.sqlite`,
-        );
-
-        expect([await readFile(found), await readFile(other)]).toEqual(before);
+        expect((await bytes()).equals(before)).toBe(true);
         expect(await tree()).toEqual(listing);
       });
 
-      it('takes the review that --db names when there are several', async () => {
-        const other = join(repo, 'docs', 'other_review.sqlite');
-        await copyFile(template, other);
-        const untouched = await readFile(other);
+      it('is not asked for by init, which creates a database in .ai/review-with-docs/', async () => {
+        const repo = join(work, 'repo');
+        await mkdir(join(repo, '.git'), { recursive: true });
+        env.cwd = () => repo;
 
-        expect(await step('finding', 'update', '--db', found, 'F3', 'a note')).toBe(0);
+        expect(await run(['init', 'PR 44'], env)).toBe(0);
 
-        expect(warned).toBe(`Review database: ${join('docs', 'chain_review.sqlite')}\n`);
-        expect(await readFile(other)).toEqual(untouched);
-      });
-
-      it('is not asked for by init, which creates a database', async () => {
-        const other = join(repo, 'docs', 'other_review.sqlite');
-        await copyFile(template, other);
-
-        expect(await step('init', 'PR 44')).toBe(0);
-
-        expect(await exists(join(repo, '.ai', '2026-10-09_pr-44_review.sqlite'))).toBe(true);
+        expect(await exists(join(repo, '.ai', 'review-with-docs', '2026-10-09_pr-44_review.sqlite'))).toBe(true);
         expect(warned).toBe('');
       });
     });
@@ -983,14 +942,14 @@ describe('cli', () => {
       expect((await loadReviewFile(named)).pullRequest).toBe(prUrl);
     });
 
-    it('creates .ai/<yyyy-mm-dd>_<slug>_review.sqlite at the git root without --report, shown relative to the working directory', async () => {
+    it('creates .ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite at the git root without --report, shown relative to the working directory', async () => {
       const repo = join(work, 'repo');
       await mkdir(join(repo, '.git'), { recursive: true });
       env.cwd = () => repo;
 
       expect(await step('init', 'PR 42 — tenant registry')).toBe(0);
 
-      const db = join(repo, '.ai', '2026-10-09_pr-42-tenant-registry_review.sqlite');
+      const db = join(repo, '.ai', 'review-with-docs', '2026-10-09_pr-42-tenant-registry_review.sqlite');
       const below = relative(repo, db);
       const belowReport = relative(repo, reviewPaths(db).report);
       expect(printed).toBe(`Created ${below}\nReport: ${belowReport}\n`);
@@ -1782,26 +1741,6 @@ describe('cli', () => {
         expect(printed).toBe(`created   ${out}\n`);
         expect(await readFile(out, 'utf8')).toBe(renderReport((await loaded()).data));
         expect(await exists(report())).toBe(false);
-      });
-
-      it('prints the Review database notice when --session-dir updates the stored directories, and not when they are unchanged', async () => {
-        const sessionDir = join(work, 'session', 'files');
-
-        expect(await step('report', 'render', '--session-dir', sessionDir)).toBe(0);
-        expect(printed).toBe(`created   ${report()}\n`);
-        expect(warned).toBe(line());
-
-        expect(await step('report', 'render', '--session-dir', sessionDir)).toBe(0);
-        expect(printed).toBe(`unchanged ${report()}\n`);
-        expect(warned).toBe('');
-      });
-
-      it.runIf(process.platform === 'win32')('does not print the Review database notice when --session-dir differs only in path case on Windows', async () => {
-        await step('report', 'render', '--session-dir', join(work, 'session', 'files'));
-
-        expect(await step('report', 'render', '--session-dir', join(work, 'SESSION', 'FILES'))).toBe(0);
-        expect(printed).toBe(`unchanged ${report()}\n`);
-        expect(warned).toBe('');
       });
 
       it('never writes over the database, another SQLite file or a name that is none, and leaves them as they were', async () => {

@@ -23,7 +23,7 @@ Node 24.2, TypeScript run directly by Node (type stripping), the built-in `node:
 | Area | Files |
 | --- | --- |
 | Command line | `src/cli.ts`: one table of commands, strict arguments, the help texts, one function per command |
-| Review database | `review-store.ts` (schema, open modes, transactions), `store.ts` (the pull request snapshot, `linkable`), `review-files.ts` (init, render, sync, `changeReviewState`), `review-discover.ts`, `review-naming.ts`, `review-dump.ts` |
+| Review database | `review-store.ts` (schema, open modes, transactions), `store.ts` (the pull request snapshot, `linkable`), `review-files.ts` (init, render, sync, `changeReviewState`), `review-naming.ts`, `review-dump.ts` |
 | Review model | `review-model.ts`, `review-ops.ts` (pure changes of a review), `review-links.ts` (rules of the links), `review-view.ts` (list and show), `review-pending.ts` (the list of `link pending`) |
 | Report | `review-render.ts` (writes it), `report-parse.ts` and `review-read.ts` (read it), `report-dashboard.ts` |
 | GitHub | `github.ts` (GraphQL reads, check runs), `rest.ts`, `publish.ts` (comment engine), `reply.ts` (reply engine), `review-post.ts` and `review-reply.ts` (glue between the engines and the database), `download.ts`, `token.ts`, `token-memo.ts` |
@@ -38,22 +38,15 @@ Every module that changes a review is pure: it takes the review (and links) and 
 ### 2.1 The file
 
 - One SQLite file holds one review: the findings, the rounds, the links, and the downloaded pull request.
-- Its name ends in `.sqlite`. The default is `<yyyy-mm-dd>_<slug>_review.sqlite` in `.ai/` at the git root, next to the report `….md`, and `.ai/` is added to `.git/info/exclude` when not already ignored. `--db` must end in `.sqlite`.
-- When `--session-dir <dir>` is given on `init` (or `report render`), the primary file lives in `<dir>` and is hard-linked (or copied across volumes) with the report and `<stem>/round-<n>/**` folders into `.ai/` on every database change and `report render`.
+- Its name ends in `.sqlite`. The default on `init` (when neither `--db` nor `--report` is given) is `<yyyy-mm-dd>_<slug>_review.sqlite` in `.ai/review-with-docs/` at the git root, next to the report `….md`, and `/.ai/review-with-docs/` is added to `.git/info/exclude` when not already ignored (while `.ai/` itself can be versioned). `--db <file.sqlite>` is required on every command except `init`, and must end in `.sqlite`.
 - Only `init` creates it. It creates the file with an exclusive flag, builds it under a temporary name (`<path>.<8 hex digits>.tmp`), and publishes it with an exclusive hard link (a rename where the file system has no hard links). A crash leaves at most a `.tmp` file, never half a database.
 - Every other command opens an existing file. A missing file is `<path> does not exist`. Nothing is created as a side effect.
-- The file uses a rollback journal (`journal_mode = DELETE`) with `cache_spill = OFF`. There is no `-wal` or `-shm` file. Uncommitted pages stay in memory until commit, and any hot `-journal` file left by a crashed writer on either hard-linked path is reconciled before the next command opens the database.
+- The file uses a rollback journal (`journal_mode = DELETE`) with `cache_spill = OFF`. There is no `-wal` or `-shm` file. Uncommitted pages stay in memory until commit, and a `-journal` file exists only while a command commits.
 - `foreign_keys = ON` on every connection. The review tables are `STRICT`.
 - `PRAGMA user_version` holds the schema version, now 5 (`REVIEW_SCHEMA_VERSION`). There is no migration. An older database (version 4 included) is refused with `<path> was written by an older pr-comments (schema <n>); start again with "pr-comments init"`. A newer one is refused with `… was written by a newer pr-comments (schema <n>); update the tool`. A SQLite file without the review tables is `<path> is not a review database`.
-- Meta keys: `pull_request` (the connected pull request, canonical URL), `session_dir` (the primary session directory), and `workspace_dir` (the `.ai/` directory in the working tree).
+- Meta keys: `pull_request` (the connected pull request, canonical URL).
 
-### 2.2 Finding the database
-
-Without `--db`, the search root is the git repository that contains the working directory (found by looking for `.git` up the tree; no git process). Outside a repository it is the working directory.
-
-The search goes down `.ai/` and every folder except `.git`, `node_modules` and other folders that start with `.` (falling back to `--session-dir` when none is found in the working tree). It does not follow symbolic links. A file counts when its name ends in `review.sqlite` (any case) and it really has the review tables (opened read-only, so nothing is written to a file that only looks like a review). Exactly one must be found. None or several is an error that says to use `init` or `--db`; several are listed.
-
-### 2.3 Tables
+### 2.2 Tables
 
 The review half:
 
@@ -116,19 +109,19 @@ The rules in these tables:
 - The foreign key from a link to its finding is deferred. `saveReview` deletes all findings and inserts them again, so the key is checked when the transaction commits.
 - `gone = 1` marks a row that the last sync did not find while a link still names it.
 
-### 2.4 Reading and writing
+### 2.3 Reading and writing
 
 | Mode | Commands |
 | --- | --- |
 | Creates the database | `init` |
-| Opens it read-only | `finding list`, `finding show`, `link pending`, `pr show`, `report render` (writes only the report file, unless `--session-dir` updates the session or workspace directory), `report comments` (writes only `--out`), `report dump`. Also the discovery, and the loading step of `finding post` and `link reply` |
+| Opens it read-only | `finding list`, `finding show`, `link pending`, `pr show`, `report render` (writes only the report file), `report comments` (writes only `--out`), `report dump`. Also the loading step of `finding post` and `link reply` |
 | Writes it | `pr connect`, `pr sync`, `round open`, `round update`, `finding add`, `finding set-state|set-severity|set-title|set-description`, `finding update`, `finding post`, `link own|duplicate|note|remove`, `link reply`. `finding post` and `link reply` write nothing in a dry run |
 
 A read command must not change the committed file. A read-only connection (`new DatabaseSync(path, { readOnly: true })`) issues no write at all: no journal mode pragma, no lock file, not one byte. A manual check of all the read commands left the hash and the modification time of the file as they were. A read takes one read transaction, so it sees one state of the file even when another process commits meanwhile.
 
-### 2.5 One transaction per change
+### 2.4 One transaction per change
 
-`changeReviewState(arg, change, { snapshot? })` in `review-files.ts` is the door for every change of the review, the links and the connected pull request. (`syncReviewFile`, for `pr sync`, has a transaction of its own, see 2.6.) It runs one transaction:
+`changeReviewState(arg, change, { snapshot? })` in `review-files.ts` is the door for every change of the review, the links and the connected pull request. (`syncReviewFile`, for `pr sync`, has a transaction of its own, see 2.5.) It runs one transaction:
 
 1. `BEGIN IMMEDIATE`: the write lock is taken before anything is read. Writers in several processes run one after the other, each on what the one before saved.
 2. When a snapshot is given (a pull request that was just downloaded), it is saved first and always.
@@ -143,7 +136,7 @@ Before a changed review is saved, `assertRenders` renders it and reads the repor
 
 `mutateReviewFile` is `changeReviewState` for changes of the review alone. The report is rendered on `init` and on every change of the review, and `report render` re-renders it on demand (or writes `--out`).
 
-### 2.6 `pr sync` and the snapshot
+### 2.5 `pr sync` and the snapshot
 
 `pr sync` needs a connected pull request (`pr connect` or `init --pr`). It downloads with `downloadPullRequest` (comments, reviews, threads and check annotations), then `syncReviewFile` runs one `BEGIN IMMEDIATE` transaction:
 

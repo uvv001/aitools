@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { access, copyFile, link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { access, link, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, extname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual } from 'node:util';
 import type { PullRequestData } from './model.ts';
@@ -14,7 +14,7 @@ import { defaultReportPath, findRepoRoot, REVIEW_FOLDER } from './review-naming.
 import { newReview } from './review-ops.ts';
 import { readReport } from './review-read.ts';
 import { renderReport } from './review-render.ts';
-import { getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, REVIEW_SCHEMA_VERSION, saveLinks, saveReview, setMeta } from './review-store.ts';
+import { getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
 import { clearPullRequest, loadKnownRefs, loadPullRequest, savePullRequest } from './store.ts';
 
 export interface ReviewPaths {
@@ -98,18 +98,12 @@ async function publish(temp: string, target: string): Promise<boolean> {
   return true;
 }
 
-function buildDatabase(
-  path: string,
-  data: ReviewData,
-  meta: { pullRequest?: string; sessionDir?: string; workspaceDir?: string } = {},
-): void {
+function buildDatabase(path: string, data: ReviewData, pullRequest: string | undefined): void {
   const db = openReviewDb(path, 'create');
   try {
     inTransaction(db, () => {
       saveReview(db, data);
-      if (meta.pullRequest !== undefined) setMeta(db, PULL_REQUEST, meta.pullRequest);
-      if (meta.sessionDir !== undefined) setMeta(db, SESSION_DIR, meta.sessionDir);
-      if (meta.workspaceDir !== undefined) setMeta(db, WORKSPACE_DIR, meta.workspaceDir);
+      if (pullRequest !== undefined) setMeta(db, PULL_REQUEST, pullRequest);
     });
   } finally {
     db.close();
@@ -119,14 +113,10 @@ function buildDatabase(
 // The database is built under a temporary name next to its final one, the review and the pull request in one
 // transaction, and published whole: a crash leaves a stray `.tmp` file at worst, never a half-written database. The
 // temporary file is removed on every path.
-async function createDatabase(
-  path: string,
-  data: ReviewData,
-  meta: { pullRequest?: string; sessionDir?: string; workspaceDir?: string } = {},
-): Promise<boolean> {
+async function createDatabase(path: string, data: ReviewData, pullRequest: string | undefined): Promise<boolean> {
   const temp = `${path}.${randomBytes(4).toString('hex')}.tmp`;
   try {
-    buildDatabase(temp, data, meta);
+    buildDatabase(temp, data, pullRequest);
     return await publish(temp, path);
   } finally {
     await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
@@ -184,18 +174,19 @@ export interface InitResult {
   report: string;
 }
 
-// The meta keys that hold the connected pull request and the linked session/workspace directories.
+// The meta key that holds the connected pull request.
 const PULL_REQUEST = 'pull_request';
-const SESSION_DIR = 'session_dir';
-const WORKSPACE_DIR = 'workspace_dir';
 
-const AI_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
-const AI_NEGATE_LINE = /^[ \t]*!(?:\/?\.ai(?:\/[^\r\n]*)?|\*+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
+const AI_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/review-with-docs)?(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
+const AI_DIR_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/?[ \t]*$/u;
+const AI_NEGATE_LINE =
+  /^[ \t]*!(?:\/?\.ai\/(?:\*\*|\*)|\/?\.ai\/review-with-docs(?:\/[^\r\n]*)?|\*+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
 
 function aiIgnoreState(content: string): 'ignored' | 'negated' | 'none' {
   let state: 'ignored' | 'negated' | 'none' = 'none';
   for (const line of content.split(/\r?\n/u)) {
     if (AI_IGNORE_LINE.test(line)) state = 'ignored';
+    else if (AI_DIR_UNIGNORE_LINE.test(line)) state = 'none';
     else if (AI_NEGATE_LINE.test(line)) state = 'negated';
   }
   return state;
@@ -227,8 +218,9 @@ function resolveGitDir(repoRoot: string): string | undefined {
   }
 }
 
-// Ensures `.ai/` is ignored by Git when a review file is placed in `<repoRoot>/.ai/`: uses `.git/info/exclude` (or the
-// worktree's common git dir) when `.gitignore` does not already ignore `.ai/`, so tracked files stay untouched.
+// Ensures `.ai/review-with-docs/` is ignored by Git when a review file is placed in `<repoRoot>/.ai/review-with-docs/`:
+// uses `.git/info/exclude` (or the worktree's common git dir) when `.gitignore` does not already ignore it, so tracked
+// files stay untouched and `.ai/` itself can remain versioned.
 export async function ensureAiGitExcluded(repoRoot: string): Promise<void> {
   const gitignorePath = join(repoRoot, '.gitignore');
   const gitignore = await readExisting(gitignorePath);
@@ -241,322 +233,25 @@ export async function ensureAiGitExcluded(repoRoot: string): Promise<void> {
     if (aiIgnoreState(current) !== 'ignored') {
       await mkdir(dirname(excludePath), { recursive: true });
       const prefix = current === '' || current.endsWith('\n') ? '' : '\n';
-      await writeFile(excludePath, `${current}${prefix}/.ai/\n`, 'utf8');
+      await writeFile(excludePath, `${current}${prefix}/.ai/review-with-docs/\n`, 'utf8');
     }
   }
   if (gitignoreState === 'negated') {
-    throw new Error(`${gitignorePath} negates .ai/, which overrides .git/info/exclude and exposes .ai/ to git`);
+    throw new Error(
+      `${gitignorePath} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
+    );
   }
 }
 
-async function sameInode(a: string, b: string): Promise<boolean> {
-  try {
-    const [sa, sb] = await Promise.all([stat(a, { bigint: true }), stat(b, { bigint: true })]);
-    return sa.dev === sb.dev && sa.ino === sb.ino && sa.ino !== 0n;
-  } catch {
-    return false;
-  }
-}
-
-const LINK_FALLBACK_CODES = new Set(['EXDEV', 'EPERM', 'EACCES', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EMLINK', 'EINVAL', 'UNKNOWN']);
-
-// Ensures `target` is a hard link to `source` (or an identical copy when the file system or volume does not allow a
-// hard link). Replaces a detached link or stale copy atomically via a temporary sibling file.
-async function ensureLinkedFile(source: string, target: string, preferNewer = true): Promise<void> {
-  if (samePath(source, target) || !(await exists(source)) || (await sameInode(source, target))) return;
-  if (preferNewer && (await exists(target))) {
-    const [srcStat, dstStat] = await Promise.all([stat(source, { bigint: true }), stat(target, { bigint: true })]);
-    if (dstStat.mtimeNs > srcStat.mtimeNs) return;
-    if (dstStat.mtimeNs === srcStat.mtimeNs) {
-      if (srcStat.size !== dstStat.size) return;
-      const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
-      if (!srcBytes.equals(dstBytes)) return;
-    }
-  }
-  await mkdir(dirname(target), { recursive: true });
-  const temp = `${target}.${randomBytes(4).toString('hex')}.tmp`;
-  try {
-    try {
-      await link(source, temp);
-    } catch (error) {
-      if (!LINK_FALLBACK_CODES.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
-      if (await exists(target)) {
-        const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
-        if (srcBytes.equals(dstBytes)) return;
-      }
-      await copyFile(source, temp);
-    }
-    try {
-      await rename(temp, target);
-    } catch (error) {
-      if (!['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-      if (await sameInode(source, target)) return;
-      if (await exists(target)) {
-        const [srcBytes, dstBytes] = await Promise.all([readFile(source), readFile(target)]);
-        if (srcBytes.equals(dstBytes)) return;
-      }
-      await copyFile(source, target);
-    }
-  } finally {
-    await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
-  }
-}
-
-function vacuumDatabase(source: string, destination: string): void {
-  const snapshot = new DatabaseSync(source, { readOnly: true, timeout: 10_000 });
-  try {
-    snapshot.prepare('VACUUM INTO ?').run(destination);
-  } finally {
-    snapshot.close();
-  }
-}
-
-function readDatabaseSnapshot(dbPath: string): unknown {
-  const handle = new DatabaseSync(dbPath, { readOnly: true, timeout: 10_000 });
-  try {
-    return inTransaction(handle, () => ({
-      state: loadState(handle),
-      pullRequestData: loadPullRequest(handle),
-      sessionDir: getMeta(handle, SESSION_DIR),
-      workspaceDir: getMeta(handle, WORKSPACE_DIR),
-    }));
-  } finally {
-    handle.close();
-  }
-}
-
-function reconcileHotJournal(candidatePath: string): void {
-  if (!existsSync(candidatePath) || !existsSync(`${candidatePath}-journal`)) return;
-  const handle = new DatabaseSync(candidatePath, { timeout: 10_000 });
-  try {
-    handle.exec('BEGIN IMMEDIATE; ROLLBACK');
-  } catch {
-    // Ignore if the file is not a valid SQLite database.
-  } finally {
-    handle.close();
-  }
-}
-
-function readStoredDirs(dbPath: string): { sessionDir?: string; workspaceDir?: string } {
-  if (!existsSync(dbPath)) return {};
-  let handle: DatabaseSync | undefined;
-  try {
-    handle = new DatabaseSync(dbPath, { readOnly: true, timeout: 10_000 });
-    const version = (handle.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined)?.user_version;
-    if (version !== REVIEW_SCHEMA_VERSION) return {};
-    const rows = handle
-      .prepare("SELECT key, value FROM meta WHERE key IN ('session_dir', 'workspace_dir')")
-      .all() as { key: string; value: string }[];
-    let sessionDir: string | undefined;
-    let workspaceDir: string | undefined;
-    for (const row of rows) {
-      if (row.key === SESSION_DIR) sessionDir = row.value;
-      else if (row.key === WORKSPACE_DIR) workspaceDir = row.value;
-    }
-    return { sessionDir, workspaceDir };
-  } catch {
-    return {};
-  } finally {
-    handle?.close();
-  }
-}
-
-// Reconciles any hot rollback journal on `dbPath` or its hard-linked session/workspace peer before opening the
-// database, and when `restoreWorkspace` is true and `dbPath` is the session copy of an existing workspace repository,
-// restores a missing `.ai/` database link first so manipulations run against the `.ai/` database path.
-async function prepareDatabasePath(dbPath: string, options: { restoreWorkspace?: boolean } = {}): Promise<string> {
-  if (!existsSync(dbPath)) return dbPath;
-  reconcileHotJournal(dbPath);
-  const { sessionDir, workspaceDir } = readStoredDirs(dbPath);
-  if (sessionDir !== undefined && workspaceDir !== undefined) {
-    const fileName = basename(dbPath);
-    const sessionDb = join(sessionDir, fileName);
-    const workspaceDb = join(workspaceDir, fileName);
-    if (existsSync(`${workspaceDb}-journal`) && (samePath(dbPath, workspaceDb) || (await sameInode(dbPath, workspaceDb)))) {
-      reconcileHotJournal(workspaceDb);
-    }
-    if (existsSync(`${sessionDb}-journal`) && (samePath(dbPath, sessionDb) || (await sameInode(dbPath, sessionDb)))) {
-      reconcileHotJournal(sessionDb);
-    }
-    if (
-      options.restoreWorkspace &&
-      samePath(dirname(resolve(dbPath)), sessionDir) &&
-      !samePath(sessionDir, workspaceDir) &&
-      isLiveWorkspaceDir(workspaceDir)
-    ) {
-      const wsRepoRoot = findRepoRoot(workspaceDir);
-      if (wsRepoRoot !== undefined && samePath(workspaceDir, join(wsRepoRoot, REVIEW_FOLDER))) {
-        await ensureAiGitExcluded(wsRepoRoot);
-      }
-      if (!(await exists(workspaceDb))) {
-        await ensureLinkedDatabase(sessionDb, workspaceDb);
-      }
-      const wsDirs = readStoredDirs(workspaceDb);
-      if (
-        (await sameInode(sessionDb, workspaceDb)) ||
-        (wsDirs.sessionDir !== undefined &&
-          wsDirs.workspaceDir !== undefined &&
-          samePath(wsDirs.sessionDir, sessionDir) &&
-          samePath(wsDirs.workspaceDir, workspaceDir))
-      ) {
-        return workspaceDb;
-      }
-    }
-  }
-  return dbPath;
-}
-
-// Ensures `target` is a hard link to the SQLite database `source` or, when hard links are unavailable, a
-// transactionally consistent SQLite snapshot (`VACUUM INTO`) so uncommitted cache-spilled pages are never copied.
-async function ensureLinkedDatabase(source: string, target: string): Promise<void> {
-  if (samePath(source, target) || !(await exists(source))) return;
-  reconcileHotJournal(source);
-  reconcileHotJournal(target);
-  if (await sameInode(source, target)) return;
-  await mkdir(dirname(target), { recursive: true });
-  while (true) {
-    const temp = `${target}.${randomBytes(4).toString('hex')}.tmp`;
-    let vacuumed = false;
-    try {
-      try {
-        await link(source, temp);
-      } catch (error) {
-        if (!LINK_FALLBACK_CODES.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
-        vacuumDatabase(source, temp);
-        vacuumed = true;
-      }
-      try {
-        await rename(temp, target);
-      } catch (error) {
-        if (!['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-        if (await sameInode(source, target)) return;
-        if (!vacuumed) {
-          await rm(temp, { force: true });
-          vacuumDatabase(source, temp);
-          vacuumed = true;
-        }
-        await copyFile(temp, target);
-      }
-    } finally {
-      await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
-    }
-    if (!vacuumed || (await sameInode(source, target))) return;
-    if (isDeepStrictEqual(readDatabaseSnapshot(target), readDatabaseSnapshot(source))) return;
-  }
-}
-
-const TEMP_FILE_SUFFIX = /\.[0-9a-f]{8}\.tmp$/u;
-
-async function walkFiles(root: string, prefix = ''): Promise<string[]> {
-  let entries;
-  try {
-    entries = await readdir(join(root, prefix), { withFileTypes: true });
-  } catch (error) {
-    if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return [];
-    throw error;
-  }
-  const files: string[] = [];
-  for (const entry of entries) {
-    const rel = prefix ? join(prefix, entry.name) : entry.name;
-    if (entry.isDirectory()) files.push(...(await walkFiles(root, rel)));
-    else if (entry.isFile() && !TEMP_FILE_SUFFIX.test(entry.name)) files.push(rel);
-  }
-  return files;
-}
-
-function isLiveWorkspaceDir(workspaceDir: string | undefined): workspaceDir is string {
-  return workspaceDir !== undefined && (existsSync(workspaceDir) || existsSync(dirname(workspaceDir)));
-}
-
-// Synchronizes the `.sqlite` database, `.md` report, and `<stem>/round-<n>/**` files between `sessionDir` (the
-// durable primary store) and `workspaceDir` (the `.ai/` folder in the working tree for IDE access).
-async function syncMirrorFiles(options: {
-  activeDb: string;
-  sessionDir?: string;
-  workspaceDir?: string;
-  cwd?: string;
-  preferredReport?: string;
-}): Promise<void> {
-  const { activeDb, sessionDir, cwd, preferredReport } = options;
-  if (sessionDir === undefined) return;
-  const activeDir = dirname(resolve(activeDb));
-  const repoRoot = findRepoRoot(cwd ?? activeDir);
-  const workspaceDir =
-    options.workspaceDir ??
-    (samePath(activeDir, sessionDir) ? (repoRoot ? join(repoRoot, REVIEW_FOLDER) : activeDir) : activeDir);
-  if (!isLiveWorkspaceDir(workspaceDir) || samePath(sessionDir, workspaceDir)) return;
-
-  const wsRepoRoot = findRepoRoot(workspaceDir);
-  if (wsRepoRoot !== undefined && samePath(workspaceDir, join(wsRepoRoot, REVIEW_FOLDER))) {
-    await ensureAiGitExcluded(wsRepoRoot);
-  }
-
-  const dbFileName = basename(activeDb);
-  const ext = extname(dbFileName);
-  const stem = dbFileName.slice(0, dbFileName.length - ext.length);
-  const sessionDb = join(sessionDir, dbFileName);
-  const workspaceDb = join(workspaceDir, dbFileName);
-
-  if (samePath(activeDb, sessionDb)) {
-    await ensureLinkedDatabase(sessionDb, workspaceDb);
-  } else if (samePath(activeDb, workspaceDb)) {
-    await ensureLinkedDatabase(workspaceDb, sessionDb);
-  } else {
-    await ensureLinkedDatabase(activeDb, sessionDb);
-    await ensureLinkedDatabase(sessionDb, workspaceDb);
-  }
-
-  const sessionReport = join(sessionDir, `${stem}.md`);
-  const workspaceReport = join(workspaceDir, `${stem}.md`);
-  if (preferredReport !== undefined && samePath(preferredReport, workspaceReport)) {
-    await ensureLinkedFile(workspaceReport, sessionReport, false);
-  } else if (preferredReport !== undefined && samePath(preferredReport, sessionReport)) {
-    await ensureLinkedFile(sessionReport, workspaceReport, false);
-  } else {
-    await ensureLinkedFile(sessionReport, workspaceReport);
-    await ensureLinkedFile(workspaceReport, sessionReport);
-  }
-
-  const sessionRounds = join(sessionDir, stem);
-  const workspaceRounds = join(workspaceDir, stem);
-  for (const rel of await walkFiles(workspaceRounds)) {
-    await ensureLinkedFile(join(workspaceRounds, rel), join(sessionRounds, rel));
-  }
-  for (const rel of await walkFiles(sessionRounds)) {
-    await ensureLinkedFile(join(sessionRounds, rel), join(workspaceRounds, rel));
-  }
-}
-
-// Publishes the initial workspace mirror of `primaryDb` exclusively so a competing `init` that created `workspaceDb`
-// after the pre-flight check is never overwritten.
-async function publishExclusiveMirror(primaryDb: string, workspaceDb: string): Promise<boolean> {
-  await mkdir(dirname(workspaceDb), { recursive: true });
-  try {
-    await link(primaryDb, workspaceDb);
-    return true;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code ?? '';
-    if (code === 'EEXIST') return false;
-    if (!LINK_FALLBACK_CODES.has(code)) throw error;
-  }
-  if (await exists(workspaceDb)) return false;
-  const temp = `${workspaceDb}.${randomBytes(4).toString('hex')}.tmp`;
-  try {
-    vacuumDatabase(primaryDb, temp);
-    return await publish(temp, workspaceDb);
-  } finally {
-    await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
-  }
-}
+// Creates the database of a new review named `name` (the title of its report): no rounds or findings. It
 // lives at `options.report` (a report or a database path) or, without one, at the default place of a review of that
-// name (`.ai/` of the repository of `cwd`); `options.db` names another file, which must end in `.sqlite`. When
-// `options.sessionDir` is given, the primary file is created in `sessionDir` and hard-linked into the workspace folder.
-// `options.pr` connects it to a pull request, validated before anything is created and stored in the same file. The
-// report is rendered and written next to the database. Refuses an existing database, and publishes the new one
-// atomically.
+// name (`.ai/review-with-docs/` of the repository of `cwd`); `options.db` names another file, which must end in
+// `.sqlite`. `options.pr` connects it to a pull request, validated before anything is created and stored in the same
+// file. The report is rendered and written next to the database. Refuses an existing database, and publishes the new
+// one atomically.
 export async function initReviewFile(
   name: string,
-  options: { report?: string; db?: string; pr?: string; sessionDir?: string; now?: Date; cwd?: string } = {},
+  options: { report?: string; db?: string; pr?: string; now?: Date; cwd?: string } = {},
 ): Promise<InitResult> {
   mustBeDatabase(options.db);
   const cwd = options.cwd ?? process.cwd();
@@ -565,55 +260,25 @@ export async function initReviewFile(
   const pullRequest = options.pr === undefined ? undefined : formatPullRequestUrl(parsePullRequestUrl(options.pr));
   const paths = reviewPaths(options.report ?? defaultReportPath(data.target, now, cwd));
   const dbPath = options.db ?? paths.db;
-  const workspaceDir = dirname(resolve(cwd, dbPath));
-  const sessionDir = options.sessionDir === undefined ? undefined : resolve(cwd, options.sessionDir);
-  const dualHomed = sessionDir !== undefined && !samePath(sessionDir, workspaceDir);
-  const primaryDb = dualHomed ? join(sessionDir, basename(dbPath)) : dbPath;
+  const targetDir = dirname(resolve(cwd, dbPath));
 
   if (await exists(dbPath)) throw existingDatabase(dbPath);
-  if (dualHomed && (await exists(primaryDb))) throw existingDatabase(primaryDb);
   const reportTarget = options.report !== undefined || options.db === undefined ? paths.report : reviewPaths(dbPath).report;
   await refuseDatabase(reportTarget, dbPath);
   const rendered = assertRenders(data, reportTarget);
 
-  const repoRoot = findRepoRoot(workspaceDir);
-  if (repoRoot !== undefined && samePath(workspaceDir, join(repoRoot, REVIEW_FOLDER))) {
+  const repoRoot = findRepoRoot(targetDir);
+  if (repoRoot !== undefined && samePath(targetDir, join(repoRoot, REVIEW_FOLDER))) {
     await ensureAiGitExcluded(repoRoot);
   }
 
-  const created = await createDatabase(
-    primaryDb,
-    data,
-    dualHomed ? { pullRequest, sessionDir, workspaceDir } : { pullRequest },
-  );
-  if (!created) throw existingDatabase(primaryDb);
-  if (dualHomed) {
-    let mirrorPublished = false;
-    try {
-      mirrorPublished = await publishExclusiveMirror(primaryDb, dbPath);
-    } catch (error) {
-      await rm(primaryDb, { force: true, maxRetries: 5, retryDelay: 100 });
-      throw error;
-    }
-    if (!mirrorPublished) {
-      await rm(primaryDb, { force: true, maxRetries: 5, retryDelay: 100 });
-      throw existingDatabase(dbPath);
-    }
-  }
+  const created = await createDatabase(dbPath, data, pullRequest);
+  if (!created) throw existingDatabase(dbPath);
   let text = rendered;
   await mkdir(dirname(reportTarget), { recursive: true });
   while (true) {
     await writeFile(reportTarget, text, 'utf8');
-    if (dualHomed) {
-      await syncMirrorFiles({
-        activeDb: primaryDb,
-        sessionDir,
-        workspaceDir,
-        cwd,
-        preferredReport: reportTarget,
-      });
-    }
-    const handle = new DatabaseSync(existsSync(dbPath) ? dbPath : primaryDb, { readOnly: true, timeout: 10_000 });
+    const handle = new DatabaseSync(dbPath, { readOnly: true, timeout: 10_000 });
     let latest: string;
     try {
       latest = renderReport(loadReview(handle));
@@ -643,7 +308,6 @@ function loadState(db: DatabaseSync): ReviewState {
 // Reads the whole review through a read-only connection: nothing is written, not even by accident.
 export async function loadReviewFile(arg: string): Promise<LoadedReview> {
   const paths = reviewPaths(arg);
-  await prepareDatabasePath(paths.db);
   const db = openReviewDb(paths.db, 'readonly');
   try {
     return { ...loadState(db), paths };
@@ -654,9 +318,7 @@ export async function loadReviewFile(arg: string): Promise<LoadedReview> {
 
 // The pull request that the last `pr sync` stored, `undefined` before the first one. Read-only.
 export async function loadSnapshot(arg: string): Promise<PullRequestData | undefined> {
-  const dbPath = reviewPaths(arg).db;
-  await prepareDatabasePath(dbPath);
-  const db = openReviewDb(dbPath, 'readonly');
+  const db = openReviewDb(reviewPaths(arg).db, 'readonly');
   try {
     return inTransaction(db, () => loadPullRequest(db));
   } finally {
@@ -668,79 +330,18 @@ export interface RenderResult {
   // The file that was written (or found unchanged).
   report: string;
   action: 'created' | 'updated' | 'unchanged';
-  databaseChanged?: boolean;
 }
 
 // Writes the derived report, with LF line breaks and no BOM, to `out` or next to the database. The
-// database is only read (unless `sessionDir` updates the stored session or workspace folder). An existing file is overwritten
-// whatever it holds, except a database: `out` may be neither the database of `arg` nor any other SQLite file, nor
-// named `.sqlite`.
-export async function renderReportFile(
-  arg: string,
-  options: { out?: string; sessionDir?: string; cwd?: string } = {},
-): Promise<RenderResult> {
+// database is only read. An existing file is overwritten whatever it holds, except a database: `out` may be neither
+// the database of `arg` nor any other SQLite file, nor named `.sqlite`.
+export async function renderReportFile(arg: string, options: { out?: string } = {}): Promise<RenderResult> {
   const paths = reviewPaths(arg);
-  await refuseDatabase(options.out ?? paths.report, paths.db);
-  await prepareDatabasePath(paths.db);
+  const target = options.out ?? paths.report;
+  await refuseDatabase(target, paths.db);
   const db = openReviewDb(paths.db, 'readonly');
   try {
     let text = renderReport(loadReview(db));
-    let metaSessionDir = getMeta(db, SESSION_DIR);
-    let metaWorkspaceDir = getMeta(db, WORKSPACE_DIR);
-    let databaseChanged = false;
-    const cwd = options.cwd ?? process.cwd();
-    const resolvedSessionDir = options.sessionDir === undefined ? undefined : resolve(cwd, options.sessionDir);
-    const activeDir = dirname(resolve(cwd, paths.db));
-    const previousSessionDir = metaSessionDir;
-    const fromSessionDir =
-      (resolvedSessionDir !== undefined && samePath(activeDir, resolvedSessionDir)) ||
-      (previousSessionDir !== undefined && samePath(activeDir, previousSessionDir));
-    if (resolvedSessionDir !== undefined) {
-      const repoRoot = findRepoRoot(cwd);
-      const storedRepoRoot = metaWorkspaceDir === undefined ? undefined : findRepoRoot(metaWorkspaceDir);
-      const keepStoredWorkspace =
-        isLiveWorkspaceDir(metaWorkspaceDir) &&
-        (repoRoot === undefined || (storedRepoRoot !== undefined && samePath(storedRepoRoot, repoRoot)));
-      const resolvedWorkspaceDir = fromSessionDir
-        ? metaWorkspaceDir !== undefined && keepStoredWorkspace
-          ? metaWorkspaceDir
-          : repoRoot
-            ? join(repoRoot, REVIEW_FOLDER)
-            : activeDir
-        : activeDir;
-      const differs = (a: string, b: string | undefined): boolean => b === undefined || !samePath(a, b);
-      if (differs(resolvedSessionDir, metaSessionDir) || differs(resolvedWorkspaceDir, metaWorkspaceDir)) {
-        const rw = openReviewDb(paths.db, 'existing');
-        try {
-          inTransaction(rw, () => {
-            setMeta(rw, SESSION_DIR, resolvedSessionDir);
-            setMeta(rw, WORKSPACE_DIR, resolvedWorkspaceDir);
-          });
-          metaSessionDir = resolvedSessionDir;
-          metaWorkspaceDir = resolvedWorkspaceDir;
-          databaseChanged = true;
-        } finally {
-          rw.close();
-        }
-      }
-      if (previousSessionDir !== undefined && !samePath(previousSessionDir, resolvedSessionDir)) {
-        await mkdir(resolvedSessionDir, { recursive: true });
-        await syncMirrorFiles({
-          activeDb: paths.db,
-          sessionDir: previousSessionDir,
-          workspaceDir: resolvedSessionDir,
-          cwd,
-        });
-      }
-    }
-    const target =
-      options.out ??
-      (metaSessionDir !== undefined &&
-      isLiveWorkspaceDir(metaWorkspaceDir) &&
-      (fromSessionDir || samePath(activeDir, metaSessionDir))
-        ? join(metaWorkspaceDir, basename(paths.report))
-        : paths.report);
-    if (target !== (options.out ?? paths.report)) await refuseDatabase(target, paths.db);
     const current = await readExisting(target);
     if (current !== text) text = renderReport(loadReview(db));
     const action: RenderResult['action'] = current === text ? 'unchanged' : current === undefined ? 'created' : 'updated';
@@ -748,29 +349,12 @@ export async function renderReportFile(
       await mkdir(dirname(target), { recursive: true });
       while (true) {
         await writeFile(target, text, 'utf8');
-        if (metaSessionDir !== undefined) {
-          await syncMirrorFiles({
-            activeDb: paths.db,
-            sessionDir: metaSessionDir,
-            workspaceDir: metaWorkspaceDir,
-            cwd,
-            preferredReport: options.out === undefined ? target : undefined,
-          });
-        }
         const latest = renderReport(loadReview(db));
         if (latest === text) break;
         text = latest;
       }
-    } else if (metaSessionDir !== undefined) {
-      await syncMirrorFiles({
-        activeDb: paths.db,
-        sessionDir: metaSessionDir,
-        workspaceDir: metaWorkspaceDir,
-        cwd,
-        preferredReport: options.out === undefined ? target : undefined,
-      });
     }
-    return databaseChanged ? { report: target, action, databaseChanged: true } : { report: target, action };
+    return { report: target, action };
   } finally {
     db.close();
   }
@@ -804,13 +388,9 @@ export async function changeReviewState<T>(
   change: (state: ReviewState) => StateChange<T> | Promise<StateChange<T>>,
   options: { snapshot?: PullRequestData } = {},
 ): Promise<StateChange<T>> {
-  const activeDbPath = await prepareDatabasePath(reviewPaths(arg).db, { restoreWorkspace: true });
-  const paths = reviewPaths(activeDbPath);
+  const paths = reviewPaths(arg);
   const db = openReviewDb(paths.db, 'existing');
-  let sessionDir: string | undefined;
-  let workspaceDir: string | undefined;
   let rendered: string | undefined;
-  let reportTarget = paths.report;
   try {
     const changed = await inTransactionAsync(
       db,
@@ -833,58 +413,25 @@ export async function changeReviewState<T>(
             if (before.pullRequest !== undefined && options.snapshot === undefined) clearPullRequest(db);
           }
         }
-        sessionDir = getMeta(db, SESSION_DIR);
-        workspaceDir = getMeta(db, WORKSPACE_DIR);
         if (rendered !== undefined) {
-          reportTarget =
-            sessionDir !== undefined &&
-            isLiveWorkspaceDir(workspaceDir) &&
-            samePath(dirname(resolve(paths.db)), sessionDir)
-              ? join(workspaceDir, basename(paths.report))
-              : paths.report;
-          await refuseDatabase(reportTarget, paths.db);
+          await refuseDatabase(paths.report, paths.db);
         }
         return result;
       },
       { immediate: true },
     );
     if (rendered !== undefined) {
-      let reportWritten = false;
       try {
-        await mkdir(dirname(reportTarget), { recursive: true });
+        await mkdir(dirname(paths.report), { recursive: true });
         while (true) {
-          await writeFile(reportTarget, rendered, 'utf8');
-          reportWritten = true;
-          if (sessionDir !== undefined) {
-            await syncMirrorFiles({
-              activeDb: paths.db,
-              sessionDir,
-              workspaceDir,
-              preferredReport: reportTarget,
-            });
-          }
+          await writeFile(paths.report, rendered, 'utf8');
           const latest = renderReport(loadReview(db));
           if (latest === rendered) break;
           rendered = latest;
         }
       } catch {
-        if (!reportWritten && sessionDir !== undefined) {
-          try {
-            await syncMirrorFiles({ activeDb: paths.db, sessionDir, workspaceDir });
-          } catch {
-            // The database transaction has already committed.
-          }
-        }
-      }
-    } else if (sessionDir !== undefined) {
-      try {
-        await syncMirrorFiles({
-          activeDb: paths.db,
-          sessionDir,
-          workspaceDir,
-        });
-      } catch {
-        // The database transaction has already committed.
+        // The database transaction has already committed; do not report the saved change as failed if the derived
+        // report cannot be refreshed right now.
       }
     }
     return changed;
@@ -930,11 +477,8 @@ const samePullRequest = (a: PullRequestRef, b: PullRequestRef): boolean =>
 // connected to a pull request, and it must be this one (host, owner and repository compared without regard to case).
 // The links stay as they are: what they point at is kept, as gone, when the pull request no longer has it.
 export async function syncReviewFile(arg: string, data: PullRequestData): Promise<SyncResult> {
-  const activeDbPath = await prepareDatabasePath(reviewPaths(arg).db, { restoreWorkspace: true });
-  const paths = reviewPaths(activeDbPath);
+  const paths = reviewPaths(arg);
   const db = openReviewDb(paths.db, 'existing');
-  let sessionDir: string | undefined;
-  let workspaceDir: string | undefined;
   try {
     inTransaction(
       db,
@@ -947,20 +491,11 @@ export async function syncReviewFile(arg: string, data: PullRequestData): Promis
           throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(data.pullRequest)}`);
         }
         savePullRequest(db, data);
-        sessionDir = getMeta(db, SESSION_DIR);
-        workspaceDir = getMeta(db, WORKSPACE_DIR);
       },
       { immediate: true },
     );
   } finally {
     db.close();
-  }
-  if (sessionDir !== undefined) {
-    try {
-      await syncMirrorFiles({ activeDb: paths.db, sessionDir, workspaceDir });
-    } catch {
-      // The pull request snapshot is already committed in the database.
-    }
   }
   const annotations = (data.checkRuns ?? []).reduce((total, run) => total + run.annotations.length, 0);
   return { db: paths.db, reviews: data.reviews.length, threads: data.threads.length, comments: data.comments.length, annotations };
