@@ -10,7 +10,8 @@ two agents no instruction file covers — one for purpose fit, one for the
 ecosystem's best practices. A narrow, single-rule brief is what keeps an
 agent's findings checkable. Pass an explicit `model` on each dispatch,
 selecting from the latest-generation models in the dispatch tool's schema
-and spreading agents across distinct model families: the strongest
+and spreading agents across distinct model families — each tier draws on at
+least two families where the schema offers them: the strongest
 deep-reasoning models for `purpose-fit`, `best-practices`, `recheck`, and
 semantic or architectural rules; fast, precise models for mechanical rules
 and for the PR-comment agents of [pull-request.md](pull-request.md). Where
@@ -65,10 +66,10 @@ its current version.
 
 ## Hold the index, not the findings
 
-The orchestrator's context holds the index — which agent produced which
-findings — and the briefs carry the pairing of instruction files and paths
-from step 2 of [SKILL.md](SKILL.md). `finding add` reads the files, so the
-orchestrator passes paths.
+The orchestrator's context holds the index — which agent, on which model,
+produced which findings — and the briefs carry the pairing of instruction
+files and paths from step 2 of [SKILL.md](SKILL.md). `finding add` reads the
+files, so the orchestrator passes paths.
 
 Findings two agents raised on the same anchor merge into one: record the
 description whose evidence is stronger, and where the other adds occurrences,
