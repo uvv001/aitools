@@ -685,6 +685,11 @@ describe('initReviewFile', () => {
       await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
         `${join(repo, '.gitignore')} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
       );
+
+      await writeFile(join(repo, '.gitignore'), '!/.ai/review-with-docs/\n!/.ai/\n', 'utf8');
+      await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
+        `${join(repo, '.gitignore')} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
+      );
     });
 
     it('writes /.ai/review-with-docs/ to the shared common git info/exclude in a linked worktree, or to gitdir/info/exclude when commondir is absent', async () => {

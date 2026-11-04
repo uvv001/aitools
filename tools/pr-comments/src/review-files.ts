@@ -177,19 +177,30 @@ export interface InitResult {
 // The meta key that holds the connected pull request.
 const PULL_REQUEST = 'pull_request';
 
-const AI_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/review-with-docs)?(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
-const AI_DIR_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/?[ \t]*$/u;
+const AI_PARENT_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
+const AI_PARENT_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/?[ \t]*$/u;
+const AI_CHILD_IGNORE_LINE = /^[ \t]*\/?\.ai\/review-with-docs(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
 const AI_NEGATE_LINE =
   /^[ \t]*!(?:\/?\.ai\/(?:\*\*|\*)|\/?\.ai\/review-with-docs(?:\/[^\r\n]*)?|\*+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
 
 function aiIgnoreState(content: string): 'ignored' | 'negated' | 'none' {
-  let state: 'ignored' | 'negated' | 'none' = 'none';
+  let parentIgnored = false;
+  let childState: 'ignored' | 'negated' | 'none' = 'none';
   for (const line of content.split(/\r?\n/u)) {
-    if (AI_IGNORE_LINE.test(line)) state = 'ignored';
-    else if (AI_DIR_UNIGNORE_LINE.test(line)) state = 'none';
-    else if (AI_NEGATE_LINE.test(line)) state = 'negated';
+    if (AI_CHILD_IGNORE_LINE.test(line)) {
+      childState = 'ignored';
+    } else if (AI_PARENT_IGNORE_LINE.test(line)) {
+      parentIgnored = true;
+      if (childState === 'negated') childState = 'ignored';
+    } else if (AI_PARENT_UNIGNORE_LINE.test(line)) {
+      parentIgnored = false;
+    } else if (AI_NEGATE_LINE.test(line)) {
+      parentIgnored = false;
+      childState = 'negated';
+    }
   }
-  return state;
+  if (childState !== 'none') return childState;
+  return parentIgnored ? 'ignored' : 'none';
 }
 
 function resolveGitDir(repoRoot: string): string | undefined {
