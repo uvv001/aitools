@@ -2843,6 +2843,16 @@ async function ensureAiGitExcluded(repoRoot) {
 	}
 	if (gitignoreState === "negated") throw new Error(`${gitignorePath} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`);
 }
+async function writeReportUntilStable(target, initial, renderLatest) {
+	let text = initial;
+	await mkdir(dirname(target), { recursive: true });
+	while (true) {
+		await writeFile(target, text, "utf8");
+		const latest = renderLatest();
+		if (latest === text) break;
+		text = latest;
+	}
+}
 async function initReviewFile(name, options = {}) {
 	mustBeDatabase(options.db);
 	const cwd = options.cwd ?? process.cwd();
@@ -2859,23 +2869,17 @@ async function initReviewFile(name, options = {}) {
 	const repoRoot = findRepoRoot(targetDir);
 	if (repoRoot !== void 0 && samePath(targetDir, join(repoRoot, REVIEW_FOLDER))) await ensureAiGitExcluded(repoRoot);
 	if (!await createDatabase(dbPath, data, pullRequest)) throw existingDatabase(dbPath);
-	let text = rendered;
-	await mkdir(dirname(reportTarget), { recursive: true });
-	while (true) {
-		await writeFile(reportTarget, text, "utf8");
+	await writeReportUntilStable(reportTarget, rendered, () => {
 		const handle = new DatabaseSync(dbPath, {
 			readOnly: true,
 			timeout: 1e4
 		});
-		let latest;
 		try {
-			latest = renderReport(loadReview(handle));
+			return renderReport(loadReview(handle));
 		} finally {
 			handle.close();
 		}
-		if (latest === text) break;
-		text = latest;
-	}
+	});
 	return {
 		db: dbPath,
 		report: reportTarget
@@ -2919,19 +2923,10 @@ async function renderReportFile(arg, options = {}) {
 	await refuseDatabase(target, paths.db);
 	const db = openReviewDb(paths.db, "readonly");
 	try {
-		let text = renderReport(loadReview(db));
+		const text = renderReport(loadReview(db));
 		const current = await readExisting(target);
-		if (current !== text) text = renderReport(loadReview(db));
 		const action = current === text ? "unchanged" : current === void 0 ? "created" : "updated";
-		if (action !== "unchanged") {
-			await mkdir(dirname(target), { recursive: true });
-			while (true) {
-				await writeFile(target, text, "utf8");
-				const latest = renderReport(loadReview(db));
-				if (latest === text) break;
-				text = latest;
-			}
-		}
+		if (action !== "unchanged") await writeReportUntilStable(target, text, () => renderReport(loadReview(db)));
 		return {
 			report: target,
 			action
@@ -2973,13 +2968,7 @@ async function changeReviewState(arg, change, options = {}) {
 			return result;
 		}, { immediate: true });
 		if (rendered !== void 0) try {
-			await mkdir(dirname(paths.report), { recursive: true });
-			while (true) {
-				await writeFile(paths.report, rendered, "utf8");
-				const latest = renderReport(loadReview(db));
-				if (latest === rendered) break;
-				rendered = latest;
-			}
+			await writeReportUntilStable(paths.report, rendered, () => renderReport(loadReview(db)));
 		} catch (error) {
 			return {
 				...changed,
@@ -3736,7 +3725,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+0bbd31d`;
+	return `pr-comments ${VERSION}+cb4042a`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4646,7 +4635,7 @@ const DEFINITIONS = [
 	{
 		words: "report render",
 		summary: "writes the review report",
-		description: ["Writes the markdown report of the review, made from the database, and says whether the file was created, updated or", "left unchanged. It writes only the report, never the database, and never over a SQLite file."],
+		description: ["Writes the markdown report of the review, made from the database, and says whether the file was created, updated or", "left unchanged. It writes the report only, never the database, and never over a SQLite file."],
 		args: [],
 		options: [{
 			name: "out",
@@ -4937,7 +4926,7 @@ function checkedArguments(command, parsed) {
 	const missing = command.args.filter(({ optional: skippable }) => !skippable)[args.length];
 	if (missing !== void 0) throw usageError(command, `missing ${missing.name}`);
 	if (args.length > command.args.length) throw usageError(command, `unexpected argument "${args[command.args.length]}"`);
-	if (command.options.some(({ name, required }) => name === "db" && required) && !given.has("db")) throw usageError(command, "--db is required");
+	if (command.database !== "none" && !given.has("db")) throw usageError(command, "--db is required");
 	return args;
 }
 async function execute(command, argv, env) {
