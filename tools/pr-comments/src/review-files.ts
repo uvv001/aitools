@@ -180,26 +180,39 @@ const PULL_REQUEST = 'pull_request';
 
 const AI_PARENT_IGNORE_LINE = /^[ \t]*\/?\.ai\/?[ \t]*$/u;
 const AI_PARENT_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/?[ \t]*$/u;
-const AI_CHILD_IGNORE_LINE = /^[ \t]*\/?\.ai\/(?:(?:\*\*|\*)|review-with-docs(?:\/(?:\*\*|\*)?)?)[ \t]*$/u;
-const AI_NEGATE_LINE =
-  /^[ \t]*!(?:\/?\.ai\/(?:\*\*|\*)|\/?\.ai\/review-with-docs(?:\/[^\r\n]*)?|\*+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
+const AI_GLOBAL_DIR_UNIGNORE_LINE = /^[ \t]*!\*+\/?[ \t]*$/u;
+const AI_CHILD_DIR_IGNORE_LINE = /^[ \t]*\/?\.ai\/(?:\*+(?:\/\*+)?|review-[^\r\n/]*)\/?[ \t]*$/u;
+const AI_CHILD_CONTENTS_IGNORE_LINE = /^[ \t]*\/?\.ai\/review-with-docs\/\*+[ \t]*$/u;
+const AI_CHILD_DIR_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/(?:\*+(?:\/\*+)?|review-[^\r\n/]*)\/?[ \t]*$/u;
+const AI_CHILD_FILE_NEGATE_LINE =
+  /^[ \t]*!(?:\/?\.ai\/review-with-docs\/[^\r\n]+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
 
 function aiIgnoreState(content: string): 'ignored' | 'negated' | 'none' {
-  let parentIgnored = false;
+  let parentDirIgnored = false;
+  let childDirIgnored = false;
   let childState: 'ignored' | 'negated' | 'none' = 'none';
   for (const line of content.split(/\r?\n/u)) {
-    if (AI_CHILD_IGNORE_LINE.test(line)) {
-      childState = 'ignored';
-    } else if (AI_PARENT_IGNORE_LINE.test(line)) {
-      parentIgnored = true;
+    if (AI_PARENT_IGNORE_LINE.test(line)) {
+      parentDirIgnored = true;
     } else if (AI_PARENT_UNIGNORE_LINE.test(line)) {
-      parentIgnored = false;
-    } else if (AI_NEGATE_LINE.test(line)) {
-      parentIgnored = false;
+      parentDirIgnored = false;
+    } else if (AI_GLOBAL_DIR_UNIGNORE_LINE.test(line)) {
+      parentDirIgnored = false;
+      childDirIgnored = false;
       childState = 'negated';
+    } else if (AI_CHILD_DIR_IGNORE_LINE.test(line)) {
+      childDirIgnored = true;
+      childState = 'ignored';
+    } else if (AI_CHILD_CONTENTS_IGNORE_LINE.test(line)) {
+      childState = 'ignored';
+    } else if (AI_CHILD_DIR_UNIGNORE_LINE.test(line)) {
+      childDirIgnored = false;
+      childState = 'negated';
+    } else if (AI_CHILD_FILE_NEGATE_LINE.test(line)) {
+      if (!childDirIgnored) childState = 'negated';
     }
   }
-  if (parentIgnored) return 'ignored';
+  if (parentDirIgnored || childDirIgnored) return 'ignored';
   return childState;
 }
 

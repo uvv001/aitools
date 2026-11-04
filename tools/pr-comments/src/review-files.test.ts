@@ -661,9 +661,16 @@ describe('initReviewFile', () => {
       expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n!/.ai/review-with-docs/\n/.ai/review-with-docs/\n');
     });
 
-    it('skips .git/info/exclude when .gitignore already ignores .ai/review-with-docs/', async () => {
+    it.each([
+      ['explicit .ai/review-with-docs/ rule with unrelated negation', '/.ai/review-with-docs/\n!docs/review.md\n'],
+      ['excluded .ai/ directory followed by child directory negation', '/.ai/\n!/.ai/review-with-docs/\n'],
+      ['excluded .ai/review-with-docs/ directory followed by file-glob negation', '/.ai/review-with-docs/\n!*.md\n'],
+      ['excluded .ai/ directory followed by file-glob negation', '/.ai/\n!*.md\n'],
+      ['excluded .ai/ directory followed by child wildcard negation', '/.ai/\n!/.ai/*\n'],
+      ['child negation followed by /.ai/* and !/.ai/', '!/.ai/review-with-docs/\n/.ai/*\n!/.ai/\n'],
+    ])('skips .git/info/exclude when .gitignore already ignores .ai/review-with-docs/ via %s', async (_name, gitignoreText) => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
-      await writeFile(join(repo, '.gitignore'), '/.ai/review-with-docs/\n!docs/review.md\n', 'utf8');
+      await writeFile(join(repo, '.gitignore'), gitignoreText, 'utf8');
       await initReviewFile('PR 42', { cwd, now: NOW });
       expect(existsSync(excludePath)).toBe(false);
     });
@@ -680,6 +687,9 @@ describe('initReviewFile', () => {
       ['markdown negation under .ai/review-with-docs/', '/.ai/review-with-docs/**\n!/.ai/review-with-docs/*.md\n'],
       ['child negation before parent !/.ai/', '!/.ai/review-with-docs/\n!/.ai/\n'],
       ['child negation before parent /.ai/ and !/.ai/', '!/.ai/review-with-docs/\n/.ai/\n!/.ai/\n'],
+      ['global directory wildcard negation !*/', '!*/\n'],
+      ['recursive directory wildcard negation !/.ai/**/', '!/.ai/**/\n'],
+      ['prefix directory wildcard negation !/.ai/review-*/', '!/.ai/review-*/\n'],
     ])('reports a conflict when .gitignore exposes .ai/review-with-docs/ via %s', async (_name, gitignoreText) => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
       await writeFile(join(repo, '.gitignore'), gitignoreText, 'utf8');
