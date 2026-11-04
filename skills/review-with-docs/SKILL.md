@@ -41,14 +41,14 @@ the expected outcome.
 
 ## Protocol
 
-A review database already in `<session-folder>/files/review-with-docs/` (or in
-an earlier session's `files/review-with-docs/` folder that the user names, or
-in `.ai/review-with-docs/` when the host provides no session folder) means the
-request continues it: where several exist, take the one whose title or
-`pr show --db <file.sqlite>` matches the target; pass `--db <file.sqlite>` on
-every command, read `finding list`, and start at the step the request calls
-for — a verdict is step 5, a publish or sync request step 6, new changes (a
-moved PR head included) step 7, a fix request the paragraph under States.
+A review database already in `<session-folder>/files/review-with-docs/`, in
+`.ai/review-with-docs/`, or in an earlier session's `files/review-with-docs/`
+folder that the user names means the request continues it: where several
+exist, take the one whose title or `pr show --db <file.sqlite>` matches the
+target; pass `--db <file.sqlite>` on every command, read `finding list`, and
+start at the step the request calls for — a verdict is step 5, a publish or
+sync request step 6, new changes (a moved PR head included) step 7, a fix
+request the paragraph under States.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions — so where the target is not in a
