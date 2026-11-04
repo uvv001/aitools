@@ -221,7 +221,7 @@ describe('bundle', () => {
     expect(reply.stderr).toContain(`${ISSUE_REF} is a check annotation; there is nothing to reply to`);
     const unknown = await bundled(['link', 'duplicate', '--db', db, 'F1', 'r999'], dir);
     expect(unknown).toMatchObject({ code: 1, stdout: '' });
-    expect(unknown.stderr).toContain('r999 is not in the database; run "pr-comments pr sync" first, or check the id');
+    expect(unknown.stderr).toContain(`r999 is not in the database; run "pr-comments pr sync --db ${db}" first, or check the id`);
     expect((await readFile(db)).equals(before)).toBe(true);
 
     const linked = await bundled(['link', 'duplicate', '--db', db, 'F1', ISSUE_REF], dir);
