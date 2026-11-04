@@ -10,13 +10,13 @@ Dispatch one agent per rule, each scoped to the paths that rule covers, plus
 two agents no instruction file covers — one for purpose fit, one for the
 ecosystem's best practices. A narrow, single-rule brief is what keeps an
 agent's findings checkable. Pass an explicit `model` on each dispatch,
-selecting from the latest-generation models in the dispatch tool's schema
-and spreading agents across distinct model families — in each dispatch,
-every tier with two or more agents draws on at least two families where the
-schema offers them: the strongest deep-reasoning models for `purpose-fit`,
+selecting from the latest-generation models in the dispatch tool's schema, in
+two tiers: the strongest deep-reasoning models for `purpose-fit`,
 `best-practices`, `recheck`, and semantic or architectural rules; fast,
 precise models for mechanical rules and for the PR-comment agents of
-[pull-request.md](pull-request.md). Where the orchestrator wrote the fixes,
+[pull-request.md](pull-request.md). The **tier bound**: in each dispatch,
+every tier with two or more agents draws on at least two model families
+where the schema offers them. Where the orchestrator wrote the fixes,
 `recheck` runs on a family other than the orchestrator's.
 
 The **shared brief** — every brief carries it — is the pinned revision, its
