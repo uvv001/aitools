@@ -2867,17 +2867,25 @@ async function initReviewFile(name, options = {}) {
 	const repoRoot = findRepoRoot(targetDir);
 	if (repoRoot !== void 0 && samePath(targetDir, join(repoRoot, REVIEW_FOLDER))) await ensureAiGitExcluded(repoRoot);
 	if (!await createDatabase(dbPath, data, pullRequest)) throw existingDatabase(dbPath);
-	await writeReportUntilStable(reportTarget, rendered, () => {
-		const handle = new DatabaseSync(dbPath, {
-			readOnly: true,
-			timeout: 1e4
+	try {
+		await writeReportUntilStable(reportTarget, rendered, () => {
+			const handle = new DatabaseSync(dbPath, {
+				readOnly: true,
+				timeout: 1e4
+			});
+			try {
+				return renderReport(loadReview(handle));
+			} finally {
+				handle.close();
+			}
 		});
-		try {
-			return renderReport(loadReview(handle));
-		} finally {
-			handle.close();
-		}
-	});
+	} catch (error) {
+		return {
+			db: dbPath,
+			report: reportTarget,
+			reportError: error instanceof Error ? error : new Error(String(error))
+		};
+	}
 	return {
 		db: dbPath,
 		report: reportTarget
@@ -3728,7 +3736,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+3f24f13`;
+	return `pr-comments ${VERSION}+66ef1c3`;
 }
 //#endregion
 //#region src/cli.ts
@@ -3881,7 +3889,7 @@ function reportMatchesDatabase({ report, db }) {
 async function initReview({ env, args: [name = ""], values }) {
 	const title = need("the name", name);
 	reportMatchesDatabase(values);
-	const { db, report } = await initReviewFile(title, {
+	const { db, report, reportError } = await initReviewFile(title, {
 		report: values.report,
 		db: values.db,
 		pr: values.pr,
@@ -3891,7 +3899,8 @@ async function initReview({ env, args: [name = ""], values }) {
 	const shown = shownPath(db, env.cwd());
 	env.print(`Created ${shown}\n`);
 	if (values.pr !== void 0) env.print(`Pull request: ${formatPullRequestUrl(parsePullRequestUrl(values.pr))}\n`);
-	env.print(`Report: ${shownPath(report, env.cwd())}\n`);
+	if (reportError === void 0) env.print(`Report: ${shownPath(report, env.cwd())}\n`);
+	else warnReportError(env, db, reportError);
 	return 0;
 }
 async function connectReview({ env, args: [url = ""] }, db) {
