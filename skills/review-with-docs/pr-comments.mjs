@@ -2790,16 +2790,14 @@ function aiIgnoreState(content) {
 	let parentIgnored = false;
 	let childState = "none";
 	for (const line of content.split(/\r?\n/u)) if (AI_CHILD_IGNORE_LINE.test(line)) childState = "ignored";
-	else if (AI_PARENT_IGNORE_LINE.test(line)) {
-		parentIgnored = true;
-		if (childState === "negated") childState = "ignored";
-	} else if (AI_PARENT_UNIGNORE_LINE.test(line)) parentIgnored = false;
+	else if (AI_PARENT_IGNORE_LINE.test(line)) parentIgnored = true;
+	else if (AI_PARENT_UNIGNORE_LINE.test(line)) parentIgnored = false;
 	else if (AI_NEGATE_LINE.test(line)) {
 		parentIgnored = false;
 		childState = "negated";
 	}
-	if (childState !== "none") return childState;
-	return parentIgnored ? "ignored" : "none";
+	if (parentIgnored) return "ignored";
+	return childState;
 }
 function resolveGitDir(repoRoot) {
 	const dotGit = join(repoRoot, ".git");
@@ -3730,7 +3728,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+4924df7`;
+	return `pr-comments ${VERSION}+431f86d`;
 }
 //#endregion
 //#region src/cli.ts
