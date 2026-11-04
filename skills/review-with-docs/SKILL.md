@@ -28,6 +28,9 @@ the expected outcome.
 - Options and examples live in `pr-comments <command> --help`; read it before
   a command's first use. Every command after `init` requires
   `--db <file.sqlite>` (the path `init` created or the continuation selected).
+- The **review folder** is `<session-folder>/files/review-with-docs/` where the
+  host provides a session folder, and `.ai/review-with-docs/` (the `init`
+  default, with no `--db`) where it does not.
 - Every title, description, update, and `--note` renders as Markdown in the
   report, so keep `<...>` tokens inside backticks or code fences. Pass
   descriptions as UTF-8 files and text arguments in single quotes: PowerShell
@@ -41,11 +44,10 @@ the expected outcome.
 
 ## Protocol
 
-A review database already in `<session-folder>/files/review-with-docs/`, in
-`.ai/review-with-docs/`, or in an earlier session's `files/review-with-docs/`
-folder that the user names means the request continues it: where several
-exist, take the one whose title or `pr show --db <file.sqlite>` matches the
-target; pass `--db <file.sqlite>` on every command, read `finding list`, and
+A review database already in the review folder, in `.ai/review-with-docs/`, or
+in an earlier session's `files/review-with-docs/` folder that the user names
+means the request continues it: where several exist, take the one whose title
+or `pr show --db <file.sqlite>` matches the target, read `finding list`, and
 start at the step the request calls for — a verdict is step 5, a publish or
 sync request step 6, new changes (a moved PR head included) step 7, a fix
 request the paragraph under States.
@@ -59,20 +61,19 @@ request the paragraph under States.
    dirty-tree note for an uncommitted tree, none for files reviewed as they
    stand. One attempt to resolve an ambiguous target or base, then the user's
    call — a wrong base silently changes the changeset under review.
-   `init <name>` creates the database — `<name>` the report's title, derived
-   from the review context (PR number, PR author, feature name) — with
-   `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite`
-   when the host provides a session folder (or in `.ai/review-with-docs/` by
-   default when it does not) and `--pr <url>` where the target is a pull
+   `init <name>` creates the database in the review folder — `<name>` the
+   report's title, derived from the review context (PR number, PR author,
+   feature name), with
+   `--db <review-folder>/<yyyy-mm-dd>_<slug>_review.sqlite` where the host
+   provides a session folder and `--pr <url>` where the target is a pull
    request. That first pass — fleet briefs included — reads the changeset
    without the PR's existing comments, so they cannot frame it; the user asks
    for the sync, and even when requested up front, the comments enrich the
    report only after the pass ([pull-request.md](pull-request.md)).
-   **Ready when:** the database and report exist in
-   `<session-folder>/files/review-with-docs/` (or `.ai/review-with-docs/` when
-   the host provides no session folder), the reviewed revision and its base
-   (or none) are pinned, on a pull request target `pr show` names that pull
-   request, and the user's target and base were confirmed or unambiguous.
+   **Ready when:** the database and report exist in the review folder, the
+   reviewed revision and its base (or none) are pinned, on a pull request
+   target `pr show` names that pull request, and the user's target and base
+   were confirmed or unambiguous.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
