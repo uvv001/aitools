@@ -2013,6 +2013,158 @@ function addUpdate(data, id, input, now) {
 	return amend(data, findFinding$1(data, id), now, { round: input.round }, requiredText("update text", input.text));
 }
 //#endregion
+//#region src/review-links.ts
+const DB_HINT_PLACEHOLDER = "--db <file.sqlite>";
+const REMOVE = `pr-comments link remove ${DB_HINT_PLACEHOLDER}`;
+function checkedRef(ref) {
+	if (!isLinkRef(ref)) throw new Error(`"${ref}" is not a PR comment ref; expected r544830, c623843 or a3f9c2d1e`);
+}
+function knownRef(state, ref) {
+	if (!state.known.has(ref)) throw new Error(`${ref} is not in the database; run "pr-comments pr sync ${DB_HINT_PLACEHOLDER}" first, or check the id`);
+}
+const ONLY_DUPLICATE = ": it can only be linked as a duplicate of a finding (the tool does not publish it, and every check item has to be tied to a finding)";
+const NOT_A_NOTE = `: every check item has to be tied to a finding, so it cannot be recorded as a note; link it to a finding (add one with "pr-comments finding add ${DB_HINT_PLACEHOLDER}" when none covers it)`;
+const NOTHING_TO_REPLY = "; there is nothing to reply to";
+function refuseAnnotation(ref, why) {
+	if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation${why}`);
+}
+const subject = (state, ref) => isAnnotationRef(ref) ? `check annotation ${ref}` : `PR comment ${commentLink(state.pullRequest, ref)}`;
+const linkOf = (links, ref) => links.find((link) => link.ref === ref);
+const ownOf = (links, findingId) => links.find((link) => link.role === "own" && link.finding === findingId);
+function describeLink({ role, finding, note }) {
+	if (role === "own") return `the own comment of ${finding}`;
+	return role === "duplicate" ? `a duplicate of ${finding}` : `a note (${note})`;
+}
+const alreadyLinked = (link) => /* @__PURE__ */ new Error(`${link.ref} is already linked as ${describeLink(link)}; remove that link first with "${REMOVE} ${link.ref}"`);
+const alreadyHasOwn = (finding, own, lead = "") => /* @__PURE__ */ new Error(`${lead}${finding} already has its own comment ${own.ref}; remove that link first with "${REMOVE} ${own.ref}"`);
+const asRole = (role) => role === "own" ? "its own" : "a duplicate";
+function linkToFinding(state, findingId, ref, role, now, note) {
+	const found = findFinding$1(state.data, findingId);
+	checkedRef(ref);
+	knownRef(state, ref);
+	const linked = linkOf(state.links, ref);
+	if (linked !== void 0) throw alreadyLinked(linked);
+	const own = role === "own" ? ownOf(state.links, found.id) : void 0;
+	if (own !== void 0) throw alreadyHasOwn(found.id, own);
+	const data = amend(state.data, found, now, { note }, `${subject(state, ref)} linked as ${asRole(role)}`);
+	return {
+		...state,
+		data,
+		links: [...state.links, {
+			ref,
+			role,
+			finding: found.id
+		}]
+	};
+}
+function linkOwn(state, findingId, ref, now, note) {
+	refuseAnnotation(ref, ONLY_DUPLICATE);
+	return linkToFinding(state, findingId, ref, "own", now, note);
+}
+function linkDuplicate(state, findingId, ref, now, note) {
+	return linkToFinding(state, findingId, ref, "duplicate", now, note);
+}
+function linkNote(state, ref, text) {
+	refuseAnnotation(ref, NOT_A_NOTE);
+	checkedRef(ref);
+	knownRef(state, ref);
+	const reason = oneLineText("note", text);
+	const linked = linkOf(state.links, ref);
+	if (linked !== void 0) throw alreadyLinked(linked);
+	return {
+		...state,
+		links: [...state.links, {
+			ref,
+			role: "note",
+			note: reason
+		}]
+	};
+}
+function unlink$1(state, ref, now, note) {
+	checkedRef(ref);
+	const link = linkOf(state.links, ref);
+	if (link === void 0) {
+		const known = state.links.map((item) => item.ref).join(", ");
+		throw new Error(`${ref} is not linked in this review; ${known === "" ? "the review has no links" : `it has ${known}`}`);
+	}
+	const links = state.links.filter((item) => item !== link);
+	if (link.finding === void 0) {
+		if (note !== void 0) throw new Error(`${ref} is recorded as a note, which has no finding to log under; leave out --note`);
+		return {
+			...state,
+			links
+		};
+	}
+	const found = findFinding$1(state.data, link.finding);
+	const data = amend(state.data, found, now, { note }, `${subject(state, ref)} unlinked (was ${asRole(link.role)})`);
+	return {
+		...state,
+		data,
+		links
+	};
+}
+function recordPosted(state, findingId, ref, action, where, now) {
+	refuseAnnotation(ref, ONLY_DUPLICATE);
+	const found = findFinding$1(state.data, findingId);
+	checkedRef(ref);
+	knownRef(state, ref);
+	const linked = linkOf(state.links, ref);
+	if (linked !== void 0 && !(linked.role === "own" && linked.finding === found.id)) throw alreadyLinked(linked);
+	const own = ownOf(state.links, found.id);
+	if (own !== void 0 && own.ref !== ref) throw alreadyHasOwn(found.id, own, "a posted comment cannot move: ");
+	if (own !== void 0 && action === "unchanged") return state;
+	const pending = where === "pending" ? " to the pending review" : "";
+	const comment = commentLink(state.pullRequest, ref);
+	const what = {
+		created: `posted PR comment ${comment}${pending}`,
+		updated: `updated PR comment ${comment}`,
+		unchanged: `adopted PR comment ${comment} (identical)`
+	}[action];
+	const data = amend(state.data, found, now, {}, what);
+	return {
+		...state,
+		data,
+		links: own === void 0 ? [...state.links, {
+			ref,
+			role: "own",
+			finding: found.id
+		}] : state.links
+	};
+}
+function recordReplied(state, ref, replyRef, where, now) {
+	refuseAnnotation(ref, NOTHING_TO_REPLY);
+	checkedRef(ref);
+	checkedRef(replyRef);
+	knownRef(state, ref);
+	const link = linkOf(state.links, ref);
+	if (link === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate ${DB_HINT_PLACEHOLDER} <finding> ${ref}"`);
+	if (link.role !== "duplicate") throw new Error(link.role === "note" ? `${ref} is recorded as a note, not as a duplicate of a finding` : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`);
+	const found = findFinding$1(state.data, link.finding);
+	const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;
+	const recorded = (text) => {
+		const rest = text.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} — /u, "");
+		return rest.startsWith(what) && !/^\d/u.test(rest.slice(what.length));
+	};
+	if (found.updates.some((entry) => recorded(entry.text))) return state;
+	return {
+		...state,
+		data: amend(state.data, found, now, {}, `${what}${where === "pending" ? " in the pending review" : ""}`)
+	};
+}
+function connectPullRequest(state, url) {
+	const canonical = formatPullRequestUrl(parsePullRequestUrl(url));
+	if (state.pullRequest?.toLowerCase() === canonical.toLowerCase()) return state;
+	if (state.pullRequest !== void 0 && state.links.length > 0) throw new Error(`the review is connected to ${state.pullRequest} and its ${state.links.length} PR comment link(s) point there; remove them first with "${REMOVE} <ref>" before connecting ${canonical}`);
+	return {
+		...state,
+		pullRequest: canonical
+	};
+}
+function linksOf(links, findingId) {
+	const wanted = findingId.trim().toLowerCase();
+	return links.filter((link) => link.finding?.toLowerCase() === wanted);
+}
+//#endregion
 //#region src/review-naming.ts
 const REVIEW_FOLDER = join(".ai", "review-with-docs");
 const MAX_SLUG_LENGTH = 60;
@@ -2985,7 +3137,7 @@ async function changeReviewState(arg, change, options = {}) {
 			try {
 				result = await change(before);
 			} catch (error) {
-				if (error instanceof Error && error.message.includes("--db <file.sqlite>")) throw new Error(error.message.replaceAll("--db <file.sqlite>", `--db ${quoteCliPath(paths.db)}`));
+				if (error instanceof Error && error.message.includes("--db <file.sqlite>")) error.message = error.message.replaceAll(DB_HINT_PLACEHOLDER, () => `--db ${quoteCliPath(paths.db)}`);
 				throw error;
 			}
 			const { state } = result;
@@ -3059,157 +3211,6 @@ async function syncReviewFile(arg, data) {
 		comments: data.comments.length,
 		annotations
 	};
-}
-//#endregion
-//#region src/review-links.ts
-const REMOVE = "pr-comments link remove --db <file.sqlite>";
-function checkedRef(ref) {
-	if (!isLinkRef(ref)) throw new Error(`"${ref}" is not a PR comment ref; expected r544830, c623843 or a3f9c2d1e`);
-}
-function knownRef(state, ref) {
-	if (!state.known.has(ref)) throw new Error(`${ref} is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id`);
-}
-const ONLY_DUPLICATE = ": it can only be linked as a duplicate of a finding (the tool does not publish it, and every check item has to be tied to a finding)";
-const NOT_A_NOTE = ": every check item has to be tied to a finding, so it cannot be recorded as a note; link it to a finding (add one with \"pr-comments finding add --db <file.sqlite>\" when none covers it)";
-const NOTHING_TO_REPLY = "; there is nothing to reply to";
-function refuseAnnotation(ref, why) {
-	if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation${why}`);
-}
-const subject = (state, ref) => isAnnotationRef(ref) ? `check annotation ${ref}` : `PR comment ${commentLink(state.pullRequest, ref)}`;
-const linkOf = (links, ref) => links.find((link) => link.ref === ref);
-const ownOf = (links, findingId) => links.find((link) => link.role === "own" && link.finding === findingId);
-function describeLink({ role, finding, note }) {
-	if (role === "own") return `the own comment of ${finding}`;
-	return role === "duplicate" ? `a duplicate of ${finding}` : `a note (${note})`;
-}
-const alreadyLinked = (link) => /* @__PURE__ */ new Error(`${link.ref} is already linked as ${describeLink(link)}; remove that link first with "${REMOVE} ${link.ref}"`);
-const alreadyHasOwn = (finding, own, lead = "") => /* @__PURE__ */ new Error(`${lead}${finding} already has its own comment ${own.ref}; remove that link first with "${REMOVE} ${own.ref}"`);
-const asRole = (role) => role === "own" ? "its own" : "a duplicate";
-function linkToFinding(state, findingId, ref, role, now, note) {
-	const found = findFinding$1(state.data, findingId);
-	checkedRef(ref);
-	knownRef(state, ref);
-	const linked = linkOf(state.links, ref);
-	if (linked !== void 0) throw alreadyLinked(linked);
-	const own = role === "own" ? ownOf(state.links, found.id) : void 0;
-	if (own !== void 0) throw alreadyHasOwn(found.id, own);
-	const data = amend(state.data, found, now, { note }, `${subject(state, ref)} linked as ${asRole(role)}`);
-	return {
-		...state,
-		data,
-		links: [...state.links, {
-			ref,
-			role,
-			finding: found.id
-		}]
-	};
-}
-function linkOwn(state, findingId, ref, now, note) {
-	refuseAnnotation(ref, ONLY_DUPLICATE);
-	return linkToFinding(state, findingId, ref, "own", now, note);
-}
-function linkDuplicate(state, findingId, ref, now, note) {
-	return linkToFinding(state, findingId, ref, "duplicate", now, note);
-}
-function linkNote(state, ref, text) {
-	refuseAnnotation(ref, NOT_A_NOTE);
-	checkedRef(ref);
-	knownRef(state, ref);
-	const reason = oneLineText("note", text);
-	const linked = linkOf(state.links, ref);
-	if (linked !== void 0) throw alreadyLinked(linked);
-	return {
-		...state,
-		links: [...state.links, {
-			ref,
-			role: "note",
-			note: reason
-		}]
-	};
-}
-function unlink$1(state, ref, now, note) {
-	checkedRef(ref);
-	const link = linkOf(state.links, ref);
-	if (link === void 0) {
-		const known = state.links.map((item) => item.ref).join(", ");
-		throw new Error(`${ref} is not linked in this review; ${known === "" ? "the review has no links" : `it has ${known}`}`);
-	}
-	const links = state.links.filter((item) => item !== link);
-	if (link.finding === void 0) {
-		if (note !== void 0) throw new Error(`${ref} is recorded as a note, which has no finding to log under; leave out --note`);
-		return {
-			...state,
-			links
-		};
-	}
-	const found = findFinding$1(state.data, link.finding);
-	const data = amend(state.data, found, now, { note }, `${subject(state, ref)} unlinked (was ${asRole(link.role)})`);
-	return {
-		...state,
-		data,
-		links
-	};
-}
-function recordPosted(state, findingId, ref, action, where, now) {
-	refuseAnnotation(ref, ONLY_DUPLICATE);
-	const found = findFinding$1(state.data, findingId);
-	checkedRef(ref);
-	knownRef(state, ref);
-	const linked = linkOf(state.links, ref);
-	if (linked !== void 0 && !(linked.role === "own" && linked.finding === found.id)) throw alreadyLinked(linked);
-	const own = ownOf(state.links, found.id);
-	if (own !== void 0 && own.ref !== ref) throw alreadyHasOwn(found.id, own, "a posted comment cannot move: ");
-	if (own !== void 0 && action === "unchanged") return state;
-	const pending = where === "pending" ? " to the pending review" : "";
-	const comment = commentLink(state.pullRequest, ref);
-	const what = {
-		created: `posted PR comment ${comment}${pending}`,
-		updated: `updated PR comment ${comment}`,
-		unchanged: `adopted PR comment ${comment} (identical)`
-	}[action];
-	const data = amend(state.data, found, now, {}, what);
-	return {
-		...state,
-		data,
-		links: own === void 0 ? [...state.links, {
-			ref,
-			role: "own",
-			finding: found.id
-		}] : state.links
-	};
-}
-function recordReplied(state, ref, replyRef, where, now) {
-	refuseAnnotation(ref, NOTHING_TO_REPLY);
-	checkedRef(ref);
-	checkedRef(replyRef);
-	knownRef(state, ref);
-	const link = linkOf(state.links, ref);
-	if (link === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db <file.sqlite> <finding> ${ref}"`);
-	if (link.role !== "duplicate") throw new Error(link.role === "note" ? `${ref} is recorded as a note, not as a duplicate of a finding` : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`);
-	const found = findFinding$1(state.data, link.finding);
-	const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;
-	const recorded = (text) => {
-		const rest = text.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} — /u, "");
-		return rest.startsWith(what) && !/^\d/u.test(rest.slice(what.length));
-	};
-	if (found.updates.some((entry) => recorded(entry.text))) return state;
-	return {
-		...state,
-		data: amend(state.data, found, now, {}, `${what}${where === "pending" ? " in the pending review" : ""}`)
-	};
-}
-function connectPullRequest(state, url) {
-	const canonical = formatPullRequestUrl(parsePullRequestUrl(url));
-	if (state.pullRequest?.toLowerCase() === canonical.toLowerCase()) return state;
-	if (state.pullRequest !== void 0 && state.links.length > 0) throw new Error(`the review is connected to ${state.pullRequest} and its ${state.links.length} PR comment link(s) point there; remove them first with "${REMOVE} <ref>" before connecting ${canonical}`);
-	return {
-		...state,
-		pullRequest: canonical
-	};
-}
-function linksOf(links, findingId) {
-	const wanted = findingId.trim().toLowerCase();
-	return links.filter((link) => link.finding?.toLowerCase() === wanted);
 }
 //#endregion
 //#region src/review-pending.ts
@@ -3770,7 +3771,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+a1cc585`;
+	return `pr-comments ${VERSION}+c875048`;
 }
 //#endregion
 //#region src/cli.ts
