@@ -178,9 +178,9 @@ export interface InitResult {
 // The meta key that holds the connected pull request.
 const PULL_REQUEST = 'pull_request';
 
-const AI_PARENT_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
+const AI_PARENT_IGNORE_LINE = /^[ \t]*\/?\.ai\/?[ \t]*$/u;
 const AI_PARENT_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/?[ \t]*$/u;
-const AI_CHILD_IGNORE_LINE = /^[ \t]*\/?\.ai\/review-with-docs(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
+const AI_CHILD_IGNORE_LINE = /^[ \t]*\/?\.ai\/(?:(?:\*\*|\*)|review-with-docs(?:\/(?:\*\*|\*)?)?)[ \t]*$/u;
 const AI_NEGATE_LINE =
   /^[ \t]*!(?:\/?\.ai\/(?:\*\*|\*)|\/?\.ai\/review-with-docs(?:\/[^\r\n]*)?|\*+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
 

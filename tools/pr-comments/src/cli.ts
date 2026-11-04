@@ -260,12 +260,13 @@ function shownPath(path: string, cwd: string): string {
   return below !== '' && !below.startsWith('..') && !isAbsolute(below) ? below : path;
 }
 
-function warnReportError(env: CliEnvironment, db: string, error: Error | undefined): void {
+function warnReportError(env: CliEnvironment, db: string, error: Error | undefined, report = reviewPaths(db).report): void {
   if (error === undefined) return;
   const shownDb = shownPath(db, env.cwd());
-  const shownReport = shownPath(reviewPaths(db).report, env.cwd());
+  const shownReport = shownPath(report, env.cwd());
+  const outFlag = report === reviewPaths(db).report ? '' : ` --out ${shownReport}`;
   env.warn(
-    `Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${shownDb}"\n`,
+    `Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${shownDb}${outFlag}"\n`,
   );
 }
 
@@ -297,7 +298,7 @@ async function initReview({ env, args: [name = ''], values }: Context): Promise<
   env.print(`Created ${shown}\n`);
   if (values.pr !== undefined) env.print(`Pull request: ${formatPullRequestUrl(parsePullRequestUrl(values.pr))}\n`);
   if (reportError === undefined) env.print(`Report: ${shownPath(report, env.cwd())}\n`);
-  else warnReportError(env, db, reportError);
+  else warnReportError(env, db, reportError, report);
   return 0;
 }
 
