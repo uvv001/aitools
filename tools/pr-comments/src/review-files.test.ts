@@ -1938,7 +1938,7 @@ const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url)).replaceAll('\\',
 
 describe.skipIf(!hasGit)('the textconv recipe of the README', () => {
   const git = async (...args: string[]): Promise<string> => {
-    const config = ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'core.autocrlf=false'];
+    const config = ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false'];
     return (await execFileAsync('git', ['-C', dir, ...config, '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', ...args])).stdout;
   };
 
