@@ -162,7 +162,8 @@ function mustBeDatabase(dbPath: string | undefined): void {
 
 // The report is always next to the database with the same name, so naming both is fine only when they agree.
 function reportMatchesDatabase(report: string | undefined, db: string | undefined): void {
-  if (report === undefined || db === undefined || samePath(reviewPaths(report).db, db)) return;
+  if (report === undefined || db === undefined) return;
+  if (samePath(reviewPaths(report).db, reviewPaths(reviewPaths(db).report).db)) return;
   throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
 }
 
@@ -237,8 +238,8 @@ async function isReviewIgnoredByGit(repoRoot: string, extraPaths: string[] = [])
     if (failure.code === 'ENOENT') {
       throw new Error(`git could not be started (is it installed and on the PATH?): ${failure.message ?? String(error)}`);
     }
-    const detail = (failure.stderr ?? failure.message ?? String(error)).trim().split(/\r?\n/u)[0] ?? 'unknown git error';
-    throw new Error(`git check-ignore failed in ${repoRoot}: ${detail}`);
+    const text = (failure.stderr ?? '').trim() || (failure.message ?? '').trim() || String(error);
+    throw new Error(`git check-ignore failed in ${repoRoot}: ${text}`);
   }
 }
 
