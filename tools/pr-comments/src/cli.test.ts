@@ -1151,6 +1151,19 @@ describe('cli', () => {
         expect(JSON.parse(printed)).toEqual({ pullRequest: prUrl, synced: false });
       });
 
+      it('quotes a database path with spaces in command hints', async () => {
+        const spacedDir = join(work, 'my reviews');
+        await mkdir(spacedDir, { recursive: true });
+        const db = join(spacedDir, 'spaced_review.sqlite');
+        await step('init', 'Spaced', '--db', db);
+
+        expect(await step('pr', 'show', '--db', db)).toBe(0);
+        expect(printed).toBe(`not connected to a pull request; connect it with "pr-comments pr connect --db '${db}' <url>"\n`);
+        await expect(step('pr', 'sync', '--db', db)).rejects.toThrow(
+          `the review is not connected to a pull request; connect it first with "pr-comments pr connect --db '${db}' <url>"`,
+        );
+      });
+
       it('prints the pull request, when it was synced, its head and what the database holds of it', async () => {
         expect(await step('pr', 'show')).toBe(0);
         expect(printed).toBe(`${prUrl}\nsynced 2026-01-06T12:00:00Z, head cccccccc\n2 reviews, 2 threads, 5 comments, 4 annotations\n`);

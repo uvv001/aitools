@@ -73,6 +73,10 @@ export async function refuseDatabase(target: string, db: string): Promise<void> 
   if (/\.sqlite(?::[^\\/]*)?$/iu.test(target)) throw new Error('--out must be a report file, not a database');
 }
 
+// Wraps a path in single quotes when it contains whitespace or single quotes, so a command hint inside double quotes
+// can be copied and run without splitting on spaces.
+export const quoteCliPath = (path: string): string => (/[\s']/u.test(path) ? `'${path.replaceAll("'", "''")}'` : path);
+
 // Accepts the report (`…_review.md`) or the database (`….sqlite`) and derives the other one next to it. The
 // extension is matched without regard to case; the derived path always has the lower-case one.
 export function reviewPaths(arg: string): ReviewPaths {
@@ -435,7 +439,7 @@ export async function changeReviewState<T>(
           result = await change(before);
         } catch (error) {
           if (error instanceof Error && error.message.includes('--db <file.sqlite>')) {
-            throw new Error(error.message.replaceAll('--db <file.sqlite>', `--db ${paths.db}`));
+            throw new Error(error.message.replaceAll('--db <file.sqlite>', `--db ${quoteCliPath(paths.db)}`));
           }
           throw error;
         }
@@ -522,7 +526,7 @@ export async function syncReviewFile(arg: string, data: PullRequestData): Promis
       () => {
         const connected = getMeta(db, PULL_REQUEST);
         if (connected === undefined) {
-          throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${paths.db} <url>"`);
+          throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(paths.db)} <url>"`);
         }
         if (!samePullRequest(parsePullRequestUrl(connected), data.pullRequest)) {
           throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(data.pullRequest)}`);

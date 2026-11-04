@@ -4,7 +4,7 @@ import { parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { composeBody } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
-import { changeReviewState, loadReviewFile } from './review-files.ts';
+import { changeReviewState, loadReviewFile, quoteCliPath } from './review-files.ts';
 import { linksOf, recordReplied } from './review-links.ts';
 
 export interface ReplyDuplicateOptions {
@@ -69,12 +69,13 @@ export async function replyToDuplicate(
 ): Promise<RepliedDuplicate> {
   if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation; there is nothing to reply to`);
   const { links, pullRequest, paths } = await loadReviewFile(arg);
+  const quotedDb = quoteCliPath(paths.db);
   if (pullRequest === undefined) {
-    throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${paths.db} <url>"`);
+    throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
   }
   const linked = links.find((link) => link.ref === ref);
   if (linked === undefined) {
-    throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db ${paths.db} <finding> ${ref}"`);
+    throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db ${quotedDb} <finding> ${ref}"`);
   }
   if (linked.role === 'note') throw new Error(`${ref} is recorded as a note, not as a duplicate of a finding`);
   const finding = linked.finding!;
@@ -84,7 +85,7 @@ export async function replyToDuplicate(
   const own = linksOf(links, finding).find((link) => link.role === 'own');
   if (own === undefined) {
     throw new Error(
-      `${finding} has no own comment yet; post it with "pr-comments finding post --db ${paths.db} ${finding}" or link its comment with "pr-comments link own --db ${paths.db} ${finding} <ref>"`,
+      `${finding} has no own comment yet; post it with "pr-comments finding post --db ${quotedDb} ${finding}" or link its comment with "pr-comments link own --db ${quotedDb} ${finding} <ref>"`,
     );
   }
 
@@ -95,8 +96,8 @@ export async function replyToDuplicate(
   const gone = own.ref.startsWith('r') ? 'was your pending review discarded?' : 'was it deleted?';
   const missing =
     `comment ${own.ref}, the own comment of ${finding}, no longer exists in this pull request (${gone}); ` +
-    `remove the link with "pr-comments link remove --db ${paths.db} ${own.ref}" ` +
-    `and post ${finding} again with "pr-comments finding post --db ${paths.db} ${finding}"`;
+    `remove the link with "pr-comments link remove --db ${quotedDb} ${own.ref}" ` +
+    `and post ${finding} again with "pr-comments finding post --db ${quotedDb} ${finding}"`;
   const request = { commentRef: ref, body, requires: { ref: own.ref, missing } };
   const pullRequestRef = parsePullRequestUrl(pullRequest);
   const result = await deps.reply(pullRequestRef, request, { now: options.now, dryRun: options.dryRun });
@@ -110,7 +111,7 @@ export async function replyToDuplicate(
     snapshot = await deps.refresh(pullRequestRef);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    const message = `${was}, but the pull request could not be refreshed (${reason}); run "pr-comments pr sync --db ${paths.db}" and run the command again to record it`;
+    const message = `${was}, but the pull request could not be refreshed (${reason}); run "pr-comments pr sync --db ${quotedDb}" and run the command again to record it`;
     return { ...replied, result: { ...result, action: 'error', message } };
   }
   try {

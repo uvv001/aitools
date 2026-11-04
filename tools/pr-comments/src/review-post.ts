@@ -6,7 +6,7 @@ import type { PullRequestRef } from './pr-url.ts';
 import { extractComment } from './report-extract.ts';
 import type { Anchor } from './report-extract.ts';
 import { parseReport } from './report-parse.ts';
-import { changeReviewState, loadReviewFile } from './review-files.ts';
+import { changeReviewState, loadReviewFile, quoteCliPath } from './review-files.ts';
 import { linksOf, recordPosted } from './review-links.ts';
 import type { PostedAction } from './review-links.ts';
 import { renderReport } from './review-render.ts';
@@ -56,7 +56,7 @@ export interface PostedFinding {
 // The finding is tied to its own comment by a link, so that is where the way on starts.
 function linkAdvice(reason: OwnCommentReason, ref: string, db: string): string {
   const stays = reason === 'moved' ? `; ${ref} stays on GitHub until you delete it` : '';
-  return `remove the link with "pr-comments link remove --db ${db} ${ref}" and post again (that creates a new comment${stays})`;
+  return `remove the link with "pr-comments link remove --db ${quoteCliPath(db)} ${ref}" and post again (that creates a new comment${stays})`;
 }
 
 // Publishes the comment of ONE finding of the review database `arg` (a report or a database path), using the
@@ -83,8 +83,9 @@ export async function postFinding(
   deps: PostFindingDeps,
 ): Promise<PostedFinding> {
   const { data, links, pullRequest, paths } = await loadReviewFile(arg);
+  const quotedDb = quoteCliPath(paths.db);
   if (pullRequest === undefined) {
-    throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${paths.db} <url>"`);
+    throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
   }
   const ref = parsePullRequestUrl(pullRequest);
   const extracted = extractComment(parseReport(renderReport(data), paths.report), findingId, {
@@ -111,7 +112,7 @@ export async function postFinding(
       if (options.dryRun || posted === undefined) return result;
       const action: PostedAction = result.action;
       const was = action === 'created' ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
-      const linkOwnCommand = `"pr-comments link own --db ${paths.db} ${id} ${posted}"`;
+      const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
       let snapshot: PullRequestData;
       try {
         snapshot = await deps.refresh(ref);
@@ -119,7 +120,7 @@ export async function postFinding(
         const reason = error instanceof Error ? error.message : String(error);
         const message =
           `${was}, but the pull request could not be refreshed (${reason}); ` +
-          `run "pr-comments pr sync --db ${paths.db}", then ${linkOwnCommand}`;
+          `run "pr-comments pr sync --db ${quotedDb}", then ${linkOwnCommand}`;
         return { ...result, action: 'error', message };
       }
       try {

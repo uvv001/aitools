@@ -21,6 +21,7 @@ import {
   loadReviewFile,
   loadSnapshot,
   mutateReviewFile,
+  quoteCliPath,
   refuseDatabase,
   renderReportFile,
   reviewPaths,
@@ -264,9 +265,9 @@ function warnReportError(env: CliEnvironment, db: string, error: Error | undefin
   if (error === undefined) return;
   const shownDb = shownPath(db, env.cwd());
   const shownReport = shownPath(report, env.cwd());
-  const outFlag = report === reviewPaths(db).report ? '' : ` --out ${shownReport}`;
+  const outFlag = report === reviewPaths(db).report ? '' : ` --out ${quoteCliPath(shownReport)}`;
   env.warn(
-    `Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${shownDb}${outFlag}"\n`,
+    `Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${quoteCliPath(shownDb)}${outFlag}"\n`,
   );
 }
 
@@ -274,7 +275,7 @@ const countAnnotations = (data: PullRequestData): number => (data.checkRuns ?? [
 
 async function snapshotOf(db: string): Promise<PullRequestData> {
   const data = await loadSnapshot(db);
-  if (data === undefined) throw new Error(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
+  if (data === undefined) throw new Error(`no pull request data in the database; run "pr-comments pr sync --db ${quoteCliPath(db)}" first`);
   return data;
 }
 
@@ -315,13 +316,13 @@ async function showPullRequest({ env, values }: Context, db: string): Promise<nu
   const { pullRequest } = await loadReviewFile(db);
   if (pullRequest === undefined) {
     if (values.json) printJson(env, { pullRequest: null });
-    else env.print(`not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"\n`);
+    else env.print(`not connected to a pull request; connect it with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"\n`);
     return 0;
   }
   const data = await loadSnapshot(db);
   if (data === undefined) {
     if (values.json) printJson(env, { pullRequest, synced: false });
-    else env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync --db ${db}"\n`);
+    else env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync --db ${quoteCliPath(db)}"\n`);
     return 0;
   }
   const { fetchedAt, headSha } = data.pullRequest;
@@ -339,7 +340,7 @@ async function showPullRequest({ env, values }: Context, db: string): Promise<nu
 async function syncPullRequest({ env }: Context, db: string): Promise<number> {
   const { pullRequest } = await loadReviewFile(db);
   if (pullRequest === undefined) {
-    throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${db} <url>"`);
+    throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"`);
   }
   const ref = parsePullRequestUrl(pullRequest);
   const { reviews, threads, comments, annotations } = await syncReviewFile(db, await env.getPullRequest(ref));
