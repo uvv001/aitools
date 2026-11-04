@@ -3040,9 +3040,13 @@ async function initReviewFile(name, options = {}) {
 	const dbPath = options.db ?? paths.db;
 	const targetDir = dirname(resolve(cwd, dbPath));
 	if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
-	const reportTarget = options.report !== void 0 || options.db === void 0 ? paths.report : reviewPaths(dbPath).report;
+	const reportTarget = reviewPaths(reviewPaths(options.report !== void 0 || options.db === void 0 ? paths.report : reviewPaths(dbPath).report).db).report;
 	await refuseDatabase(reportTarget, dbPath);
 	if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
+	if (options.report !== void 0 && options.report !== reportTarget && !samePath(options.report, dbPath)) {
+		await refuseDatabase(options.report, dbPath);
+		if (await existsOrSymlink(options.report)) throw existingReport(options.report);
+	}
 	const rendered = assertRenders(data, reportTarget);
 	const repoRoot = findRepoRoot(targetDir);
 	if (repoRoot !== void 0 && isInsideReviewFolder(targetDir, repoRoot)) await ensureAiGitExcluded(repoRoot, [resolve(cwd, dbPath), resolve(cwd, reportTarget)]);
@@ -3774,7 +3778,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+dea044f`;
+	return `pr-comments ${VERSION}+21daa59`;
 }
 //#endregion
 //#region src/cli.ts
@@ -3907,12 +3911,11 @@ function shownPath(path, cwd) {
 	const below = relative(cwd, path);
 	return below !== "" && !below.startsWith("..") && !isAbsolute(below) ? below : path;
 }
-function warnReportError(env, db, error, report = reviewPaths(db).report) {
+function warnReportError(env, db, error) {
 	if (error === void 0) return;
 	const shownDb = shownPath(db, env.cwd());
-	const shownReport = shownPath(report, env.cwd());
-	const outFlag = report === reviewPaths(db).report ? "" : ` --out ${quoteCliPath(shownReport)}`;
-	env.warn(`Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${quoteCliPath(shownDb)}${outFlag}"\n`);
+	const shownReport = shownPath(reviewPaths(db).report, env.cwd());
+	env.warn(`Warning: the report ${shownReport} was not refreshed (${error.message}); run "pr-comments report render --db ${quoteCliPath(shownDb)}"\n`);
 }
 const countAnnotations = (data) => (data.checkRuns ?? []).reduce((total, run) => total + run.annotations.length, 0);
 async function snapshotOf(db) {
@@ -3938,7 +3941,7 @@ async function initReview({ env, args: [name = ""], values }) {
 	env.print(`Created ${shown}\n`);
 	if (values.pr !== void 0) env.print(`Pull request: ${formatPullRequestUrl(parsePullRequestUrl(values.pr))}\n`);
 	if (reportError === void 0) env.print(`Report: ${shownPath(report, env.cwd())}\n`);
-	else warnReportError(env, db, reportError, report);
+	else warnReportError(env, db, reportError);
 	return 0;
 }
 async function connectReview({ env, args: [url = ""] }, db) {
