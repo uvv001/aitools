@@ -74,9 +74,13 @@ export async function refuseDatabase(target: string, db: string): Promise<void> 
   if (/\.sqlite(?::[^\\/]*)?$/iu.test(target)) throw new Error('--out must be a report file, not a database');
 }
 
-// Wraps a path in single quotes when it contains whitespace or single quotes, so a command hint inside double quotes
-// can be copied and run without splitting on spaces.
-export const quoteCliPath = (path: string): string => (/[\s']/u.test(path) ? `'${path.replaceAll("'", "''")}'` : path);
+// Wraps a path in single quotes when it contains whitespace or shell metacharacters, escaping single quotes for the
+// platform shell (`''` on Windows PowerShell, `'\''` on POSIX shells) so a copied command hint runs as one argument.
+export function quoteCliPath(path: string, platform: NodeJS.Platform = process.platform): string {
+  if (!/[^\w@%+=:,./\\-]/u.test(path)) return path;
+  const escaped = platform === 'win32' ? path.replaceAll("'", "''") : path.replaceAll("'", "'\\''");
+  return `'${escaped}'`;
+}
 
 // Accepts the report (`…_review.md`) or the database (`….sqlite`) and derives the other one next to it. The
 // extension is matched without regard to case; the derived path always has the lower-case one.

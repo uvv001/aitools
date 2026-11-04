@@ -16,6 +16,7 @@ import {
   loadReviewFile,
   loadSnapshot,
   mutateReviewFile,
+  quoteCliPath,
   refuseDatabase,
   renderReportFile,
   reviewPaths,
@@ -123,6 +124,17 @@ describe('reviewPaths', () => {
 
   it.each(['r.txt', 'r', 'r.md.bak', 'r.sqlite3', '.md', ''])('refuses %j', (arg) => {
     expect(() => reviewPaths(arg)).toThrow(new Error(`${arg} must be a report (.md) or a review database (.sqlite)`));
+  });
+});
+
+describe('quoteCliPath', () => {
+  it('leaves plain paths unquoted and quotes spaces, metacharacters, and apostrophes per platform', () => {
+    expect(quoteCliPath('docs/demo_review.sqlite', 'linux')).toBe('docs/demo_review.sqlite');
+    expect(quoteCliPath('C:\\dev\\AI\\own\\r.sqlite', 'win32')).toBe('C:\\dev\\AI\\own\\r.sqlite');
+    expect(quoteCliPath('my reviews/r.sqlite', 'linux')).toBe("'my reviews/r.sqlite'");
+    expect(quoteCliPath('dir(1)&$x/r.sqlite', 'linux')).toBe("'dir(1)&$x/r.sqlite'");
+    expect(quoteCliPath("C:\\Jane's Reviews\\r.sqlite", 'win32')).toBe("'C:\\Jane''s Reviews\\r.sqlite'");
+    expect(quoteCliPath("/tmp/Jane's Reviews/r.sqlite", 'linux')).toBe("'/tmp/Jane'\\''s Reviews/r.sqlite'");
   });
 });
 
