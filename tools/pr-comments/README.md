@@ -57,7 +57,7 @@ Pull request: https://github.com/acme/widgets/pull/42
 Report: .ai/review-with-docs/2026-10-29_pr-42-tenant-registry_review.md
 ```
 
-Both the database and the report are created, and every change updates the report. Without `--report` or `--db`, the files go to `.ai/review-with-docs/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root, and `/.ai/review-with-docs/` is added to `.git/info/exclude` when not already ignored (while `.ai/` itself can remain versioned). Pass `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` when storing the review in a session folder. Every subsequent command takes `--db <file.sqlite>` (`$DB` below). If the pull request does not exist yet, leave out `--pr`, and connect it later:
+Both the database and the report are created, and every change updates the report after the database change commits (if writing the report file fails afterwards, the database change stays saved, the command exits `0`, and `stderr` prints `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"`). Without `--report` or `--db`, the files go to `.ai/review-with-docs/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root, and `/.ai/review-with-docs/` is added to `.git/info/exclude` when not already ignored (while `.ai/` itself can remain versioned). Pass `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` when storing the review in a session folder. Every subsequent command takes `--db <file.sqlite>` (`$DB` below). If the pull request does not exist yet, leave out `--pr`, and connect it later:
 
 ```
 pr-comments pr connect https://github.com/acme/widgets/pull/42 --db $DB
