@@ -677,6 +677,7 @@ describe('initReviewFile', () => {
       ['wildcard negation under .ai/', '/.ai/\n!/.ai/\n!/.ai/**\n'],
       ['markdown negation under .ai/review-with-docs/', '/.ai/review-with-docs/**\n!/.ai/review-with-docs/*.md\n'],
       ['child negation before parent !/.ai/', '!/.ai/review-with-docs/\n!/.ai/\n'],
+      ['child negation before parent /.ai/ and !/.ai/', '!/.ai/review-with-docs/\n/.ai/\n!/.ai/\n'],
     ])('reports a conflict when .gitignore exposes .ai/review-with-docs/ via %s', async (_name, gitignoreText) => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
       await writeFile(join(repo, '.gitignore'), gitignoreText, 'utf8');

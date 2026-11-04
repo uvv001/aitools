@@ -191,7 +191,6 @@ function aiIgnoreState(content: string): 'ignored' | 'negated' | 'none' {
       childState = 'ignored';
     } else if (AI_PARENT_IGNORE_LINE.test(line)) {
       parentIgnored = true;
-      if (childState === 'negated') childState = 'ignored';
     } else if (AI_PARENT_UNIGNORE_LINE.test(line)) {
       parentIgnored = false;
     } else if (AI_NEGATE_LINE.test(line)) {
@@ -199,8 +198,8 @@ function aiIgnoreState(content: string): 'ignored' | 'negated' | 'none' {
       childState = 'negated';
     }
   }
-  if (childState !== 'none') return childState;
-  return parentIgnored ? 'ignored' : 'none';
+  if (parentIgnored) return 'ignored';
+  return childState;
 }
 
 function resolveGitDir(repoRoot: string): string | undefined {
