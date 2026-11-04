@@ -637,7 +637,9 @@ describe('initReviewFile', () => {
     beforeEach(async () => {
       repo = join(dir, 'repo');
       cwd = join(repo, 'src', 'deep');
-      await mkdir(join(repo, '.git'), { recursive: true });
+      await mkdir(join(repo, '.git', 'refs'), { recursive: true });
+      await mkdir(join(repo, '.git', 'objects'), { recursive: true });
+      await writeFile(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
       await mkdir(cwd, { recursive: true });
     });
 
@@ -675,21 +677,34 @@ describe('initReviewFile', () => {
       expect(existsSync(excludePath)).toBe(false);
     });
 
-    it('adds /.ai/review-with-docs/ to .git/info/exclude when .gitignore un-ignores .ai/ to version it', async () => {
+    it.each([
+      ['un-ignoring .ai/ to version it', '/.ai/\n!/.ai/\n'],
+      ['un-ignoring .ai/ and *.md without un-ignoring .ai/review-with-docs/', '/.ai/\n!/.ai/\n!*.md\n'],
+      ['markdown negation under .ai/review-with-docs/ without directory negation', '/.ai/review-with-docs/**\n!/.ai/review-with-docs/*.md\n'],
+    ])('adds /.ai/review-with-docs/ to .git/info/exclude when .gitignore has %s', async (_name, gitignoreText) => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
-      await writeFile(join(repo, '.gitignore'), '/.ai/\n!/.ai/\n', 'utf8');
+      await writeFile(join(repo, '.gitignore'), gitignoreText, 'utf8');
       await initReviewFile('PR 42', { cwd, now: NOW });
+      expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n');
+    });
+
+    it('adds /.ai/review-with-docs/ to .git/info/exclude when --db is in a subdirectory under .ai/review-with-docs/', async () => {
+      const excludePath = join(repo, '.git', 'info', 'exclude');
+      const subDb = join(repo, '.ai', 'review-with-docs', 'sub', 'pr42_review.sqlite');
+      await initReviewFile('PR 42', { cwd, db: subDb, now: NOW });
       expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n');
     });
 
     it.each([
       ['wildcard negation under .ai/', '/.ai/\n!/.ai/\n!/.ai/**\n'],
-      ['markdown negation under .ai/review-with-docs/', '/.ai/review-with-docs/**\n!/.ai/review-with-docs/*.md\n'],
+      ['markdown negation under un-ignored .ai/review-with-docs/', '!/.ai/review-with-docs/\n/.ai/review-with-docs/*\n!/.ai/review-with-docs/*.md\n'],
       ['child negation before parent !/.ai/', '!/.ai/review-with-docs/\n!/.ai/\n'],
       ['child negation before parent /.ai/ and !/.ai/', '!/.ai/review-with-docs/\n/.ai/\n!/.ai/\n'],
       ['global directory wildcard negation !*/', '!*/\n'],
       ['recursive directory wildcard negation !/.ai/**/', '!/.ai/**/\n'],
       ['prefix directory wildcard negation !/.ai/review-*/', '!/.ai/review-*/\n'],
+      ['unanchored directory negation !review-with-docs/', '!review-with-docs/\n'],
+      ['non-recursive /* with !*/ exposing round folders', '/.ai/review-with-docs/*\n!*/\n'],
     ])('reports a conflict when .gitignore exposes .ai/review-with-docs/ via %s', async (_name, gitignoreText) => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
       await writeFile(join(repo, '.gitignore'), gitignoreText, 'utf8');

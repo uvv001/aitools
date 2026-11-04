@@ -1,9 +1,10 @@
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { access, link, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, extname, join, resolve } from 'node:path';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual, promisify } from 'node:util';
 import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
@@ -182,50 +183,41 @@ export interface InitResult {
 // The meta key that holds the connected pull request.
 const PULL_REQUEST = 'pull_request';
 
-const AI_PARENT_IGNORE_LINE = /^[ \t]*\/?\.ai\/?[ \t]*$/u;
-const AI_PARENT_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/?[ \t]*$/u;
-const AI_GLOBAL_DIR_ONLY_UNIGNORE_LINE = /^[ \t]*!\*+\/[ \t]*$/u;
-const AI_GLOBAL_ALL_UNIGNORE_LINE = /^[ \t]*!\*+[ \t]*$/u;
-const AI_CHILD_DIR_IGNORE_LINE = /^[ \t]*\/?\.ai\/(?:\*+|review-(?:with-docs|\*+))\/?[ \t]*$/u;
-const AI_CHILD_CONTENTS_IGNORE_LINE = /^[ \t]*\/?\.ai\/(?:\*+|review-(?:with-docs|\*+))\/\*+[ \t]*$/u;
-const AI_CHILD_DIR_ONLY_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/(?:\*+(?:\/\*+)?\/|review-(?:with-docs|\*+)\/?)[ \t]*$/u;
-const AI_CHILD_ALL_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/\*+(?:\/\*+)?[ \t]*$/u;
-const AI_CHILD_FILE_NEGATE_LINE =
-  /^[ \t]*!(?:\/?\.ai\/review-(?:with-docs|\*+)\/[^\r\n]+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
+const runGit = promisify(execFile);
+const EXCLUDE_RULE = '/.ai/review-with-docs/';
+const IGNORE_PROBES = [
+  '.ai/review-with-docs/probe_review.md',
+  '.ai/review-with-docs/probe_review.sqlite',
+  '.ai/review-with-docs/probe_review/round-1/probe.md',
+];
 
-function aiIgnoreState(content: string): 'ignored' | 'negated' | 'none' {
-  let parentDirIgnored = false;
-  let childDirIgnored = false;
-  let childState: 'ignored' | 'negated' | 'none' = 'none';
-  for (const line of content.split(/\r?\n/u)) {
-    if (AI_PARENT_IGNORE_LINE.test(line)) {
-      parentDirIgnored = true;
-    } else if (AI_PARENT_UNIGNORE_LINE.test(line)) {
-      parentDirIgnored = false;
-    } else if (AI_GLOBAL_DIR_ONLY_UNIGNORE_LINE.test(line)) {
-      parentDirIgnored = false;
-      childDirIgnored = false;
-      if (childState !== 'ignored') childState = 'negated';
-    } else if (AI_GLOBAL_ALL_UNIGNORE_LINE.test(line)) {
-      parentDirIgnored = false;
-      childDirIgnored = false;
-      childState = 'negated';
-    } else if (AI_CHILD_DIR_IGNORE_LINE.test(line)) {
-      childDirIgnored = true;
-    } else if (AI_CHILD_CONTENTS_IGNORE_LINE.test(line)) {
-      childState = 'ignored';
-    } else if (AI_CHILD_DIR_ONLY_UNIGNORE_LINE.test(line)) {
-      childDirIgnored = false;
-      if (childState !== 'ignored') childState = 'negated';
-    } else if (AI_CHILD_ALL_UNIGNORE_LINE.test(line)) {
-      childDirIgnored = false;
-      childState = 'negated';
-    } else if (AI_CHILD_FILE_NEGATE_LINE.test(line)) {
-      if (!childDirIgnored) childState = 'negated';
-    }
+function isInsideReviewFolder(targetDir: string, repoRoot: string): boolean {
+  const folder = resolve(repoRoot, REVIEW_FOLDER);
+  const target = resolve(targetDir);
+  const [normFolder, normTarget] = process.platform === 'win32' ? [folder.toLowerCase(), target.toLowerCase()] : [folder, target];
+  return normTarget === normFolder || normTarget.startsWith(`${normFolder}${sep}`);
+}
+
+async function checkReviewIgnored(repoRoot: string): Promise<'ignored' | 'exposed' | 'unavailable'> {
+  try {
+    const { stdout } = await runGit('git', ['check-ignore', '--no-index', ...IGNORE_PROBES], {
+      cwd: repoRoot,
+      env: { ...process.env, LC_ALL: 'C', GIT_CEILING_DIRECTORIES: dirname(repoRoot) },
+    });
+    const matched = stdout.trim().split(/\r?\n/u).filter(Boolean).length;
+    return matched === IGNORE_PROBES.length ? 'ignored' : 'exposed';
+  } catch (error) {
+    const code = (error as { code?: number | string }).code;
+    return code === 1 ? 'exposed' : 'unavailable';
   }
-  if (parentDirIgnored || childDirIgnored) return 'ignored';
-  return childState;
+}
+
+function hasTrailingExcludeRule(content: string): boolean {
+  const lines = content
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'));
+  return lines.at(-1) === EXCLUDE_RULE;
 }
 
 function resolveGitDir(repoRoot: string): string | undefined {
@@ -254,25 +246,24 @@ function resolveGitDir(repoRoot: string): string | undefined {
   }
 }
 
-// Ensures `.ai/review-with-docs/` is ignored by Git when a review file is placed in `<repoRoot>/.ai/review-with-docs/`:
-// uses `.git/info/exclude` (or the worktree's common git dir) when `.gitignore` does not already ignore it, so tracked
-// files stay untouched and `.ai/` itself can remain versioned.
+// Ensures `.ai/review-with-docs/` is ignored by Git when a review file is placed under `<repoRoot>/.ai/review-with-docs/`:
+// asks `git check-ignore`, appends `/.ai/review-with-docs/` to `.git/info/exclude` (or the worktree's common git dir)
+// when needed, and verifies with `git check-ignore` that no `.gitignore` rule still exposes the review artifacts.
 export async function ensureAiGitExcluded(repoRoot: string): Promise<void> {
-  const gitignorePath = join(repoRoot, '.gitignore');
-  const gitignore = await readExisting(gitignorePath);
-  const gitignoreState = gitignore !== undefined ? aiIgnoreState(gitignore) : 'none';
-  if (gitignoreState === 'ignored') return;
+  const before = await checkReviewIgnored(repoRoot);
+  if (before === 'ignored') return;
   const gitDir = resolveGitDir(repoRoot);
   if (gitDir !== undefined && existsSync(gitDir)) {
     const excludePath = join(gitDir, 'info', 'exclude');
     const current = (await readExisting(excludePath)) ?? '';
-    if (aiIgnoreState(current) !== 'ignored') {
+    if (!hasTrailingExcludeRule(current)) {
       await mkdir(dirname(excludePath), { recursive: true });
       const prefix = current === '' || current.endsWith('\n') ? '' : '\n';
-      await writeFile(excludePath, `${current}${prefix}/.ai/review-with-docs/\n`, 'utf8');
+      await writeFile(excludePath, `${current}${prefix}${EXCLUDE_RULE}\n`, 'utf8');
     }
   }
-  if (gitignoreState === 'negated') {
+  if (before === 'exposed' && (await checkReviewIgnored(repoRoot)) === 'exposed') {
+    const gitignorePath = join(repoRoot, '.gitignore');
     throw new Error(
       `${gitignorePath} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
     );
@@ -315,7 +306,7 @@ export async function initReviewFile(
   const rendered = assertRenders(data, reportTarget);
 
   const repoRoot = findRepoRoot(targetDir);
-  if (repoRoot !== undefined && samePath(targetDir, join(repoRoot, REVIEW_FOLDER))) {
+  if (repoRoot !== undefined && isInsideReviewFolder(targetDir, repoRoot)) {
     await ensureAiGitExcluded(repoRoot);
   }
 
