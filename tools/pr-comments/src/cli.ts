@@ -288,7 +288,7 @@ function reportMatchesDatabase({ report, db }: Values): void {
 async function initReview({ env, args: [name = ''], values }: Context): Promise<number> {
   const title = need('the name', name);
   reportMatchesDatabase(values);
-  const { db, report } = await initReviewFile(title, {
+  const { db, report, reportError } = await initReviewFile(title, {
     report: values.report,
     db: values.db,
     pr: values.pr,
@@ -298,7 +298,8 @@ async function initReview({ env, args: [name = ''], values }: Context): Promise<
   const shown = shownPath(db, env.cwd());
   env.print(`Created ${shown}\n`);
   if (values.pr !== undefined) env.print(`Pull request: ${formatPullRequestUrl(parsePullRequestUrl(values.pr))}\n`);
-  env.print(`Report: ${shownPath(report, env.cwd())}\n`);
+  if (reportError === undefined) env.print(`Report: ${shownPath(report, env.cwd())}\n`);
+  else warnReportError(env, db, reportError);
   return 0;
 }
 

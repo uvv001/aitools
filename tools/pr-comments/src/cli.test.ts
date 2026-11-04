@@ -964,6 +964,23 @@ describe('cli', () => {
       expect((await loadReviewFile(named)).data.target).toBe('PR 43');
     });
 
+    it('warns on stderr and keeps the created database when the initial report file cannot be written', async () => {
+      const readonlyReport = join(docs, 'readonly_review.md');
+      const readonlyDb = join(docs, 'readonly_review.sqlite');
+      await writeFile(readonlyReport, 'existing\n', 'utf8');
+      await chmod(readonlyReport, 0o444);
+      try {
+        expect(await step('init', 'PR 42', '--db', readonlyDb)).toBe(0);
+        expect(printed).toBe(`Created ${shown(readonlyDb)}\n`);
+        expect(warned).toMatch(
+          /^Warning: the report .*readonly_review\.md was not refreshed \(.*\); run "pr-comments report render --db .*readonly_review\.sqlite"\n$/u,
+        );
+        expect((await loadReviewFile(readonlyDb)).data.target).toBe('PR 42');
+      } finally {
+        await chmod(readonlyReport, 0o666);
+      }
+    });
+
     it('takes the database for --report as well as the report', async () => {
       const named = join(docs, 'chain_review.sqlite');
 

@@ -805,6 +805,16 @@ describe('initReviewFile', () => {
       expect(listing()).toEqual([]);
     });
 
+    it('keeps the published database and returns reportError when writing the initial report fails', async () => {
+      vi.mocked(writeFile).mockRejectedValueOnce(failure('EPERM'));
+      const result = await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW });
+      expect(result.db).toBe(join(dir, 'r.sqlite'));
+      expect(result.report).toBe(join(dir, 'r.md'));
+      expect(result.reportError?.message).toBe('failed: EPERM');
+      expect(listing()).toEqual(['r.sqlite']);
+      expect((await loadReviewFile(result.db)).data.target).toBe('PR 42');
+    });
+
     it('still refuses an existing database where the file system has no hard links, and leaves nothing behind', async () => {
       await rivalAppearsWhileBuilding();
       vi.mocked(link).mockRejectedValueOnce(failure('EPERM'));

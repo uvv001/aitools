@@ -172,6 +172,7 @@ export interface InitResult {
   db: string;
   // The report the review renders to, written alongside the database.
   report: string;
+  reportError?: Error;
 }
 
 // The meta key that holds the connected pull request.
@@ -295,14 +296,24 @@ export async function initReviewFile(
 
   const created = await createDatabase(dbPath, data, pullRequest);
   if (!created) throw existingDatabase(dbPath);
-  await writeReportUntilStable(reportTarget, rendered, () => {
-    const handle = new DatabaseSync(dbPath, { readOnly: true, timeout: 10_000 });
-    try {
-      return renderReport(loadReview(handle));
-    } finally {
-      handle.close();
-    }
-  });
+  try {
+    await writeReportUntilStable(reportTarget, rendered, () => {
+      const handle = new DatabaseSync(dbPath, { readOnly: true, timeout: 10_000 });
+      try {
+        return renderReport(loadReview(handle));
+      } finally {
+        handle.close();
+      }
+    });
+  } catch (error) {
+    // The database has already been published; do not fail the creation if the initial report cannot be written,
+    // but surface the error to the caller so it can warn.
+    return {
+      db: dbPath,
+      report: reportTarget,
+      reportError: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
   return { db: dbPath, report: reportTarget };
 }
 
