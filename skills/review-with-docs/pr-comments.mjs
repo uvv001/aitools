@@ -2782,15 +2782,24 @@ function assertRenders(data, report) {
 	return rendered;
 }
 const PULL_REQUEST = "pull_request";
-const AI_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/review-with-docs)?(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
-const AI_DIR_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/?[ \t]*$/u;
+const AI_PARENT_IGNORE_LINE = /^[ \t]*\/?\.ai(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
+const AI_PARENT_UNIGNORE_LINE = /^[ \t]*!\/?\.ai\/?[ \t]*$/u;
+const AI_CHILD_IGNORE_LINE = /^[ \t]*\/?\.ai\/review-with-docs(?:\/(?:\*\*|\*)?)?[ \t]*$/u;
 const AI_NEGATE_LINE = /^[ \t]*!(?:\/?\.ai\/(?:\*\*|\*)|\/?\.ai\/review-with-docs(?:\/[^\r\n]*)?|\*+|\*\.(?:md|sqlite)|[^\r\n/]*_review\.(?:md|sqlite))[ \t]*$/u;
 function aiIgnoreState(content) {
-	let state = "none";
-	for (const line of content.split(/\r?\n/u)) if (AI_IGNORE_LINE.test(line)) state = "ignored";
-	else if (AI_DIR_UNIGNORE_LINE.test(line)) state = "none";
-	else if (AI_NEGATE_LINE.test(line)) state = "negated";
-	return state;
+	let parentIgnored = false;
+	let childState = "none";
+	for (const line of content.split(/\r?\n/u)) if (AI_CHILD_IGNORE_LINE.test(line)) childState = "ignored";
+	else if (AI_PARENT_IGNORE_LINE.test(line)) {
+		parentIgnored = true;
+		if (childState === "negated") childState = "ignored";
+	} else if (AI_PARENT_UNIGNORE_LINE.test(line)) parentIgnored = false;
+	else if (AI_NEGATE_LINE.test(line)) {
+		parentIgnored = false;
+		childState = "negated";
+	}
+	if (childState !== "none") return childState;
+	return parentIgnored ? "ignored" : "none";
 }
 function resolveGitDir(repoRoot) {
 	const dotGit = join(repoRoot, ".git");
@@ -3727,7 +3736,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+cfbce90`;
+	return `pr-comments ${VERSION}+304595c`;
 }
 //#endregion
 //#region src/cli.ts
