@@ -321,7 +321,10 @@ export async function initReviewFile(
   const targetDir = dirname(resolve(cwd, dbPath));
 
   if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
-  const reportBase = options.report !== undefined || options.db === undefined ? paths.report : reviewPaths(dbPath).report;
+  const reportBase =
+    options.report !== undefined && options.db !== undefined && !samePath(paths.db, dbPath)
+      ? paths.report
+      : reviewPaths(dbPath).report;
   const reportTarget = reviewPaths(reviewPaths(reportBase).db).report;
   await refuseDatabase(reportTarget, dbPath);
   if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
