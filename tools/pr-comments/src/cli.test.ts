@@ -991,6 +991,23 @@ describe('cli', () => {
       }
     });
 
+    it('includes --out in the initial report warning when --report differs from <stem>.md', async () => {
+      const upperReport = join(docs, 'upper_review.MD');
+      const upperDb = join(docs, 'upper_review.sqlite');
+      await writeFile(upperReport, 'existing\n', 'utf8');
+      await chmod(upperReport, 0o444);
+      try {
+        expect(await step('init', 'PR 42', '--report', upperReport)).toBe(0);
+        expect(printed).toBe(`Created ${shown(upperDb)}\n`);
+        expect(warned).toMatch(
+          /^Warning: the report .*upper_review\.MD was not refreshed \(.*\); run "pr-comments report render --db .*upper_review\.sqlite --out .*upper_review\.MD"\n$/u,
+        );
+        expect((await loadReviewFile(upperDb)).data.target).toBe('PR 42');
+      } finally {
+        await chmod(upperReport, 0o666);
+      }
+    });
+
     it('takes the database for --report as well as the report', async () => {
       const named = join(docs, 'chain_review.sqlite');
 
