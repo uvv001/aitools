@@ -2530,7 +2530,7 @@ function configure(db, path, mode) {
 	}
 	if (mode !== "readonly") {
 		if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}PRAGMA user_version = 5`));
-		db.exec("PRAGMA journal_mode = DELETE; PRAGMA cache_spill = OFF");
+		db.exec("PRAGMA journal_mode = DELETE");
 	}
 	db.exec("PRAGMA foreign_keys = ON");
 }
@@ -3736,7 +3736,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+c0bf061`;
+	return `pr-comments ${VERSION}+0bbd31d`;
 }
 //#endregion
 //#region src/cli.ts
