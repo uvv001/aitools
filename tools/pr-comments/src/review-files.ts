@@ -277,17 +277,6 @@ function resolveGitDir(repoRoot: string): string | undefined {
   }
 }
 
-function findConflictingGitignore(repoRoot: string, targetPaths: string[]): string {
-  const candidates = [
-    ...targetPaths.map((target) => join(dirname(resolve(repoRoot, target)), '.gitignore')),
-    join(repoRoot, REVIEW_FOLDER, '.gitignore'),
-    join(repoRoot, '.ai', '.gitignore'),
-    join(repoRoot, '.gitignore'),
-  ];
-  const existing = [...new Set(candidates)].filter((candidate) => existsSync(candidate));
-  return existing.find((candidate) => /^[ \t]*!/mu.test(readFileSync(candidate, 'utf8'))) ?? existing[0] ?? join(repoRoot, '.gitignore');
-}
-
 // Ensures `.ai/review-with-docs/` is ignored by Git when a review file is placed under `<repoRoot>/.ai/review-with-docs/`:
 // asks `git check-ignore`, appends `/.ai/review-with-docs/` to `.git/info/exclude` (or the worktree's common git dir)
 // when needed, and verifies with `git check-ignore` that no `.gitignore` rule still exposes the review artifacts.
@@ -305,9 +294,8 @@ export async function ensureAiGitExcluded(repoRoot: string, targetPaths: string[
     }
   }
   if (!(await isReviewIgnoredByGit(repoRoot, relTargets))) {
-    const gitignorePath = findConflictingGitignore(repoRoot, targetPaths);
     throw new Error(
-      `${gitignorePath} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
+      'a .gitignore rule negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git',
     );
   }
 }

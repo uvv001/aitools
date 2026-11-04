@@ -743,18 +743,18 @@ describe('initReviewFile', () => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
       await writeFile(join(repo, '.gitignore'), gitignoreText, 'utf8');
       await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
-        `${join(repo, '.gitignore')} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
+        'a .gitignore rule negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git',
       );
       expect(await readFile(excludePath, 'utf8')).toBe('/.ai/review-with-docs/\n');
       expect(existsSync(join(repo, '.ai'))).toBe(false);
     });
 
-    it('names the nested .ai/.gitignore when it exposes .ai/review-with-docs/ without a root .gitignore', async () => {
+    it('reports a conflict when a nested .ai/.gitignore exposes .ai/review-with-docs/ without a root .gitignore', async () => {
       const nestedIgnore = join(repo, '.ai', '.gitignore');
       await mkdir(dirname(nestedIgnore), { recursive: true });
       await writeFile(nestedIgnore, '!review-with-docs/\n', 'utf8');
       await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(
-        `${nestedIgnore} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
+        'a .gitignore rule negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git',
       );
       expect(existsSync(join(repo, '.ai', 'review-with-docs'))).toBe(false);
     });
