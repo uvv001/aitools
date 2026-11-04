@@ -153,7 +153,7 @@ Consequences:
 
 `pr show` reads `fetched_at` and the head of the snapshot. `fetched_at` is the time taken before the first request, so the data is at least as new as that moment.
 
-### 2.7 `finding post` and `link reply`: the refresh before the link
+### 2.6 `finding post` and `link reply`: the refresh before the link
 
 A comment that was just written on GitHub is not in the snapshot yet, and a link may only name a row of the snapshot. So both commands refresh the snapshot before they record anything:
 
@@ -294,7 +294,7 @@ SonarQube and similar tools publish their issues through the Checks API. GitHub 
 - The app that published the run is its "author": the suite's app slug.
 - If reading the check runs fails, the whole sync fails (`reading the check runs failed: …`). It does not silently skip the checks. An access error keeps its meaning, so that another token can be tried.
 
-SonarQube deletes its annotations and publishes new ones when it analyses a new commit. So a sync replaces the check runs as a whole. A link to an annotation that is no longer there stays, marked `gone` (section 2.6). The annotations of earlier commits are not stored.
+SonarQube deletes its annotations and publishes new ones when it analyses a new commit. So a sync replaces the check runs as a whole. A link to an annotation that is no longer there stays, marked `gone` (section 2.5). The annotations of earlier commits are not stored.
 
 `report comments` ends with a `## Checks` section: one `###` heading per check run (`<name> — <conclusion>`, sorted by name), a line with the app, the commit, the number of annotations and a link to the details, and one item per annotation (id, level, place, message; a title that only repeats the place, such as SonarQube's `path#L132`, is left out). `--author` takes the app as the author of its check run.
 
@@ -337,7 +337,7 @@ Kinds of token:
 
 ## 8. The report
 
-`report render` writes `<stem>.md` next to the database (or `--out`). The renderer is `renderReport`, the reader is `readReport` (`review-read.ts`). No command reads a report: `readReport` serves the guard of section 2.5, and `finding post` takes the text of a comment from the rendered report (`parseReport(renderReport(…))`). The format is the one this tool writes: `# Review — <target>`, Intro with **Reviewed**, Dashboard, Findings (a sample follows). There is no hand-edit guard and no hash: the report is derived text and is overwritten each time. It prints `created`, `updated` or `unchanged` and the path. It refuses a target that is a SQLite file, and `--out` that ends in `.sqlite`. The report always has LF line breaks and a generated Dashboard.
+`report render` writes `<stem>.md` next to the database (or `--out`). The renderer is `renderReport`, the reader is `readReport` (`review-read.ts`). No command reads a report: `readReport` serves the guard of section 2.4, and `finding post` takes the text of a comment from the rendered report (`parseReport(renderReport(…))`). The format is the one this tool writes: `# Review — <target>`, Intro with **Reviewed**, Dashboard, Findings (a sample follows). There is no hand-edit guard and no hash: the report is derived text and is overwritten each time. It prints `created`, `updated` or `unchanged` and the path. It refuses a target that is a SQLite file, and `--out` that ends in `.sqlite`. The report always has LF line breaks and a generated Dashboard.
 
 This is a real report of a small review (shortened):
 
@@ -395,7 +395,7 @@ The lookup loop never gives up. …
   | `link reply` | `replied to duplicate [r…](<url>) with [r…](<url>)[ in the pending review]` |
 
   A `--note` is added after ` — `. `--round <n>` adds `Round <n>: ` at the start. It must name a round that was opened. `link note` writes nothing under Updates, because a note belongs to no finding. Nothing else writes under Updates.
-- The report carries the URL of every comment it names, because the web UI cannot search comments by id. In the table `[r…](<url>)` is the id as a markdown link to the comment on the connected pull request, `<pull request URL>#discussion_r…` (`#issuecomment-…` for a `c…`). The URL is written into the text of the entry when the entry is made, so `renderReport` stays a function of the data alone and the report still reads back as the review (section 2.5). A check annotation has no URL on GitHub and stays bare (`check annotation a…`), and so does a comment of a review that is not connected to a pull request. Entries written before this change keep their bare ids.
+- The report carries the URL of every comment it names, because the web UI cannot search comments by id. In the table `[r…](<url>)` is the id as a markdown link to the comment on the connected pull request, `<pull request URL>#discussion_r…` (`#issuecomment-…` for a `c…`). The URL is written into the text of the entry when the entry is made, so `renderReport` stays a function of the data alone and the report still reads back as the review (section 2.4). A check annotation has no URL on GitHub and stays bare (`check annotation a…`), and so does a comment of a review that is not connected to a pull request. Entries written before this change keep their bare ids.
 - The links and the pull request are not in the report. They are only in the database (and in `report dump`).
 
 `report dump` is a text form of the review for `git diff`:
