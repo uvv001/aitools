@@ -3728,7 +3728,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+431f86d`;
+	return `pr-comments ${VERSION}+3f24f13`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4945,7 +4945,7 @@ async function execute(command, argv, env) {
 		values
 	};
 	if (command.database === "none") return command.run(context);
-	const db = need("--db", values.db);
+	const db = values.db;
 	const outcome = await command.run(context, db);
 	const code = outcome === "unchanged" ? 0 : outcome;
 	if (outcome === 0 && command.database === "change" && !values["dry-run"]) env.warn(`Review database: ${shownPath(db, env.cwd())}\n`);
