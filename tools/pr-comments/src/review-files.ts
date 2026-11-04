@@ -284,7 +284,8 @@ function findConflictingGitignore(repoRoot: string, targetPaths: string[]): stri
     join(repoRoot, '.ai', '.gitignore'),
     join(repoRoot, '.gitignore'),
   ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? join(repoRoot, '.gitignore');
+  const existing = [...new Set(candidates)].filter((candidate) => existsSync(candidate));
+  return existing.find((candidate) => /^[ \t]*!/mu.test(readFileSync(candidate, 'utf8'))) ?? existing[0] ?? join(repoRoot, '.gitignore');
 }
 
 // Ensures `.ai/review-with-docs/` is ignored by Git when a review file is placed under `<repoRoot>/.ai/review-with-docs/`:
