@@ -573,7 +573,7 @@ describe('initReviewFile', () => {
   it('refuses an existing database, says why and how to start another review, and leaves it alone', async () => {
     const db = await write('r.sqlite', 'precious');
     await expect(initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW })).rejects.toThrow(
-      /r\.sqlite already exists; the database is the source of truth and must not be overwritten.*delete the database deliberately.*another name or location with --report/u,
+      /r\.sqlite already exists; the database is the source of truth and must not be overwritten.*delete the database deliberately.*another name or location with --db or --report/u,
     );
     expect(await readFile(db, 'utf8')).toBe('precious');
     expect(listing()).toEqual(['r.sqlite']);
@@ -794,10 +794,10 @@ describe('initReviewFile', () => {
       expect(existsSync(join(repo, '.ai'))).toBe(false);
     });
 
-    it('refuses a second review of the same name and day, and says to use another name or --report', async () => {
+    it('refuses a second review of the same name and day, and says to use another name or --db or --report', async () => {
       await initReviewFile('PR 42', { cwd, now: NOW });
       const before = await readFile(ai('2026-10-09_pr-42_review.sqlite'));
-      await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(/already exists.*source of truth.*another name or location with --report/u);
+      await expect(initReviewFile('PR 42', { cwd, now: NOW })).rejects.toThrow(/already exists.*source of truth.*another name or location with --db or --report/u);
       expect((await readFile(ai('2026-10-09_pr-42_review.sqlite'))).equals(before)).toBe(true);
       expect(readdirSync(join(repo, '.ai', 'review-with-docs'))).toEqual(['2026-10-09_pr-42_review.md', '2026-10-09_pr-42_review.sqlite']);
     });

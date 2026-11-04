@@ -137,7 +137,7 @@ const existingDatabase = (dbPath: string): Error =>
   new Error(
     `${dbPath} already exists; the database is the source of truth and must not be overwritten. ` +
       'If you really want to start this review again, delete the database deliberately first. ' +
-      'To start another review, choose another name or location with --report.',
+      'To start another review, choose another name or location with --db or --report.',
   );
 
 const existingReport = (reportPath: string): Error =>

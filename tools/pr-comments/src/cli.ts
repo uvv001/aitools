@@ -978,7 +978,7 @@ const DEFINITIONS: Command[] = [
     summary: 'writes the pull request conversation as markdown',
     description: [
       'Writes the downloaded pull request (description, reviews, threads, comments and the Checks section) as markdown, to the',
-      'screen unless --out is given. Run "pr-comments pr sync" first.',
+      'screen unless --out is given. Run "pr-comments pr sync --db <file.sqlite>" first.',
     ],
     args: [],
     options: [
