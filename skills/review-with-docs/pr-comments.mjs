@@ -2918,7 +2918,8 @@ function mustBeDatabase(dbPath) {
 	if (dbPath !== void 0 && extname(dbPath).toLowerCase() !== ".sqlite") throw new Error(`--db must be a file ending in .sqlite: ${dbPath}`);
 }
 function reportMatchesDatabase(report, db) {
-	if (report === void 0 || db === void 0 || samePath(reviewPaths(report).db, db)) return;
+	if (report === void 0 || db === void 0) return;
+	if (samePath(reviewPaths(report).db, reviewPaths(reviewPaths(db).report).db)) return;
 	throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
 }
 function firstDifference(a, b, path) {
@@ -2977,8 +2978,8 @@ async function isReviewIgnoredByGit(repoRoot, extraPaths = []) {
 		const failure = error;
 		if (failure.code === 1) return false;
 		if (failure.code === "ENOENT") throw new Error(`git could not be started (is it installed and on the PATH?): ${failure.message ?? String(error)}`);
-		const detail = (failure.stderr ?? failure.message ?? String(error)).trim().split(/\r?\n/u)[0] ?? "unknown git error";
-		throw new Error(`git check-ignore failed in ${repoRoot}: ${detail}`);
+		const text = (failure.stderr ?? "").trim() || (failure.message ?? "").trim() || String(error);
+		throw new Error(`git check-ignore failed in ${repoRoot}: ${text}`);
 	}
 }
 function hasTrailingExcludeRule(content) {
@@ -3786,7 +3787,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+26208fa`;
+	return `pr-comments ${VERSION}+d9df01c`;
 }
 //#endregion
 //#region src/cli.ts
