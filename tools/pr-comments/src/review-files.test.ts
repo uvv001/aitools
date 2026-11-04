@@ -131,6 +131,8 @@ describe('quoteCliPath', () => {
   it('leaves plain paths unquoted and quotes spaces, metacharacters, and apostrophes per platform', () => {
     expect(quoteCliPath('docs/demo_review.sqlite', 'linux')).toBe('docs/demo_review.sqlite');
     expect(quoteCliPath('C:\\dev\\AI\\own\\r.sqlite', 'win32')).toBe('C:\\dev\\AI\\own\\r.sqlite');
+    expect(quoteCliPath('folder\\name.sqlite', 'linux')).toBe("'folder\\name.sqlite'");
+    expect(quoteCliPath('@hello.sqlite', 'win32')).toBe("'@hello.sqlite'");
     expect(quoteCliPath('my reviews/r.sqlite', 'linux')).toBe("'my reviews/r.sqlite'");
     expect(quoteCliPath('dir(1)&$x/r.sqlite', 'linux')).toBe("'dir(1)&$x/r.sqlite'");
     expect(quoteCliPath("C:\\Jane's Reviews\\r.sqlite", 'win32')).toBe("'C:\\Jane''s Reviews\\r.sqlite'");

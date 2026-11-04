@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { access, link, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, extname, join, resolve, sep } from 'node:path';
+import { access, link, lstat, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual, promisify } from 'node:util';
 import type { PullRequestData } from './model.ts';
@@ -31,6 +31,12 @@ const exists = (path: string): Promise<boolean> =>
   access(path).then(
     () => true,
     () => false,
+  );
+
+const existsOrSymlink = (path: string): Promise<boolean> =>
+  lstat(path).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? false : exists(path)),
   );
 
 async function readExisting(path: string): Promise<string | undefined> {
@@ -78,7 +84,8 @@ export async function refuseDatabase(target: string, db: string): Promise<void> 
 // Wraps a path in single quotes when it contains whitespace or shell metacharacters, escaping single quotes for the
 // platform shell (`''` on Windows PowerShell, `'\''` on POSIX shells) so a copied command hint runs as one argument.
 export function quoteCliPath(path: string, platform: NodeJS.Platform = process.platform): string {
-  if (!/[^\w@%+=:,./\\-]/u.test(path)) return path;
+  const unsafe = platform === 'win32' ? /[^\w%+=:,./\\-]/u : /[^\w%+=:,./-]/u;
+  if (!unsafe.test(path)) return path;
   const escaped = platform === 'win32' ? path.replaceAll("'", "''") : path.replaceAll("'", "'\\''");
   return `'${escaped}'`;
 }
@@ -209,14 +216,15 @@ function isInsideReviewFolder(targetDir: string, repoRoot: string): boolean {
   return normTarget === normFolder || normTarget.startsWith(`${normFolder}${sep}`);
 }
 
-async function checkReviewIgnored(repoRoot: string): Promise<'ignored' | 'exposed' | 'unavailable'> {
+async function checkReviewIgnored(repoRoot: string, extraPaths: string[] = []): Promise<'ignored' | 'exposed' | 'unavailable'> {
+  const probes = [...new Set([...IGNORE_PROBES, ...extraPaths])];
   try {
-    const { stdout } = await runGit('git', ['check-ignore', '--no-index', ...IGNORE_PROBES], {
+    const { stdout } = await runGit('git', ['check-ignore', '--no-index', ...probes], {
       cwd: repoRoot,
       env: { ...process.env, LC_ALL: 'C', GIT_CEILING_DIRECTORIES: dirname(repoRoot) },
     });
     const matched = stdout.trim().split(/\r?\n/u).filter(Boolean).length;
-    return matched === IGNORE_PROBES.length ? 'ignored' : 'exposed';
+    return matched === probes.length ? 'ignored' : 'exposed';
   } catch (error) {
     const code = (error as { code?: number | string }).code;
     return code === 1 ? 'exposed' : 'unavailable';
@@ -260,8 +268,9 @@ function resolveGitDir(repoRoot: string): string | undefined {
 // Ensures `.ai/review-with-docs/` is ignored by Git when a review file is placed under `<repoRoot>/.ai/review-with-docs/`:
 // asks `git check-ignore`, appends `/.ai/review-with-docs/` to `.git/info/exclude` (or the worktree's common git dir)
 // when needed, and verifies with `git check-ignore` that no `.gitignore` rule still exposes the review artifacts.
-export async function ensureAiGitExcluded(repoRoot: string): Promise<void> {
-  const before = await checkReviewIgnored(repoRoot);
+export async function ensureAiGitExcluded(repoRoot: string, targetPaths: string[] = []): Promise<void> {
+  const relTargets = targetPaths.map((target) => relative(repoRoot, target).replaceAll('\\', '/'));
+  const before = await checkReviewIgnored(repoRoot, relTargets);
   if (before === 'ignored') return;
   const gitDir = resolveGitDir(repoRoot);
   if (gitDir !== undefined && existsSync(gitDir)) {
@@ -273,7 +282,7 @@ export async function ensureAiGitExcluded(repoRoot: string): Promise<void> {
       await writeFile(excludePath, `${current}${prefix}${EXCLUDE_RULE}\n`, 'utf8');
     }
   }
-  if (before === 'exposed' && (await checkReviewIgnored(repoRoot)) === 'exposed') {
+  if (before === 'exposed' && (await checkReviewIgnored(repoRoot, relTargets)) !== 'ignored') {
     const gitignorePath = join(repoRoot, '.gitignore');
     throw new Error(
       `${gitignorePath} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`,
@@ -311,15 +320,15 @@ export async function initReviewFile(
   const dbPath = options.db ?? paths.db;
   const targetDir = dirname(resolve(cwd, dbPath));
 
-  if (await exists(dbPath)) throw existingDatabase(dbPath);
+  if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
   const reportTarget = options.report !== undefined || options.db === undefined ? paths.report : reviewPaths(dbPath).report;
   await refuseDatabase(reportTarget, dbPath);
-  if (await exists(reportTarget)) throw existingReport(reportTarget);
+  if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
   const rendered = assertRenders(data, reportTarget);
 
   const repoRoot = findRepoRoot(targetDir);
   if (repoRoot !== undefined && isInsideReviewFolder(targetDir, repoRoot)) {
-    await ensureAiGitExcluded(repoRoot);
+    await ensureAiGitExcluded(repoRoot, [resolve(cwd, dbPath), resolve(cwd, reportTarget)]);
   }
 
   const created = await createDatabase(dbPath, data, pullRequest);
