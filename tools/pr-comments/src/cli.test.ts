@@ -2,7 +2,7 @@ import { execFile, spawnSync } from 'node:child_process';
 import { access, chmod, copyFile, link, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COMMANDS, defaultEnvironment, readFailure, run, synopsis } from './cli.ts';
 import type { CliEnvironment } from './cli.ts';
 import { annotationRef } from './comment-ref.ts';
@@ -20,6 +20,14 @@ import { pendingItems, pendingLines } from './review-pending.ts';
 import { renderReport } from './review-render.ts';
 import { removeScratch, scratchDir } from './review-test-support.ts';
 import { VERSION } from './version.ts';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    writeFile: vi.fn(actual.writeFile),
+  };
+});
 
 const execFileAsync = promisify(execFile);
 const CLI = join(import.meta.dirname, 'cli.ts');
@@ -975,37 +983,39 @@ describe('cli', () => {
     });
 
     it('warns on stderr and keeps the created database when the initial report file cannot be written', async () => {
-      const readonlyReport = join(docs, 'readonly_review.md');
       const readonlyDb = join(docs, 'readonly_review.sqlite');
-      await writeFile(readonlyReport, 'existing\n', 'utf8');
-      await chmod(readonlyReport, 0o444);
-      try {
-        expect(await step('init', 'PR 42', '--db', readonlyDb)).toBe(0);
-        expect(printed).toBe(`Created ${shown(readonlyDb)}\n`);
-        expect(warned).toMatch(
-          /^Warning: the report .*readonly_review\.md was not refreshed \(.*\); run "pr-comments report render --db .*readonly_review\.sqlite"\n$/u,
-        );
-        expect((await loadReviewFile(readonlyDb)).data.target).toBe('PR 42');
-      } finally {
-        await chmod(readonlyReport, 0o666);
-      }
+      vi.mocked(writeFile).mockRejectedValueOnce(new Error('EPERM: report locked'));
+
+      expect(await step('init', 'PR 42', '--db', readonlyDb)).toBe(0);
+      expect(printed).toBe(`Created ${shown(readonlyDb)}\n`);
+      expect(warned).toMatch(
+        /^Warning: the report .*readonly_review\.md was not refreshed \(EPERM: report locked\); run "pr-comments report render --db .*readonly_review\.sqlite"\n$/u,
+      );
+      expect((await loadReviewFile(readonlyDb)).data.target).toBe('PR 42');
     });
 
     it('includes --out in the initial report warning when --report differs from <stem>.md', async () => {
       const upperReport = join(docs, 'upper_review.MD');
       const upperDb = join(docs, 'upper_review.sqlite');
-      await writeFile(upperReport, 'existing\n', 'utf8');
-      await chmod(upperReport, 0o444);
-      try {
-        expect(await step('init', 'PR 42', '--report', upperReport)).toBe(0);
-        expect(printed).toBe(`Created ${shown(upperDb)}\n`);
-        expect(warned).toMatch(
-          /^Warning: the report .*upper_review\.MD was not refreshed \(.*\); run "pr-comments report render --db .*upper_review\.sqlite --out .*upper_review\.MD"\n$/u,
-        );
-        expect((await loadReviewFile(upperDb)).data.target).toBe('PR 42');
-      } finally {
-        await chmod(upperReport, 0o666);
-      }
+      vi.mocked(writeFile).mockRejectedValueOnce(new Error('EPERM: report locked'));
+
+      expect(await step('init', 'PR 42', '--report', upperReport)).toBe(0);
+      expect(printed).toBe(`Created ${shown(upperDb)}\n`);
+      expect(warned).toMatch(
+        /^Warning: the report .*upper_review\.MD was not refreshed \(EPERM: report locked\); run "pr-comments report render --db .*upper_review\.sqlite --out .*upper_review\.MD"\n$/u,
+      );
+      expect((await loadReviewFile(upperDb)).data.target).toBe('PR 42');
+    });
+
+    it('refuses an existing report file without overwriting it or creating a database', async () => {
+      const existingMd = join(docs, 'notes_review.md');
+      await writeFile(existingMd, 'my important notes\n', 'utf8');
+
+      await expect(step('init', 'PR 42', '--report', existingMd)).rejects.toThrow(
+        `${existingMd} already exists; init will not overwrite an existing report file`,
+      );
+      expect(await readFile(existingMd, 'utf8')).toBe('my important notes\n');
+      expect(await exists(join(docs, 'notes_review.sqlite'))).toBe(false);
     });
 
     it('takes the database for --report as well as the report', async () => {

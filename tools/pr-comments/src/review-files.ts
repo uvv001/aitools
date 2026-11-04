@@ -135,6 +135,12 @@ const existingDatabase = (dbPath: string): Error =>
       'To start another review, choose another name or location with --report.',
   );
 
+const existingReport = (reportPath: string): Error =>
+  new Error(
+    `${reportPath} already exists; init will not overwrite an existing report file. ` +
+      'Choose another name or location with --db or --report, or remove the file first.',
+  );
+
 // The database of a review is a `.sqlite` file, which is what lets a command tell it from the report.
 function mustBeDatabase(dbPath: string | undefined): void {
   if (dbPath !== undefined && extname(dbPath).toLowerCase() !== '.sqlite') {
@@ -303,6 +309,7 @@ export async function initReviewFile(
   if (await exists(dbPath)) throw existingDatabase(dbPath);
   const reportTarget = options.report !== undefined || options.db === undefined ? paths.report : reviewPaths(dbPath).report;
   await refuseDatabase(reportTarget, dbPath);
+  if (await exists(reportTarget)) throw existingReport(reportTarget);
   const rendered = assertRenders(data, reportTarget);
 
   const repoRoot = findRepoRoot(targetDir);

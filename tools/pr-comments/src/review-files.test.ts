@@ -101,7 +101,8 @@ const modes = (): string[] => vi.mocked(openReviewDb).mock.calls.map((call) => c
 
 // A database that holds the sample review, with the report it renders to next to it (`name` is the report's file).
 async function sampleReview(name = 'r.md'): Promise<string> {
-  const report = await write(name, sampleReport());
+  const report = join(dir, name);
+  await mkdir(dirname(report), { recursive: true });
   const { db } = await initReviewFile('PR 42', { report, now: NOW });
   await mutateReviewFile(db, () => ({ data: readReport(sampleReport(), name), result: null }));
   return report;
@@ -564,6 +565,15 @@ describe('initReviewFile', () => {
     );
     expect(await readFile(db, 'utf8')).toBe('precious');
     expect(listing()).toEqual(['r.sqlite']);
+  });
+
+  it('refuses an existing report file without overwriting it or creating the database', async () => {
+    const report = await write('r.md', 'my notes\n');
+    await expect(initReviewFile('PR 42', { report, now: NOW })).rejects.toThrow(
+      `${report} already exists; init will not overwrite an existing report file. Choose another name or location with --db or --report, or remove the file first.`,
+    );
+    expect(await readFile(report, 'utf8')).toBe('my notes\n');
+    expect(listing()).toEqual(['r.md']);
   });
 
   it('refuses a second init and keeps the first review', async () => {
