@@ -321,9 +321,14 @@ export async function initReviewFile(
   const targetDir = dirname(resolve(cwd, dbPath));
 
   if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
-  const reportTarget = options.report !== undefined || options.db === undefined ? paths.report : reviewPaths(dbPath).report;
+  const reportBase = options.report !== undefined || options.db === undefined ? paths.report : reviewPaths(dbPath).report;
+  const reportTarget = reviewPaths(reviewPaths(reportBase).db).report;
   await refuseDatabase(reportTarget, dbPath);
   if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
+  if (options.report !== undefined && options.report !== reportTarget && !samePath(options.report, dbPath)) {
+    await refuseDatabase(options.report, dbPath);
+    if (await existsOrSymlink(options.report)) throw existingReport(options.report);
+  }
   const rendered = assertRenders(data, reportTarget);
 
   const repoRoot = findRepoRoot(targetDir);

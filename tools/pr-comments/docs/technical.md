@@ -134,7 +134,7 @@ A connection waits up to 10 seconds for a lock (`timeout` of `DatabaseSync`). Pa
 
 Before a changed review is saved, `assertRenders` renders it and reads the report back. The result must equal the review (`readReport(renderReport(x))` equals `x`). A change that breaks this fails with `internal error: … nothing was written`. The texts are checked when they come in, so this is a guard against bugs, not an error a user meets: no control characters except tab and newline, no `#`…`####` heading outside a code fence in a description or a note, no unclosed code fence, a title on one line, a revision as one word.
 
-`mutateReviewFile` is `changeReviewState` for changes of the review alone. The report is rendered on `init` and on every change of the review (written after the database is published or `COMMIT` succeeds; if the report write fails afterwards, the saved database change still succeeds with exit `0` and the CLI warns `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>[ --out <report>]"` on `stderr`), and `report render` re-renders it on demand (or writes `--out`).
+`mutateReviewFile` is `changeReviewState` for changes of the review alone. The report is rendered on `init` and on every change of the review (written after the database is published or `COMMIT` succeeds; if the report write fails afterwards, the saved database change still succeeds with exit `0` and the CLI warns `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"` on `stderr`), and `report render` re-renders it on demand (or writes `--out`).
 
 ### 2.5 `pr sync` and the snapshot
 

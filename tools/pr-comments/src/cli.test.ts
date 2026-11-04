@@ -994,17 +994,16 @@ describe('cli', () => {
       expect((await loadReviewFile(readonlyDb)).data.target).toBe('PR 42');
     });
 
-    it('includes --out in the initial report warning when --report differs from <stem>.md', async () => {
+    it('normalizes an upper-case --report .MD extension to .md so init and later mutations write the same report file', async () => {
       const upperReport = join(docs, 'upper_review.MD');
+      const lowerReport = join(docs, 'upper_review.md');
       const upperDb = join(docs, 'upper_review.sqlite');
-      vi.mocked(writeFile).mockRejectedValueOnce(new Error('EPERM: report locked'));
 
       expect(await step('init', 'PR 42', '--report', upperReport)).toBe(0);
-      expect(printed).toBe(`Created ${shown(upperDb)}\n`);
-      expect(warned).toMatch(
-        /^Warning: the report .*upper_review\.MD was not refreshed \(EPERM: report locked\); run "pr-comments report render --db .*upper_review\.sqlite --out .*upper_review\.MD"\n$/u,
-      );
-      expect((await loadReviewFile(upperDb)).data.target).toBe('PR 42');
+      expect(printed).toBe(`Created ${shown(upperDb)}\nReport: ${shown(lowerReport)}\n`);
+
+      expect(await step('round', 'open', '--no-base', '--note', 'updated round', '--db', upperDb)).toBe(0);
+      expect(await readFile(lowerReport, 'utf8')).toContain('updated round');
     });
 
     it('refuses an existing report file without overwriting it or creating a database', async () => {

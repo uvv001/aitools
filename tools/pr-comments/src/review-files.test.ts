@@ -590,6 +590,13 @@ describe('initReviewFile', () => {
     expect(listing()).toEqual(['r.md']);
   });
 
+  it('normalizes an upper-case .MD report option to .md so init and later mutations write the same report path', async () => {
+    const result = await initReviewFile('Initial title', { report: join(dir, 'Review.MD'), now: NOW });
+    expect(result).toEqual({ db: join(dir, 'Review.sqlite'), report: join(dir, 'Review.md') });
+    await mutateReviewFile(result.db, (data) => ({ data: { ...data, target: 'Changed title' }, result: null }));
+    expect(await readFile(result.report, 'utf8')).toContain('# Review — Changed title');
+  });
+
   it('refuses a second init and keeps the first review', async () => {
     const report = join(dir, 'r.md');
     await initReviewFile('PR 42', { report, now: NOW });
