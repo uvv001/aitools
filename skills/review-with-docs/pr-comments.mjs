@@ -2953,7 +2953,7 @@ function isInsideReviewFolder(targetDir, repoRoot) {
 	const [normFolder, normTarget] = process.platform === "win32" ? [folder.toLowerCase(), target.toLowerCase()] : [folder, target];
 	return normTarget === normFolder || normTarget.startsWith(`${normFolder}${sep}`);
 }
-async function checkReviewIgnored(repoRoot, extraPaths = []) {
+async function isReviewIgnoredByGit(repoRoot, extraPaths = []) {
 	const probes = [.../* @__PURE__ */ new Set([...IGNORE_PROBES, ...extraPaths])];
 	try {
 		const { stdout } = await runGit("git", [
@@ -2968,9 +2968,13 @@ async function checkReviewIgnored(repoRoot, extraPaths = []) {
 				GIT_CEILING_DIRECTORIES: dirname(repoRoot)
 			}
 		});
-		return stdout.trim().split(/\r?\n/u).filter(Boolean).length === probes.length ? "ignored" : "exposed";
+		return stdout.trim().split(/\r?\n/u).filter(Boolean).length === probes.length;
 	} catch (error) {
-		return error.code === 1 ? "exposed" : "unavailable";
+		const failure = error;
+		if (failure.code === 1) return false;
+		if (failure.code === "ENOENT") throw new Error(`git could not be started (is it installed and on the PATH?): ${failure.message ?? String(error)}`);
+		const detail = (failure.stderr ?? failure.message ?? String(error)).trim().split(/\r?\n/u)[0] ?? "unknown git error";
+		throw new Error(`git check-ignore failed in ${repoRoot}: ${detail}`);
 	}
 }
 function hasTrailingExcludeRule(content) {
@@ -3003,8 +3007,7 @@ function resolveGitDir(repoRoot) {
 }
 async function ensureAiGitExcluded(repoRoot, targetPaths = []) {
 	const relTargets = targetPaths.map((target) => relative(repoRoot, target).replaceAll("\\", "/"));
-	const before = await checkReviewIgnored(repoRoot, relTargets);
-	if (before === "ignored") return;
+	if (await isReviewIgnoredByGit(repoRoot, relTargets)) return;
 	const gitDir = resolveGitDir(repoRoot);
 	if (gitDir !== void 0 && existsSync(gitDir)) {
 		const excludePath = join(gitDir, "info", "exclude");
@@ -3015,7 +3018,7 @@ async function ensureAiGitExcluded(repoRoot, targetPaths = []) {
 			await writeFile(excludePath, `${current}${prefix}${EXCLUDE_RULE}\n`, "utf8");
 		}
 	}
-	if (before === "exposed" && await checkReviewIgnored(repoRoot, relTargets) !== "ignored") {
+	if (!await isReviewIgnoredByGit(repoRoot, relTargets)) {
 		const gitignorePath = join(repoRoot, ".gitignore");
 		throw new Error(`${gitignorePath} negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git`);
 	}
@@ -3778,7 +3781,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+5945d6b`;
+	return `pr-comments ${VERSION}+d47ed2a`;
 }
 //#endregion
 //#region src/cli.ts
