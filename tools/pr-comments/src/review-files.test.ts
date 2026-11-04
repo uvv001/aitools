@@ -24,7 +24,7 @@ import {
 } from './review-files.ts';
 import { dumpReview } from './review-dump.ts';
 import type { CommentLink, ReviewState } from './review-links.ts';
-import { linkDuplicate, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
+import { linkDuplicate, linkNote, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { newReview } from './review-ops.ts';
 import { readReport } from './review-read.ts';
@@ -1552,6 +1552,14 @@ describe('changeReviewState', () => {
     expect(changed).toStrictEqual({ data: withFinding(withFinding(newReview('PR 42'), 'F1'), 'F2'), result: 'F2' });
     const loaded = await loadReviewFile(db);
     expect([loaded.links, loaded.pullRequest]).toEqual([[own('r1', 'F1')], PULL_REQUEST]);
+  });
+
+  it('substitutes a database path containing $& literally into review-links hints', async () => {
+    const dollarDb = join(dir, 'd$&x', 'r.sqlite');
+    await initReviewFile('PR 42', { db: dollarDb, now: NOW });
+    await expect(
+      changeReviewState(dollarDb, (state) => ({ state: linkNote(state, 'r999', 'why'), result: null })),
+    ).rejects.toThrow(`r999 is not in the database; run "pr-comments pr sync --db ${quoteCliPath(dollarDb)}" first, or check the id`);
   });
 });
 

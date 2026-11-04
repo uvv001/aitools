@@ -9,6 +9,7 @@ import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { dumpReview } from './review-dump.ts';
+import { DB_HINT_PLACEHOLDER } from './review-links.ts';
 import type { ReviewState } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { defaultReportPath, findRepoRoot, REVIEW_FOLDER } from './review-naming.ts';
@@ -448,8 +449,8 @@ export async function changeReviewState<T>(
         try {
           result = await change(before);
         } catch (error) {
-          if (error instanceof Error && error.message.includes('--db <file.sqlite>')) {
-            throw new Error(error.message.replaceAll('--db <file.sqlite>', `--db ${quoteCliPath(paths.db)}`));
+          if (error instanceof Error && error.message.includes(DB_HINT_PLACEHOLDER)) {
+            error.message = error.message.replaceAll(DB_HINT_PLACEHOLDER, () => `--db ${quoteCliPath(paths.db)}`);
           }
           throw error;
         }
