@@ -3011,12 +3011,14 @@ function resolveGitDir(repoRoot) {
 	}
 }
 function findConflictingGitignore(repoRoot, targetPaths) {
-	return [
+	const candidates = [
 		...targetPaths.map((target) => join(dirname(resolve(repoRoot, target)), ".gitignore")),
 		join(repoRoot, REVIEW_FOLDER, ".gitignore"),
 		join(repoRoot, ".ai", ".gitignore"),
 		join(repoRoot, ".gitignore")
-	].find((candidate) => existsSync(candidate)) ?? join(repoRoot, ".gitignore");
+	];
+	const existing = [...new Set(candidates)].filter((candidate) => existsSync(candidate));
+	return existing.find((candidate) => /^[ \t]*!/mu.test(readFileSync(candidate, "utf8"))) ?? existing[0] ?? join(repoRoot, ".gitignore");
 }
 async function ensureAiGitExcluded(repoRoot, targetPaths = []) {
 	const relTargets = targetPaths.map((target) => relative(repoRoot, target).replaceAll("\\", "/"));
@@ -3795,7 +3797,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+b562d9d`;
+	return `pr-comments ${VERSION}+273976e`;
 }
 //#endregion
 //#region src/cli.ts
