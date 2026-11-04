@@ -101,7 +101,7 @@ CREATE UNIQUE INDEX comment_links_own ON comment_links (finding) WHERE role = 'o
 
 The rules in these tables:
 
-- `linkable` has one row for every comment (replies too) and every check annotation of the snapshot. A link can only name a row that is there. This is a foreign key, so the database enforces it. The operations in `review-links.ts` check it first, to give a message that says what to do (`r999 is not in the database; run "pr-comments pr sync" first, or check the id`).
+- `linkable` has one row for every comment (replies too) and every check annotation of the snapshot. A link can only name a row that is there. This is a foreign key, so the database enforces it. The operations in `review-links.ts` check it first, to give a message that says what to do (`r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id`, with `<file.sqlite>` replaced by the database path in `changeReviewState`).
 - A ref is linked once (`UNIQUE`).
 - `own` and `duplicate` name a finding. A `note` names none and has a reason.
 - A finding has at most one `own` link (the partial unique index).
@@ -126,7 +126,7 @@ A read command must not change the committed file. A read-only connection (`new 
 1. `BEGIN IMMEDIATE`: the write lock is taken before anything is read. Writers in several processes run one after the other, each on what the one before saved.
 2. When a snapshot is given (a pull request that was just downloaded), it is saved first and always.
 3. The state is loaded: the review, the links, the connected pull request, and the refs a link may name (`known`).
-4. `change` runs. It returns the new state.
+4. `change` runs. It returns the new state. Pure modules such as `review-links.ts` write `DB_HINT_PLACEHOLDER` (`--db <file.sqlite>`) in their command hints, and `changeReviewState` replaces it with `--db <quoted-db-path>` (`quoteCliPath`) if `change` throws.
 5. The same state object back means "nothing changed": nothing is written. Otherwise only the parts that differ are written (the review, the links, the connected pull request).
 6. `COMMIT`. Any error rolls everything back, a given snapshot too.
 
@@ -162,7 +162,7 @@ A comment that was just written on GitHub is not in the snapshot yet, and a link
 3. If the result is not an error and has a comment, the whole pull request is read again (`deps.refresh`, the same download as `pr sync`, outside any transaction).
 4. `changeReviewState(…, { snapshot })` saves that snapshot and the link (or the `replied to duplicate …` entry) in one transaction.
 
-If step 3 fails, the result becomes an error that names the comment: `the comment was posted as r…, but the pull request could not be refreshed (<reason>); run "pr-comments pr sync", then "pr-comments link own --db <db> <finding> r…"`. If step 4 fails, the transaction is rolled back (the snapshot too) and the error says how to record the link by hand. A rerun finds the comment again and records it.
+If step 3 fails, the result becomes an error that names the comment: `the comment was posted as r…, but the pull request could not be refreshed (<reason>); run "pr-comments pr sync --db <db>", then "pr-comments link own --db <db> <finding> r…"`. If step 4 fails, the transaction is rolled back (the snapshot too) and the error says how to record the link by hand. A rerun finds the comment again and records it.
 
 A side effect: the refresh also brings in whatever others wrote since the last sync.
 
