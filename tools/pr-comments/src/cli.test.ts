@@ -902,42 +902,52 @@ describe('cli', () => {
         expect(warned).toBe(`Review database: ${review}\n`);
       });
 
-      it('warns on stderr when a committed change cannot refresh the report file', async () => {
+      it.each([
+        ['finding update', ['finding', 'update', 'F3', 'saved'], async () => undefined],
+        ['link duplicate', ['link', 'duplicate', 'F1', 'r1002'], async () => undefined],
+        [
+          'finding post',
+          ['finding', 'post', 'F1'],
+          async () => {
+            env.publish = async (_ref, _comment, _options, hooks) =>
+              hooks.onResult!({
+                action: 'created',
+                dryRun: false,
+                comment: 'r2001',
+                url: `${prUrl}#discussion_r2001`,
+                state: 'pending',
+                path: 'src/app.ts',
+                lines: '10-12',
+              });
+            env.getPullRequest = async () => withComments('r2001');
+          },
+        ],
+        [
+          'link reply',
+          ['link', 'reply', 'r1002'],
+          async () => {
+            await step('link', 'own', '--db', review, 'F1', 'r1001');
+            await step('link', 'duplicate', '--db', review, 'F1', 'r1002');
+            env.reply = async () => ({
+              action: 'created',
+              dryRun: false,
+              state: 'pending',
+              comment: 'r546201',
+              url: `${prUrl}#discussion_r546201`,
+            });
+            env.getPullRequest = async () => withComments('r546201');
+          },
+        ],
+      ])('warns on stderr when %s commits a change that cannot refresh the report file', async (_name, argv, setup) => {
+        await setup();
         const reportPath = reviewPaths(review).report;
         await step('report', 'render', '--db', review);
         await chmod(reportPath, 0o444);
         try {
-          expect(await step('finding', 'update', '--db', review, 'F3', 'saved')).toBe(0);
+          expect(await step(...argv, '--db', review)).toBe(0);
           expect(warned).toMatch(
             /^Warning: the report .*demo_review\.md was not refreshed \(.*\); run "pr-comments report render --db .*demo_review\.sqlite"\nReview database: /u,
           );
-
-          expect(await step('link', 'duplicate', '--db', review, 'F1', 'r1002')).toBe(0);
-          expect(warned).toContain('Warning: the report');
-
-          env.publish = async (_ref, _comment, _options, hooks) =>
-            hooks.onResult!({
-              action: 'created',
-              dryRun: false,
-              comment: 'r2001',
-              url: `${prUrl}#discussion_r2001`,
-              state: 'pending',
-              path: 'src/app.ts',
-              lines: '10-12',
-            });
-          env.getPullRequest = async () => withComments('r2001', 'r546201');
-          expect(await step('finding', 'post', '--db', review, 'F1')).toBe(0);
-          expect(warned).toContain('Warning: the report');
-
-          env.reply = async () => ({
-            action: 'created',
-            dryRun: false,
-            state: 'pending',
-            comment: 'r546201',
-            url: `${prUrl}#discussion_r546201`,
-          });
-          expect(await step('link', 'reply', '--db', review, 'r1002')).toBe(0);
-          expect(warned).toContain('Warning: the report');
         } finally {
           await chmod(reportPath, 0o666);
         }
