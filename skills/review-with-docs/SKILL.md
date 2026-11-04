@@ -136,8 +136,9 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
    [pull-request.md](pull-request.md).
    **Ready when:** `finding list --state approved --unposted` lists only
    findings the user chose to hold back or whose refused post is the user's
-   call, `link pending` prints nothing, and the user knows the pending review
-   waits for their submit.
+   call, `link pending` prints nothing, with a PR-comment dispatch the index
+   shows the tier bound of [fleet.md](fleet.md), and the user knows the
+   pending review waits for their submit.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR;
    where in doubt, it is the user's call. A pull request target is synced
@@ -165,8 +166,11 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
    **Ready when:** the round stands in the database with its revision, its
    base, and a note carrying any narrowing (and `no new findings` when none
    were raised); step 3's Ready-when holds for the round's scope at the new
-   revision; every finding the re-check covers carries a `Round <n>:` entry;
-   and on a pull request target, `link pending` prints nothing.
+   revision (with `recheck` in the index on a family other than the
+   orchestrator's where the orchestrator wrote the fixes); every finding the
+   re-check covers carries a `Round <n>:` entry; and on a pull request target,
+   `link pending` prints nothing (with the index showing the tier bound of
+   [fleet.md](fleet.md) for any PR-comment dispatch).
 
 Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 
