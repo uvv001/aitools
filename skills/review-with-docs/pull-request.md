@@ -23,17 +23,11 @@ link names yet; empty output means every top-level item is linked. Read the
 full pending threads and annotations with `report comments --pending`, and
 read unfiltered `report comments` for nonempty review verdict bodies whose
 review URL (`#pullrequestreview-<id>`) does not yet appear in `report dump`
-and, on a re-sync, for unlinked replies in already linked threads
-(`report comments --ref <linked-ref>` also shows a linked thread;
-`report dump` lists every linked ref) — past a handful of refs to read, the
-parallel agents below read the ref slices while the orchestrator reads the
-review verdict bodies — then classify each pending ref, each unlinked reply in
-a linked thread, and each unhandled review verdict body that raises or
-addresses a concern (citing its review URL in `finding add --note` for a new
-concern or `finding update` when it repeats, is the user's own review text, or
-supplies counter-evidence on a finding), and record it from the orchestrator:
+and, on a re-sync, for unlinked replies in already linked threads (`report
+dump` lists every linked ref). Then classify each item and record it from the
+orchestrator:
 
-| The comment or annotation | Command |
+| The comment, annotation, or review verdict body | Command |
 |---|---|
 | a comment the user wrote by hand saying what a finding says | `link own <F> <ref>` |
 | the same concern as a finding | `link duplicate <F> <ref>` |
@@ -41,17 +35,21 @@ supplies counter-evidence on a finding), and record it from the orchestrator:
 | chatter or a status comment that raises no concern | `link note <ref> '<reason>'` |
 | a concern no finding covers yet | `finding add`, then `link duplicate <F> <ref>` |
 | a check annotation, always | `link duplicate <F> <ref>` |
+| a review verdict body repeating, written by the user on, or giving counter-evidence on a finding | `finding update <F> '<review-url>: <text>'` |
+| a review verdict body raising a concern no finding covers yet | `finding add --note '<review-url>'` |
 
 Links are records in the database; nothing reaches GitHub. A note attaches to
-no finding and leaves no trace in the report, so every comment that raises a
-concern on the changeset — even one the agent refutes or that collides with a
-rule — goes to a finding (with the counter-evidence recorded there) for the
-user to triage. A doubtful classification is the user's call
-([SKILL.md](SKILL.md)); `link remove <ref>` undoes a link.
+no finding and leaves no trace in the report, so every comment or review
+verdict body that raises a concern on the changeset — even one the agent
+refutes or that collides with a rule — goes to a finding (with the
+counter-evidence recorded there) for the user to triage. A doubtful
+classification is the user's call ([SKILL.md](SKILL.md)); `link remove <ref>`
+undoes a link.
 
-Past a handful of refs to read, slice the pending and linked-thread refs
-across parallel agents (each given its model, the shared brief, and the
-read-only contract per [fleet.md](fleet.md)) that run
+Past a handful of refs to read, the orchestrator reads the review verdict
+bodies and slices the pending and linked-thread refs across parallel agents
+(each given its model, the shared brief, and the read-only contract per
+[fleet.md](fleet.md)) that run
 `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
 in the reviewed repository, read the comments against the findings the review
 carries (listed as in the Later rounds of [fleet.md](fleet.md)), the already
