@@ -9,7 +9,7 @@ importers:
   .:
     devDependencies:
       '@types/node':
-        specifier: ^24.2.0
+        specifier: ^24.15.0
         version: 24.19.2
       rolldown:
         specifier: 1.2.12

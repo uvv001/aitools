@@ -18,7 +18,7 @@ Contents:
 
 ## 1. Overview
 
-Node 24.2, TypeScript run directly by Node (type stripping), the built-in `node:sqlite`. No runtime dependencies. The only dev dependencies are `typescript`, `vitest`, `rolldown` and `@types/node`.
+Node 24.15, TypeScript run directly by Node (type stripping), the built-in `node:sqlite`. No runtime dependencies. The only dev dependencies are `typescript`, `vitest`, `rolldown` and `@types/node`.
 
 | Area | Files |
 | --- | --- |
@@ -426,7 +426,7 @@ The revision of a round is checked as one word (no spaces, no backticks) because
 Build:
 
 - `pnpm build` runs `scripts/build.ts`. It bundles `src/cli.ts` and everything it imports into one ES module with rolldown (`platform: 'node'`): `../../skills/review-with-docs/pr-comments.mjs`, with a shebang and a notice that it is generated. `--out <file>` writes it elsewhere.
-- Only `node:` built-ins stay as imports. The file needs Node 24.2 and nothing else.
+- Only `node:` built-ins stay as imports. The file needs Node 24.15 and nothing else.
 - `pr-comments --version` prints the version of `package.json`. The bundle adds the build id that the build script sets (`__BUILD__`): `pr-comments 0.1.0+75c05c9` (the short commit, with `-dirty` when tracked files under `tools/pr-comments/` have uncommitted changes, and nothing without git). A copy of the bundle that fell behind can be recognised by it.
 - `bin` in `package.json` points to `./src/cli.ts`. A global install must link the project (`pnpm add -g .`). Node refuses to run TypeScript files under `node_modules`, so a copy from a tarball or registry would fail with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.
 
