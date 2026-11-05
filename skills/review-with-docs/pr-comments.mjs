@@ -3781,7 +3781,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+b161da2`;
+	return `pr-comments ${VERSION}+504d8a2`;
 }
 //#endregion
 //#region src/cli.ts
@@ -5016,7 +5016,7 @@ async function run(argv, env = defaultEnvironment) {
 	if (help) return showHelp(env, positionals, true);
 	if (unknown !== void 0) {
 		const shown = /\s/u.test(unknown) ? `"${unknown}"` : unknown;
-		const takesText = topic.kind === "command" || topic.kind === "help";
+		const takesText = topic.kind === "command" && topic.command.args.length > 0;
 		const message = unknown.startsWith("--") || !takesText ? `unknown option ${shown}` : `unknown option ${shown}; to give a text that starts with "-", put options such as --db first, then -- and the text`;
 		if (topic.kind === "command") throw usageError(topic.command, message);
 		if (topic.kind === "help") throw usageError(HELP, message);
