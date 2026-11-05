@@ -624,6 +624,7 @@ interface ArgSpec {
   name: string;
   description: string;
   optional?: boolean;
+  freeText?: boolean;
 }
 
 interface Described {
@@ -700,7 +701,7 @@ const DEFINITIONS: Command[] = [
       'It never replaces an existing database or report file. The report (markdown) is written next to the database and updated on every change.',
       'The report is always next to the database with the same name, so --report and --db may both be given only if they agree.',
     ],
-    args: [{ name: '<name>', description: 'what is under review; the title of the report (a slug of it names the files by default)' }],
+    args: [{ name: '<name>', description: 'what is under review; the title of the report (a slug of it names the files by default)', freeText: true }],
     options: [
       { name: 'pr', value: '<url>', description: 'connect the review to this pull request' },
       { name: 'report', value: '<file.md>', description: 'the report (.md) or the database (.sqlite) to create (default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)' },
@@ -767,7 +768,7 @@ const DEFINITIONS: Command[] = [
     words: 'round update',
     summary: 'adds a note to a round',
     description: ['Appends a note (such as "no findings" after an empty pass) to a round under Reviewed.'],
-    args: [{ name: '<text>', description: 'the note, one line' }],
+    args: [{ name: '<text>', description: 'the note, one line', freeText: true }],
     options: [
       { name: 'round', value: '<n>', description: 'the round to update (default: the latest round)' },
     ],
@@ -845,7 +846,7 @@ const DEFINITIONS: Command[] = [
     words: 'finding set-title',
     summary: 'changes the title of a finding',
     description: [`Changes the title of the finding. ${LOGGED}`],
-    args: [FINDING, { name: '<title>', description: 'the new title, one line' }],
+    args: [FINDING, { name: '<title>', description: 'the new title, one line', freeText: true }],
     options: [noteOption('why'), roundOption],
     database: 'change',
     example: 'pr-comments finding set-title F7 "Missing retry timeout"',
@@ -865,7 +866,7 @@ const DEFINITIONS: Command[] = [
     words: 'finding update',
     summary: 'adds an update to a finding',
     description: ['Adds a free-form entry to the Updates of the finding: a question, a verdict, a note.'],
-    args: [FINDING, { name: '<text>', description: 'the update' }],
+    args: [FINDING, { name: '<text>', description: 'the update', freeText: true }],
     options: [roundOption],
     database: 'change',
     example: 'pr-comments finding update F7 "Asked the author" --round 1',
@@ -928,7 +929,7 @@ const DEFINITIONS: Command[] = [
     words: 'link note',
     summary: 'records that a comment is not a finding, and why',
     description: ['Records that the comment is no finding, with the reason. A check annotation cannot be a note.'],
-    args: [COMMENT_REF, { name: '<text>', description: 'the reason, one line' }],
+    args: [COMMENT_REF, { name: '<text>', description: 'the reason, one line', freeText: true }],
     options: [],
     database: 'change',
     example: 'pr-comments link note c623843 "a bot, not a finding"',
@@ -1294,7 +1295,7 @@ export async function run(argv: string[], env: CliEnvironment = defaultEnvironme
 
   if (unknown !== undefined) {
     const shown = /\s/u.test(unknown) ? `"${unknown}"` : unknown;
-    const takesText = topic.kind === 'command' && topic.command.args.length > 0;
+    const takesText = topic.kind === 'command' && topic.command.args.some(({ freeText }) => freeText);
     const message =
       unknown.startsWith('--') || !takesText
         ? `unknown option ${shown}`

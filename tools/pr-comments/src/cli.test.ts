@@ -520,6 +520,7 @@ describe('cli', () => {
     const MISTAKES: [string, string[], string, string][] = [
       ['an unknown option', ['finding', 'list', '--bogus'], 'finding list', 'unknown option --bogus'],
       ['an unknown short option', ['finding', 'list', '-x'], 'finding list', 'unknown option -x'],
+      ['an unknown short option on a command with a non-text argument', ['finding', 'show', '-x'], 'finding show', 'unknown option -x'],
       ['an unknown short option on a command that takes text', ['round', 'update', '-x'], 'round update', `unknown option -x; ${DASH}`],
       ['an unknown option of a command that creates', ['init', 'Demo', '--bogus'], 'init', 'unknown option --bogus'],
       ['an unknown option given a value', ['finding', 'list', '--bogus=1'], 'finding list', 'unknown option --bogus'],
