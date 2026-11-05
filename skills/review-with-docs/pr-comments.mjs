@@ -3781,7 +3781,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+504d8a2`;
+	return `pr-comments ${VERSION}+2ae9704`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4338,7 +4338,8 @@ const DEFINITIONS = [
 		],
 		args: [{
 			name: "<name>",
-			description: "what is under review; the title of the report (a slug of it names the files by default)"
+			description: "what is under review; the title of the report (a slug of it names the files by default)",
+			freeText: true
 		}],
 		options: [
 			{
@@ -4431,7 +4432,8 @@ const DEFINITIONS = [
 		description: ["Appends a note (such as \"no findings\" after an empty pass) to a round under Reviewed."],
 		args: [{
 			name: "<text>",
-			description: "the note, one line"
+			description: "the note, one line",
+			freeText: true
 		}],
 		options: [{
 			name: "round",
@@ -4555,7 +4557,8 @@ const DEFINITIONS = [
 		description: [`Changes the title of the finding. ${LOGGED}`],
 		args: [FINDING, {
 			name: "<title>",
-			description: "the new title, one line"
+			description: "the new title, one line",
+			freeText: true
 		}],
 		options: [noteOption("why"), roundOption],
 		database: "change",
@@ -4582,7 +4585,8 @@ const DEFINITIONS = [
 		description: ["Adds a free-form entry to the Updates of the finding: a question, a verdict, a note."],
 		args: [FINDING, {
 			name: "<text>",
-			description: "the update"
+			description: "the update",
+			freeText: true
 		}],
 		options: [roundOption],
 		database: "change",
@@ -4656,7 +4660,8 @@ const DEFINITIONS = [
 		description: ["Records that the comment is no finding, with the reason. A check annotation cannot be a note."],
 		args: [COMMENT_REF, {
 			name: "<text>",
-			description: "the reason, one line"
+			description: "the reason, one line",
+			freeText: true
 		}],
 		options: [],
 		database: "change",
@@ -5016,7 +5021,7 @@ async function run(argv, env = defaultEnvironment) {
 	if (help) return showHelp(env, positionals, true);
 	if (unknown !== void 0) {
 		const shown = /\s/u.test(unknown) ? `"${unknown}"` : unknown;
-		const takesText = topic.kind === "command" && topic.command.args.length > 0;
+		const takesText = topic.kind === "command" && topic.command.args.some(({ freeText }) => freeText);
 		const message = unknown.startsWith("--") || !takesText ? `unknown option ${shown}` : `unknown option ${shown}; to give a text that starts with "-", put options such as --db first, then -- and the text`;
 		if (topic.kind === "command") throw usageError(topic.command, message);
 		if (topic.kind === "help") throw usageError(HELP, message);
