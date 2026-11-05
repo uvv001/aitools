@@ -3059,10 +3059,7 @@ async function initReviewFile(name, options = {}) {
 	if (!await createDatabase(dbPath, data, pullRequest)) throw existingDatabase(dbPath);
 	try {
 		await writeReportUntilStable(reportTarget, rendered, () => {
-			const handle = new DatabaseSync(dbPath, {
-				readOnly: true,
-				timeout: 1e4
-			});
+			const handle = openReviewDb(dbPath, "readonly");
 			try {
 				return renderReport(loadReview(handle));
 			} finally {
@@ -3784,7 +3781,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+57c5657`;
+	return `pr-comments ${VERSION}+41f515d`;
 }
 //#endregion
 //#region src/cli.ts
