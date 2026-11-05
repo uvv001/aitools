@@ -443,7 +443,6 @@ Tests (`pnpm test` runs `vitest run`; `pnpm typecheck` runs `tsc --noEmit`):
 ## 11. Known limitations
 
 - File-wide findings. A finding about a whole file is anchored at line 1. For a file that the pull request only changes, line 1 is usually not inside a hunk, so the post is refused (the message lists the commentable ranges). In one real pull request with 109 files, 63 files were added and 33 of the 39 modified `.ts`, `.html` and `.scss` files had no hunk at line 1. An idea that is not built: attach to the first commentable line of the file, with a visible note.
-- Check run ids on github.com. The check run id is read as a GraphQL `Int` (`databaseId`). On github.com such ids can be larger than 2³¹. `fullDatabaseId` would be the fix. This was not tried, because every live test ran on GitHub Enterprise Server.
 - Fine-grained tokens and checks. Reading check run annotations with a fine-grained token (Checks: Read) was not tried. A token that cannot read them makes `pr sync` fail instead of skipping them.
 - Live tests ran on GitHub Enterprise Server 3.19.4 only, with a classic token. Not tried: github.com, the exact error for a write without permission (it should be `FORBIDDEN`, which is mapped to "access denied"), what a pending review does when the head of the pull request moves after it was created, what `--commit` does at submit time, and a cross-hunk range.
 - The reply tests ran on a closed draft pull request. Replies on a closed pull request work. Differences on an open one were not seen.
