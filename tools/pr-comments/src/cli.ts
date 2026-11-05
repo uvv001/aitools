@@ -25,7 +25,6 @@ import {
   refuseDatabase,
   renderReportFile,
   reviewPaths,
-  samePath,
   syncReviewFile,
 } from './review-files.ts';
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, linksOf, unlink } from './review-links.ts';

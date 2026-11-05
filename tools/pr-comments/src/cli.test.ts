@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { access, chmod, copyFile, link, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, link, mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
