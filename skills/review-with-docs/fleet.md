@@ -46,18 +46,17 @@ asks for what none of them covers, so an agent hands back only what is new; a
 concern a closed finding (❌ 📌 🔀) covers comes back only with better
 evidence, in a finding that names it.
 One more agent, `recheck`, re-checks every finding step 7 of
-[SKILL.md](SKILL.md) puts in the round's scope. Its brief carries the
-re-check rules of step 7: an open or fixed finding is re-checked against the
-code at the new revision, a fix the way the finding was verified, since a fix
-regresses; a closed finding is re-checked only where the code it points at
-changed. Its coverage file also holds one line per finding — finding, outcome
-(`fixed`, `holds`, `partial`, `regressed` or `defective`), and the evidence
-at the new revision — and it writes a finding file for each new defect it
-meets, a defective fix included, and for each closed finding whose concern
-returns, naming it. It replies with those lines, plus the reply line of a
-rule brief for each new finding file. The orchestrator turns each re-check
-line into `finding update --round <n>`, or `set-state` where the state moves,
-`fixed` per the States paragraph of [SKILL.md](SKILL.md).
+[SKILL.md](SKILL.md) puts in the round's scope. Its brief also carries,
+verbatim, the re-check sentences of step 7 and the fix test of the States
+paragraph of [SKILL.md](SKILL.md). Its coverage file also holds one line per
+finding — finding, outcome (`fixed`, `holds`, `partial`, `regressed` or
+`defective`), and the evidence at the new revision — and it writes a finding
+file for each new defect it meets, a defective fix included, and for each
+closed finding whose concern returns, naming it. It replies with those lines,
+plus the reply line of a rule brief for each new finding file. The
+orchestrator turns each re-check line into `finding update --round <n>`, or
+`set-state` where the state moves, `fixed` per the States paragraph of
+[SKILL.md](SKILL.md).
 
 ## Files
 
