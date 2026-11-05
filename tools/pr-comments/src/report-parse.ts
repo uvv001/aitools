@@ -157,4 +157,3 @@ export function parseReport(text: string, path: string): ParsedReport {
   });
   return { path, lines, inside, target: groups<'target'>(match).target, findings, sections };
 }
-
