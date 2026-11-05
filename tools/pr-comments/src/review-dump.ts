@@ -20,8 +20,8 @@ import type { Finding, IntroEntry, ReviewData } from './review-model.ts';
 //   update 1 at="2026-10-05 11:15" round=1
 //   | text of the update
 //
-// A review connected to a pull request, or with PR comment links, ends with these blocks (none of it otherwise, so
-// the dump of a review without them has not changed); the links are in link order, a value is JSON as above:
+// A review connected to a pull request, or with PR comment links, ends with these blocks (none of it otherwise);
+// the links are in link order, a value is JSON as above:
 //
 //   pull_request="https://github.com/owner/repo/pull/42"
 //
@@ -67,8 +67,7 @@ export interface DumpExtra {
 const linkLine = (link: CommentLink): string =>
   `link ${link.ref}${LINK_FIELDS.filter((key) => link[key] !== undefined).map((key) => ` ${field(key, link[key])}`).join('')}`;
 
-// The review, then (only when there are any) the pull request and the links, each after a blank line. The dump of a
-// review without them is the same as before they existed.
+// The review, then (only when there are any) the pull request and the links, each after a blank line.
 export function dumpReview(data: ReviewData, extra: DumpExtra = {}): string {
   const lines = [
     'review-db v1',
