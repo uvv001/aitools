@@ -122,8 +122,13 @@ describe('extractEvidence', () => {
 
   it('ignores lines that only resemble an anchor', () => {
     const lookalikes = ['`a.ts`', '`a.ts:x`', '`a.ts:`', '`a.ts:3-`', 'see `a.ts:3`', '`a.ts:3` here'];
-    lookalikes.push('a.ts:3', '`a b.ts:3`', '``a.ts:3``');
+    lookalikes.push('a.ts:3', '` :3`', '`a.ts :3`', '``a.ts:3``');
     for (const line of lookalikes) expect(extractEvidence(doc(line, '```ts', 'x', '```')), line).toEqual([]);
+  });
+
+  it('extracts an anchor whose path contains spaces', () => {
+    const [found] = extractEvidence(doc('`src/My Dir/a b.ts:3-5`', '```ts', 'x', '```'));
+    expect(found).toMatchObject({ path: 'src/My Dir/a b.ts', start: 3, end: 5, snippet: ['x'] });
   });
 
   it('takes the last colon of the path part for the line numbers', () => {

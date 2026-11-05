@@ -216,6 +216,7 @@ describe('extractComment', () => {
 
     it.each([
       ['src/app/a.ts', 'src/app/a.ts'],
+      ['src/My Dir/a b.ts', 'src/My Dir/a b.ts'],
       ['src\\app\\a.ts', 'src/app/a.ts'],
       ['./src/a.ts', 'src/a.ts'],
       ['.\\src\\a.ts', 'src/a.ts'],

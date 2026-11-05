@@ -1,5 +1,6 @@
 import type { PublishComment } from './publish.ts';
 import type { ParsedReport, ReportFinding } from './report-parse.ts';
+import { ANCHOR } from './review-evidence.ts';
 
 export interface Anchor {
   path: string;
@@ -28,7 +29,6 @@ export interface Extracted {
 }
 
 const FENCE = /^\s*(`{3,}|~{3,})/;
-const ANCHOR = /^\s*`([^`\s]+):(\d+)(?:-(\d+))?`\s*$/;
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
 const REFERENCE_LINK = /\[[^\]]+\]\[[^\]]*\]/;
 const REFERENCE_DEFINITION = /^\s{0,3}\[[^\]]+\]:\s*\S/;

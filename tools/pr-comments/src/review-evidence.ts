@@ -25,7 +25,7 @@ interface Fence {
   next: number;
 }
 
-const ANCHOR = /^\s*`([^`\s]+):(\d+)(?:-(\d+))?`\s*$/;
+export const ANCHOR = /^\s*`([^\s`]+(?: [^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
 const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
 const CLOSING = /^\s*(`{3,}|~{3,})\s*$/;
 
