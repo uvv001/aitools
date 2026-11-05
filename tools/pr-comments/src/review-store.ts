@@ -85,6 +85,7 @@ const DERIVED = ['round', 'revision', 'base'];
 
 type Row = Record<string, string | number | null>;
 
+const SQLITE_CANTOPEN = 14;
 const SQLITE_NOTADB = 26;
 
 function userVersion(db: DatabaseSync, path: string): number {
@@ -157,6 +158,10 @@ export function openReviewDb(path: string, mode: OpenMode): DatabaseSync {
   } catch (error) {
     db?.close();
     if (mode === 'create') rmSync(path, { force: true });
+    const { errcode, message } = error as { errcode?: number; message?: string };
+    if (errcode !== undefined && (errcode & 0xff) === SQLITE_CANTOPEN) {
+      throw new Error(`cannot open ${path}: ${message}`);
+    }
     throw error;
   }
 }

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -90,6 +90,14 @@ describe('openReviewDb', () => {
     for (const mode of ['existing', 'readonly'] as const) {
       expect(() => openReviewDb(path, mode)).toThrow(new Error(`${path} does not exist`));
       expect(readdirSync(dir)).toEqual([]);
+    }
+  });
+
+  it('names the path when SQLite cannot open it, such as a directory named x.sqlite', () => {
+    const path = reviewFile('x.sqlite');
+    mkdirSync(path);
+    for (const mode of ['existing', 'readonly'] as const) {
+      expect(() => openReviewDb(path, mode)).toThrow(new Error(`cannot open ${path}: unable to open database file`));
     }
   });
 
