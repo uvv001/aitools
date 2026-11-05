@@ -139,7 +139,7 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
    findings the user chose to hold back or whose refused post is the user's
    call, `link pending` prints nothing, every reply ref that
    `report comments` shows in a linked thread has a `link` line in
-   `report dump`, the review URL (`#pullrequestreview-<id>`) of every
+   `report dump`, the `<review-url>@<editedAt-or-submittedAt>` token of every
    nonempty review verdict body that raises or addresses a concern appears in
    `report dump`, with a PR-comment dispatch the index shows the tier bound of
    [fleet.md](fleet.md), and the user knows the pending review waits for their
