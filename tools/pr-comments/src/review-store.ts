@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { CommentLink, LinkRole } from './review-links.ts';
@@ -134,7 +134,13 @@ function createFile(path: string): void {
   try {
     closeSync(openSync(path, 'wx'));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`${path} already exists`);
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST' || code === 'EISDIR') {
+      if (statSync(path, { throwIfNoEntry: false })?.isDirectory()) {
+        throw new Error(`${path} is a directory, not a review database`);
+      }
+      throw new Error(`${path} already exists`);
+    }
     throw error;
   }
 }
@@ -150,6 +156,7 @@ const BUSY_TIMEOUT_MS = 10_000;
 export function openReviewDb(path: string, mode: OpenMode): DatabaseSync {
   if (mode === 'create') createFile(path);
   else if (!existsSync(path)) throw new Error(`${path} does not exist`);
+  else if (statSync(path).isDirectory()) throw new Error(`${path} is a directory, not a review database`);
   let db: DatabaseSync | undefined;
   try {
     db = new DatabaseSync(path, { timeout: BUSY_TIMEOUT_MS, readOnly: mode === 'readonly' });

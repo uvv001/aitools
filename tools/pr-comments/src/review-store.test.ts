@@ -93,11 +93,11 @@ describe('openReviewDb', () => {
     }
   });
 
-  it('names the path when SQLite cannot open it, such as a directory named x.sqlite', () => {
+  it('refuses a directory named x.sqlite in every mode, naming the path', () => {
     const path = reviewFile('x.sqlite');
     mkdirSync(path);
-    for (const mode of ['existing', 'readonly'] as const) {
-      expect(() => openReviewDb(path, mode)).toThrow(new Error(`cannot open ${path}: unable to open database file`));
+    for (const mode of ['create', 'existing', 'readonly'] as const) {
+      expect(() => openReviewDb(path, mode)).toThrow(new Error(`${path} is a directory, not a review database`));
     }
   });
 
