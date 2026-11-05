@@ -3784,7 +3784,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+85ece5f`;
+	return `pr-comments ${VERSION}+99ab9f7`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4936,7 +4936,7 @@ function locate(argv) {
 	let unknown;
 	for (const token of tokens) if (token.kind === "positional") positionals.push(token.value);
 	else if (token.kind === "option" && token.name === "help" && (argv[token.index] === "-h" || argv[token.index] === "--help")) help = true;
-	else if (token.kind === "option" && (!Object.hasOwn(OPTIONS, token.name) || token.name === "help")) unknown ??= token.rawName.startsWith("--") ? token.rawName : argv[token.index];
+	else if (token.kind === "option" && (!Object.hasOwn(OPTIONS, token.name) || token.name === "help" && !token.rawName.startsWith("--"))) unknown ??= token.rawName.startsWith("--") ? token.rawName : argv[token.index];
 	return {
 		positionals,
 		help,
@@ -4954,7 +4954,7 @@ function parseStrictly(command, argv) {
 		});
 	} catch (error) {
 		const { code, message } = error;
-		const name = /^Option '(--[^ ']+)/u.exec(message)?.[1];
+		const name = /^Option '(?:-[^,]+, )?(--[^ ']+)/u.exec(message)?.[1];
 		if (code !== "ERR_PARSE_ARGS_INVALID_OPTION_VALUE" || name === void 0) throw error;
 		if (message.includes("does not take an argument")) throw usageError(command, `${name} is a flag and takes no value`);
 		throw usageError(command, `${name} needs a value${message.includes("ambiguous") ? `; a value that starts with "-" is written ${name}=<value>` : ""}`);
