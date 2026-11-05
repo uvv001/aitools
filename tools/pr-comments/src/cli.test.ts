@@ -514,14 +514,18 @@ describe('cli', () => {
       expect(result.stdout).toContain(`Usage: ${synopsis(command('finding list'))}`);
     });
 
-    it('detects the main module directly and through a symlink when import.meta.main is absent', async () => {
+    it('detects the main module when import.meta.main is absent', () => {
       const withoutMain = { url: new URL('./cli.ts', import.meta.url).href } as ImportMeta;
-      const binLink = join(work, 'pr-comments-bin.ts');
-      await symlink(CLI, binLink);
       expect(isMainModule(withoutMain, CLI)).toBe(true);
-      expect(isMainModule(withoutMain, binLink)).toBe(true);
       expect(isMainModule(withoutMain, join(work, 'other.ts'))).toBe(false);
       expect(isMainModule(withoutMain, undefined)).toBe(false);
+    });
+
+    it('detects the main module through a symlink when import.meta.main is absent', async ({ skip }) => {
+      const withoutMain = { url: new URL('./cli.ts', import.meta.url).href } as ImportMeta;
+      const binLink = join(work, 'pr-comments-bin.ts');
+      await symlink(CLI, binLink).catch((error: unknown) => skip(`symbolic links are not available here: ${(error as Error).message}`));
+      expect(isMainModule(withoutMain, binLink)).toBe(true);
     });
 
     it('refuses Node versions older than 24.15', () => {
