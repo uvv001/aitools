@@ -637,9 +637,19 @@ describe('cli', () => {
         [['help', '--state'], '--state needs a value'],
         [['help', '--json=yes'], '--json is a flag and takes no value'],
         [['help', '--help=yes'], '--help is a flag and takes no value'],
-        [['finding', '--help=yes'], '--help is a flag and takes no value'],
       ])('refuses %j like any other command: the problem, the usage line of help and exit code 1', async (argv, problem) => {
         await expect(step(...argv)).rejects.toThrow(ofHelp(problem));
+        expect(printed).toBe('');
+      });
+
+      it('refuses options on a group line with the group name and its --help hint', async () => {
+        const ofGroup = (problem: string) => new Error(`${problem}\nRun "pr-comments finding --help" for the commands of the group.`);
+        await expect(step('finding', '--db', 'x.sqlite')).rejects.toThrow(
+          ofGroup('--db does not apply to the finding group; it applies to a command such as "finding list"'),
+        );
+        await expect(step('finding', '--pr', prUrl)).rejects.toThrow(ofGroup('--pr does not apply to the finding group'));
+        await expect(step('finding', '--help=yes')).rejects.toThrow(ofGroup('--help is a flag and takes no value'));
+        await expect(step('finding', '-x')).rejects.toThrow(ofGroup('unknown option -x'));
         expect(printed).toBe('');
       });
 
@@ -712,8 +722,12 @@ describe('cli', () => {
 
     it('answers no command with the short usage, and an option alone as unknown', async () => {
       await expect(step()).rejects.toThrow(new Error('Usage: pr-comments <command> [options]\nRun "pr-comments help" for the commands.'));
+      await expect(step('--db', 'x.sqlite')).rejects.toThrow(
+        new Error('Usage: pr-comments <command> [options]\nRun "pr-comments help" for the commands.'),
+      );
+      await expect(step('--help=yes')).rejects.toThrow(new Error('--help is a flag and takes no value\nRun "pr-comments help" for the commands.'));
       await expect(step('--bogus')).rejects.toThrow(new Error('unknown option --bogus\nRun "pr-comments help" for the commands.'));
-      await expect(step('-x')).rejects.toThrow(new Error(`unknown option -x; ${DASH}\nRun "pr-comments help" for the commands.`));
+      await expect(step('-x')).rejects.toThrow(new Error('unknown option -x\nRun "pr-comments help" for the commands.'));
       await expect(step('--version', 'x')).rejects.toThrow('unknown option --version');
       await expect(step('pr', 'show', '--version')).rejects.toThrow(mistake('pr show', 'unknown option --version'));
     });

@@ -1157,9 +1157,12 @@ function topicOf(words: string[]): Topic {
   return second === undefined ? { kind: 'group', group: first } : { kind: 'unknown', text: `${first} ${second}`, group: first };
 }
 
+function groupHint(group?: string): string {
+  return group === undefined ? 'Run "pr-comments help" for the commands.' : `Run "pr-comments ${group} --help" for the commands of the group.`;
+}
+
 function unknownCommand(text: string, group?: string): Error {
-  const hint = group === undefined ? 'Run "pr-comments help" for the commands.' : `Run "pr-comments ${group} --help" for the commands of the group.`;
-  return new Error(`unknown command "${text}"\n${hint}`);
+  return new Error(`unknown command "${text}"\n${groupHint(group)}`);
 }
 
 // A mistake in the arguments of a command: what is wrong, and the one usage line of that command.
@@ -1209,16 +1212,16 @@ function locate(argv: string[]) {
 }
 
 // The strict look: what the type of an option allows, in words that name the option.
-function parseStrictly(command: Command | Helping, argv: string[]) {
+function parseStrictly(argv: string[], onError: (message: string) => Error) {
   try {
     return parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true, tokens: true });
   } catch (error) {
     const { code, message } = error as NodeJS.ErrnoException;
     const name = /^Option '(?:-[^,]+, )?(--[^ ']+)/u.exec(message)?.[1];
     if (code !== 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE' || name === undefined) throw error;
-    if (message.includes('does not take an argument')) throw usageError(command, `${name} is a flag and takes no value`);
+    if (message.includes('does not take an argument')) throw onError(`${name} is a flag and takes no value`);
     const dash = message.includes('ambiguous') ? `; a value that starts with "-" is written ${name}=<value>` : '';
-    throw usageError(command, `${name} needs a value${dash}`);
+    throw onError(`${name} needs a value${dash}`);
   }
 }
 
@@ -1263,7 +1266,7 @@ function checkedArguments(command: Command, parsed: ReturnType<typeof parseStric
 }
 
 async function execute(command: Command, argv: string[], env: CliEnvironment): Promise<number> {
-  const parsed = parseStrictly(command, argv);
+  const parsed = parseStrictly(argv, (message) => usageError(command, message));
   const args = checkedArguments(command, parsed);
   const values = parsed.values as Values;
   if (values.db !== undefined && extname(values.db).toLowerCase() !== '.sqlite') {
@@ -1290,24 +1293,37 @@ export async function run(argv: string[], env: CliEnvironment = defaultEnvironme
   if (help) return showHelp(env, positionals, true);
 
   if (unknown !== undefined) {
-    const message = unknown.startsWith('--')
-      ? `unknown option ${unknown}`
-      : `unknown option ${/\s/u.test(unknown) ? `"${unknown}"` : unknown}; to give a text that starts with "-", put options such as --db first, then -- and the text`;
+    const shown = /\s/u.test(unknown) ? `"${unknown}"` : unknown;
+    const takesText = topic.kind === 'command' || topic.kind === 'help';
+    const message =
+      unknown.startsWith('--') || !takesText
+        ? `unknown option ${shown}`
+        : `unknown option ${shown}; to give a text that starts with "-", put options such as --db first, then -- and the text`;
     if (topic.kind === 'command') throw usageError(topic.command, message);
     if (topic.kind === 'help') throw usageError(HELP, message);
-    throw new Error(`${message}\nRun "pr-comments help" for the commands.`);
+    throw new Error(`${message}\n${groupHint(topic.group)}`);
   }
   if (topic.kind === 'help') {
     // The words after `help` are the command asked about, so they are not counted as arguments.
-    checkedOptions(HELP, parseStrictly(HELP, argv));
+    checkedOptions(
+      HELP,
+      parseStrictly(argv, (message) => usageError(HELP, message)),
+    );
     return showHelp(env, positionals.slice(1));
   }
   if (positionals.length === 0) {
-    checkedOptions(HELP, parseStrictly(HELP, argv));
-    throw new Error('Usage: pr-comments <command> [options]\nRun "pr-comments help" for the commands.');
+    parseStrictly(argv, (message) => new Error(`${message}\n${groupHint()}`));
+    throw new Error(`Usage: pr-comments <command> [options]\n${groupHint()}`);
   }
   if (topic.kind === 'group') {
-    checkedOptions(HELP, parseStrictly(HELP, argv));
+    const parsed = parseStrictly(argv, (message) => new Error(`${message}\n${groupHint(topic.group)}`));
+    const option = parsed.tokens.find((token) => token.kind === 'option');
+    if (option !== undefined) {
+      const candidates = inGroup(topic.group).filter((cmd) => cmd.options.some(({ name }) => name === option.name));
+      const example = candidates.find(({ database }) => database === 'readonly') ?? candidates[0];
+      const suffix = example !== undefined ? `; it applies to a command such as "${example.words}"` : '';
+      throw new Error(`--${option.name} does not apply to the ${topic.group} group${suffix}\n${groupHint(topic.group)}`);
+    }
     return showHelp(env, positionals);
   }
   if (topic.kind === 'unknown') throw unknownCommand(topic.text, topic.group);
