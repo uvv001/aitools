@@ -117,14 +117,14 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
    and records each verdict the user gives. Write each verdict with
-   `finding set-state <F> <state> --note <why> --round <n>`, `<n>` the round
-   being triaged: ✅ approved, ❌ discarded, 📌 deferred, 🔀 routed out as an
+   `finding set-state <F> <state> --note <why> --round <n>`, `<n>` the open
+   round: ✅ approved, ❌ discarded, 📌 deferred, 🔀 routed out as an
    improvement. An answer that changes a finding rewrites it —
    `set-description`, `set-severity`, `set-title`, each with a note; a
    question or a remark that moves nothing goes in as `finding update`. A
    finding the user brings in, or one a triage question surfaces, is a
    `finding add` carrying the same evidence — text or screenshots from the
-   user are transcribed in substance — and is filed in the round just triaged.
+   user are transcribed in substance.
    The user may rule on part of the findings; the rest keep their state.
    **Ready when:** every finding the user ruled on carries its state and an
    Updates entry saying why, and every finding raised during the triage is
