@@ -434,7 +434,7 @@ Tests (`pnpm test` runs `vitest run`; `pnpm typecheck` runs `tsc --noEmit`):
 
 - A test file sits next to each module: `src/<module>.test.ts`. They run offline. GitHub is replaced by fakes: an injected `fetch`, GraphQL and REST clients, and the `CliEnvironment` of `cli.ts` (`getPullRequest`, `publish`, `reply`, `resolveRevision`, `print`, `warn`, `cwd`, `now`, `readStdin`). No test writes to GitHub.
 - Test data is inline. `src/fixtures.ts` has a sample pull request. `src/review-test-support.ts` has the helpers of the database tests: scratch folders, a snapshot with chosen refs, a sample report that uses every part of the model.
-- Scratch folders are under the git-ignored `out/`, never in the temporary folder of the system.
+- Scratch folders for the review-database, git-revision, and bundle tests are under the git-ignored `out/` (`token`, `download`, and `review-naming` tests use the temporary folder of the system).
 - `src/git-revision.test.ts` creates real git repositories (commits, branches, tags, an ambiguous abbreviation). Each has a repository of its own inside the one of the project.
 - `scripts/build.test.ts` builds the bundle and compares what it prints with what the sources print: help, errors, the pull request as markdown, links, a review made from another folder.
 - `src/cli.test.ts` covers the command line: every command, strict arguments, help, exit codes, the stderr line.
