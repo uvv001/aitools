@@ -22,7 +22,7 @@ check annotations. Run it after every push and before every publish.
 link names yet; empty output means every top-level item is linked. Read the
 full pending threads and annotations with `report comments --pending`, and
 read unfiltered `report comments` for nonempty review verdict bodies whose
-`<review-url>@<editedAt-or-submittedAt>` token does not yet appear in
+`<review-url> (<editedAt-or-submittedAt>)` marker does not yet appear in
 `report dump` and, on a re-sync, for unlinked replies in already linked
 threads (`report dump` lists every linked ref). Then classify each item and
 record it from the orchestrator:
@@ -35,8 +35,8 @@ record it from the orchestrator:
 | chatter or a status comment that raises no concern | `link note <ref> '<reason>'` |
 | a concern no finding covers yet | `finding add`, then `link duplicate <F> <ref>` |
 | a check annotation, always | `link duplicate <F> <ref>` |
-| a review verdict body repeating a finding, written by the user as that finding, or giving counter-evidence on it | `finding update <F> '<review-url>@<editedAt-or-submittedAt>: <text>'` |
-| a review verdict body raising a concern no finding covers yet | `finding add --note '<review-url>@<editedAt-or-submittedAt>'` |
+| a review verdict body repeating a finding, written by the user as that finding, or giving counter-evidence on it | `finding update <F> '<review-url> (<editedAt-or-submittedAt>): <text>'` |
+| a review verdict body raising a concern no finding covers yet | `finding add --note '<review-url> (<editedAt-or-submittedAt>)'` |
 
 Links are records in the database; nothing reaches GitHub. A note attaches to
 no finding and leaves no trace in the report, so every comment or review
