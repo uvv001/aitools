@@ -1198,7 +1198,10 @@ function locate(argv: string[]) {
   for (const token of tokens) {
     if (token.kind === 'positional') positionals.push(token.value);
     else if (token.kind === 'option' && token.name === 'help' && (argv[token.index] === '-h' || argv[token.index] === '--help')) help = true;
-    else if (token.kind === 'option' && (!Object.hasOwn(OPTIONS, token.name) || token.name === 'help')) {
+    else if (
+      token.kind === 'option' &&
+      (!Object.hasOwn(OPTIONS, token.name) || (token.name === 'help' && !token.rawName.startsWith('--')))
+    ) {
       // A long name stands for the option; a single dash is more likely the start of a text, so the whole argument is shown.
       unknown ??= token.rawName.startsWith('--') ? token.rawName : argv[token.index];
     }
@@ -1212,7 +1215,7 @@ function parseStrictly(command: Command | Helping, argv: string[]) {
     return parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true, tokens: true });
   } catch (error) {
     const { code, message } = error as NodeJS.ErrnoException;
-    const name = /^Option '(--[^ ']+)/u.exec(message)?.[1];
+    const name = /^Option '(?:-[^,]+, )?(--[^ ']+)/u.exec(message)?.[1];
     if (code !== 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE' || name === undefined) throw error;
     if (message.includes('does not take an argument')) throw usageError(command, `${name} is a flag and takes no value`);
     const dash = message.includes('ambiguous') ? `; a value that starts with "-" is written ${name}=<value>` : '';

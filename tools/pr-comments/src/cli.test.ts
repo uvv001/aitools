@@ -583,6 +583,7 @@ describe('cli', () => {
         '--db needs a value; a value that starts with "-" is written --db=<value>',
       ],
       ['a flag with a value', ['finding', 'list', '--json=yes'], 'finding list', '--json is a flag and takes no value'],
+      ['--help with a value', ['finding', 'list', '--help=yes'], 'finding list', '--help is a flag and takes no value'],
     ];
 
     it.each(MISTAKES)('refuses %s with the problem and the one usage line, and creates nothing', async (_what, argv, words, problem) => {
