@@ -671,10 +671,21 @@ describe('initReviewFile', () => {
     beforeEach(async () => {
       repo = join(dir, 'repo');
       cwd = join(repo, 'src', 'deep');
+      const globalConfig = join(dir, 'gitconfig');
+      await writeFile(globalConfig, '', 'utf8');
+      vi.stubEnv('GIT_CONFIG_GLOBAL', globalConfig);
+      vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+      vi.stubEnv('XDG_CONFIG_HOME', dir);
+      vi.stubEnv('HOME', dir);
+      vi.stubEnv('USERPROFILE', dir);
       await mkdir(join(repo, '.git', 'refs'), { recursive: true });
       await mkdir(join(repo, '.git', 'objects'), { recursive: true });
       await writeFile(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
       await mkdir(cwd, { recursive: true });
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
     });
 
     it('creates the review in .ai/review-with-docs/ of the repository, named from the date and the name, and excludes /.ai/review-with-docs/ in .git/info/exclude', async () => {
