@@ -2705,7 +2705,11 @@ function createFile(path) {
 	try {
 		closeSync(openSync(path, "wx"));
 	} catch (error) {
-		if (error.code === "EEXIST") throw new Error(`${path} already exists`);
+		const code = error.code;
+		if (code === "EEXIST" || code === "EISDIR") {
+			if (statSync(path, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`${path} is a directory, not a review database`);
+			throw new Error(`${path} already exists`);
+		}
 		throw error;
 	}
 }
@@ -2713,6 +2717,7 @@ const BUSY_TIMEOUT_MS = 1e4;
 function openReviewDb(path, mode) {
 	if (mode === "create") createFile(path);
 	else if (!existsSync(path)) throw new Error(`${path} does not exist`);
+	else if (statSync(path).isDirectory()) throw new Error(`${path} is a directory, not a review database`);
 	let db;
 	try {
 		db = new DatabaseSync(path, {
@@ -3796,7 +3801,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+42e4d0b`;
+	return `pr-comments ${VERSION}+3b798f8`;
 }
 //#endregion
 //#region src/cli.ts
