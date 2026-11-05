@@ -30,7 +30,8 @@ unlinked reply in a linked thread and record it from the orchestrator:
 | The comment or annotation | Command |
 |---|---|
 | a comment the user wrote by hand saying what a finding says | `link own <F> <ref>` |
-| the same concern as a finding (or a reply with counter-evidence on `<F>`, after `finding update <F> '<counter-evidence>'`) | `link duplicate <F> <ref>` |
+| the same concern as a finding | `link duplicate <F> <ref>` |
+| counter-evidence on a finding | `finding update <F> '<ref>: <counter-evidence>'`, then `link note <ref> 'counter-evidence recorded on <F>'` |
 | chatter or a status comment that raises no concern | `link note <ref> '<reason>'` |
 | a concern no finding covers yet | `finding add`, then `link duplicate <F> <ref>` |
 | a check annotation, always | `link duplicate <F> <ref>` |
@@ -51,9 +52,9 @@ carries (listed as in the Later rounds of [fleet.md](fleet.md)), the already
 linked refs, the user's login, and the table and the paragraph above, write a
 description file per [fleet.md](fleet.md) for each concern no finding covers
 yet, a refuted one included, and reply with one classification per unlinked
-ref (`own <F>`, `duplicate <F>` with any counter-evidence note for
-`finding update <F>`, `note '<reason>'`, or the new finding's reply line per
-[fleet.md](fleet.md)) for the orchestrator to record.
+ref (`own <F>`, `duplicate <F>`, `counter-evidence <F> '<counter-evidence>'`,
+`note '<reason>'`, or the new finding's reply line per [fleet.md](fleet.md))
+for the orchestrator to record.
 
 ## Publish
 
