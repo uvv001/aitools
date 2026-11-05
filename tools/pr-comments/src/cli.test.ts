@@ -1991,6 +1991,43 @@ describe('cli', () => {
         );
       });
 
+      it('shows a newly synced reply in a linked thread via unfiltered or --ref reads while --pending omits the linked root', async () => {
+        await step('link', 'duplicate', 'F1', 'r1001');
+        const current = withChecks();
+        const root = current.comments.find((comment) => comment.url.endsWith('#discussion_r1001'))!;
+        snapshot = {
+          ...current,
+          comments: [
+            ...current.comments,
+            {
+              ...root,
+              id: 'id-r1005',
+              threadPosition: 2,
+              replyToId: root.id,
+              author: 'erin',
+              body: 'Follow-up reply with new counter-evidence.',
+              createdAt: '2026-01-05T11:00:00Z',
+              updatedAt: '2026-01-05T11:00:00Z',
+              url: `${prUrl}#discussion_r1005`,
+            },
+          ],
+        };
+        await step('pr', 'sync');
+
+        await step('report', 'comments', '--pending');
+        expect(printed).not.toContain('`r1001`');
+        expect(printed).not.toContain('`r1005`');
+
+        await step('report', 'comments', '--ref', 'r1001');
+        expect(printed).toContain('`r1001`');
+        expect(printed).toContain('`r1005`');
+        expect(printed).toContain('Follow-up reply with new counter-evidence.');
+
+        await step('report', 'comments');
+        expect(printed).toContain('`r1005`');
+        expect(printed).toContain('Follow-up reply with new counter-evidence.');
+      });
+
       it('writes the markdown to a file, creating the folder, and says so', async () => {
         const out = join(work, 'reports', 'pr-157.md');
 
