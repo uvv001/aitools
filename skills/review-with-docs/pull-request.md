@@ -22,15 +22,15 @@ check annotations. Run it after every push and before every publish.
 link names yet; empty output means every top-level item is linked. Read the
 full pending threads and annotations with `report comments --pending`, and on
 a re-sync also read `report comments --ref <linked-ref>` (or unfiltered
-`report comments`) for new or edited replies in already linked threads — past
-a handful of refs to read, the parallel agents below read them instead — then
-classify each unlinked ref (and any reply in a linked thread that raises a new
-concern or counter-evidence) and record it from the orchestrator:
+`report comments`) for unlinked replies in already linked threads (`report
+dump` lists every linked ref) — past a handful of refs to read, the parallel
+agents below read them instead — then classify each pending ref and each
+unlinked reply in a linked thread and record it from the orchestrator:
 
 | The comment or annotation | Command |
 |---|---|
 | a comment the user wrote by hand saying what a finding says | `link own <F> <ref>` |
-| the same concern as a finding | `link duplicate <F> <ref>` |
+| the same concern as a finding (or a reply with counter-evidence on `<F>`, after `finding update <F> '<counter-evidence>'`) | `link duplicate <F> <ref>` |
 | chatter or a status comment that raises no concern | `link note <ref> '<reason>'` |
 | a concern no finding covers yet | `finding add`, then `link duplicate <F> <ref>` |
 | a check annotation, always | `link duplicate <F> <ref>` |
@@ -47,11 +47,12 @@ across parallel agents (each given its model, the shared brief, and the
 read-only contract per [fleet.md](fleet.md)) that run
 `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
 in the reviewed repository, read the comments against the findings the review
-carries (listed as in the Later rounds of [fleet.md](fleet.md)), the user's
-login, and the table and the paragraph above, write a description file per
-[fleet.md](fleet.md) for each concern no finding covers yet, a refuted one
-included, and reply with one classification per ref (`own <F>`,
-`duplicate <F>`, `note '<reason>'`, or the new finding's reply line per
+carries (listed as in the Later rounds of [fleet.md](fleet.md)), the already
+linked refs, the user's login, and the table and the paragraph above, write a
+description file per [fleet.md](fleet.md) for each concern no finding covers
+yet, a refuted one included, and reply with one classification per unlinked
+ref (`own <F>`, `duplicate <F>` with any counter-evidence note for
+`finding update <F>`, `note '<reason>'`, or the new finding's reply line per
 [fleet.md](fleet.md)) for the orchestrator to record.
 
 ## Publish
