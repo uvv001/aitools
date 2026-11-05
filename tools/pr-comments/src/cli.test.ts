@@ -123,7 +123,7 @@ const command = (words: string) => COMMANDS.find((candidate) => candidate.words 
 const mistake = (words: string, problem: string) =>
   new Error(`${problem}\nUsage: ${synopsis(command(words))}\nRun "pr-comments ${words} --help" for details.`);
 
-const DASH = 'to give a text that starts with "-", put -- before it';
+const DASH = 'to give a text that starts with "-", put options such as --db first, then -- and the text';
 
 const F1_DESCRIPTION = [
   'Crash when the list is empty; see [the helper](src/util.ts).',
@@ -591,6 +591,11 @@ describe('cli', () => {
       expect(printed).toBe('');
       expect(warned).toBe('');
       expect(await tree()).toEqual(before);
+    });
+
+    it('accepts a text that starts with "-" when options such as --db come before --', async () => {
+      expect(await run(['round', 'update', '--db', review, '--', '-x note'], env)).toBe(0);
+      expect(printed).toBe('Round 1 updated\n');
     });
 
     it('names no other command in the message of a mistake', async () => {

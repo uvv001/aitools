@@ -1290,7 +1290,7 @@ export async function run(argv: string[], env: CliEnvironment = defaultEnvironme
   if (unknown !== undefined) {
     const message = unknown.startsWith('--')
       ? `unknown option ${unknown}`
-      : `unknown option ${/\s/u.test(unknown) ? `"${unknown}"` : unknown}; to give a text that starts with "-", put -- before it`;
+      : `unknown option ${/\s/u.test(unknown) ? `"${unknown}"` : unknown}; to give a text that starts with "-", put options such as --db first, then -- and the text`;
     if (topic.kind === 'command') throw usageError(topic.command, message);
     if (topic.kind === 'help') throw usageError(HELP, message);
     throw new Error(`${message}\nRun "pr-comments help" for the commands.`);
