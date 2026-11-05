@@ -3784,7 +3784,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+29b5c4b`;
+	return `pr-comments ${VERSION}+85ece5f`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4935,8 +4935,8 @@ function locate(argv) {
 	let help = false;
 	let unknown;
 	for (const token of tokens) if (token.kind === "positional") positionals.push(token.value);
-	else if (token.kind === "option" && token.name === "help") help = true;
-	else if (token.kind === "option" && !Object.hasOwn(OPTIONS, token.name)) unknown ??= token.rawName.startsWith("--") ? token.rawName : argv[token.index];
+	else if (token.kind === "option" && token.name === "help" && (argv[token.index] === "-h" || argv[token.index] === "--help")) help = true;
+	else if (token.kind === "option" && (!Object.hasOwn(OPTIONS, token.name) || token.name === "help")) unknown ??= token.rawName.startsWith("--") ? token.rawName : argv[token.index];
 	return {
 		positionals,
 		help,
