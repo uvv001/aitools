@@ -3781,7 +3781,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+41f515d`;
+	return `pr-comments ${VERSION}+b161da2`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4892,9 +4892,11 @@ function topicOf(words) {
 		group: first
 	};
 }
+function groupHint(group) {
+	return group === void 0 ? "Run \"pr-comments help\" for the commands." : `Run "pr-comments ${group} --help" for the commands of the group.`;
+}
 function unknownCommand(text, group) {
-	const hint = group === void 0 ? "Run \"pr-comments help\" for the commands." : `Run "pr-comments ${group} --help" for the commands of the group.`;
-	return /* @__PURE__ */ new Error(`unknown command "${text}"\n${hint}`);
+	return /* @__PURE__ */ new Error(`unknown command "${text}"\n${groupHint(group)}`);
 }
 function usageError(command, message) {
 	return /* @__PURE__ */ new Error(`${message}\nUsage: ${synopsis(command)}\nRun "pr-comments ${command.words} --help" for details.`);
@@ -4940,7 +4942,7 @@ function locate(argv) {
 		unknown
 	};
 }
-function parseStrictly(command, argv) {
+function parseStrictly(argv, onError) {
 	try {
 		return parseArgs({
 			args: argv,
@@ -4953,8 +4955,8 @@ function parseStrictly(command, argv) {
 		const { code, message } = error;
 		const name = /^Option '(?:-[^,]+, )?(--[^ ']+)/u.exec(message)?.[1];
 		if (code !== "ERR_PARSE_ARGS_INVALID_OPTION_VALUE" || name === void 0) throw error;
-		if (message.includes("does not take an argument")) throw usageError(command, `${name} is a flag and takes no value`);
-		throw usageError(command, `${name} needs a value${message.includes("ambiguous") ? `; a value that starts with "-" is written ${name}=<value>` : ""}`);
+		if (message.includes("does not take an argument")) throw onError(`${name} is a flag and takes no value`);
+		throw onError(`${name} needs a value${message.includes("ambiguous") ? `; a value that starts with "-" is written ${name}=<value>` : ""}`);
 	}
 }
 function checkedOptions(command, parsed) {
@@ -4988,7 +4990,7 @@ function checkedArguments(command, parsed) {
 	return args;
 }
 async function execute(command, argv, env) {
-	const parsed = parseStrictly(command, argv);
+	const parsed = parseStrictly(argv, (message) => usageError(command, message));
 	const args = checkedArguments(command, parsed);
 	const values = parsed.values;
 	if (values.db !== void 0 && extname(values.db).toLowerCase() !== ".sqlite") throw new Error(`--db must be a file ending in .sqlite: ${values.db}`);
@@ -5013,21 +5015,29 @@ async function run(argv, env = defaultEnvironment) {
 	const topic = topicOf(positionals);
 	if (help) return showHelp(env, positionals, true);
 	if (unknown !== void 0) {
-		const message = unknown.startsWith("--") ? `unknown option ${unknown}` : `unknown option ${/\s/u.test(unknown) ? `"${unknown}"` : unknown}; to give a text that starts with "-", put options such as --db first, then -- and the text`;
+		const shown = /\s/u.test(unknown) ? `"${unknown}"` : unknown;
+		const takesText = topic.kind === "command" || topic.kind === "help";
+		const message = unknown.startsWith("--") || !takesText ? `unknown option ${shown}` : `unknown option ${shown}; to give a text that starts with "-", put options such as --db first, then -- and the text`;
 		if (topic.kind === "command") throw usageError(topic.command, message);
 		if (topic.kind === "help") throw usageError(HELP, message);
-		throw new Error(`${message}\nRun "pr-comments help" for the commands.`);
+		throw new Error(`${message}\n${groupHint(topic.group)}`);
 	}
 	if (topic.kind === "help") {
-		checkedOptions(HELP, parseStrictly(HELP, argv));
+		checkedOptions(HELP, parseStrictly(argv, (message) => usageError(HELP, message)));
 		return showHelp(env, positionals.slice(1));
 	}
 	if (positionals.length === 0) {
-		checkedOptions(HELP, parseStrictly(HELP, argv));
-		throw new Error("Usage: pr-comments <command> [options]\nRun \"pr-comments help\" for the commands.");
+		parseStrictly(argv, (message) => /* @__PURE__ */ new Error(`${message}\n${groupHint()}`));
+		throw new Error(`Usage: pr-comments <command> [options]\n${groupHint()}`);
 	}
 	if (topic.kind === "group") {
-		checkedOptions(HELP, parseStrictly(HELP, argv));
+		const option = parseStrictly(argv, (message) => /* @__PURE__ */ new Error(`${message}\n${groupHint(topic.group)}`)).tokens.find((token) => token.kind === "option");
+		if (option !== void 0) {
+			const candidates = inGroup(topic.group).filter((cmd) => cmd.options.some(({ name }) => name === option.name));
+			const example = candidates.find(({ database }) => database === "readonly") ?? candidates[0];
+			const suffix = example !== void 0 ? `; it applies to a command such as "${example.words}"` : "";
+			throw new Error(`--${option.name} does not apply to the ${topic.group} group${suffix}\n${groupHint(topic.group)}`);
+		}
 		return showHelp(env, positionals);
 	}
 	if (topic.kind === "unknown") throw unknownCommand(topic.text, topic.group);
