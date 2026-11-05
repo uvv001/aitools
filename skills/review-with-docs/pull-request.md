@@ -21,16 +21,17 @@ check annotations. Run it after every push and before every publish.
 `link pending` then lists each top-level comment and check annotation that no
 link names yet; empty output means every top-level item is linked. Read the
 full pending threads and annotations with `report comments --pending`, and
-read unfiltered `report comments` for nonempty review verdict bodies (which
-have no comment ref) and, on a re-sync, for unlinked replies in already linked
-threads (`report comments --ref <linked-ref>` also shows a linked thread;
+read unfiltered `report comments` for nonempty review verdict bodies whose
+review URL (`#pullrequestreview-<id>`) does not yet appear in `report dump`
+and, on a re-sync, for unlinked replies in already linked threads
+(`report comments --ref <linked-ref>` also shows a linked thread;
 `report dump` lists every linked ref) — past a handful of refs to read, the
 parallel agents below read the ref slices while the orchestrator reads the
 review verdict bodies — then classify each pending ref, each unlinked reply in
-a linked thread, and any review verdict body that raises a concern or
-counter-evidence (citing its review URL in `finding add --note` or
-`finding update`, since a review verdict takes no `link`), and record it from
-the orchestrator:
+a linked thread, and each unhandled review verdict body that raises or
+addresses a concern (citing its review URL in `finding add --note` for a new
+concern or `finding update` when it repeats, is the user's own review text, or
+supplies counter-evidence on a finding), and record it from the orchestrator:
 
 | The comment or annotation | Command |
 |---|---|
