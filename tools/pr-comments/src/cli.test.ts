@@ -520,7 +520,7 @@ describe('cli', () => {
       expect(isMainModule(withoutMain, join(work, 'other.ts'))).toBe(false);
       expect(isMainModule(withoutMain, undefined)).toBe(false);
 
-      for (const old of ['20.11.0', '22.17.0', '24.2.0', '24.14.9']) {
+      for (const old of ['22.13.0', '22.17.0', '24.2.0', '24.14.9']) {
         expect(() => checkNodeVersion(old)).toThrow(`pr-comments requires Node 24.15 or newer (running on Node ${old})`);
       }
       for (const supported of ['24.15.0', '24.16.0', '25.0.0']) {

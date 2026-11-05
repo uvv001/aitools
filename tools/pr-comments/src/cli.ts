@@ -1285,6 +1285,7 @@ async function execute(command: Command, argv: string[], env: CliEnvironment): P
   return code;
 }
 
+// Refuses Node 22.13–24.14 after `node:sqlite` has loaded (older Node versions fail at module load on `node:sqlite`).
 export function checkNodeVersion(version: string = process.versions.node): void {
   const [major = 0, minor = 0] = version.split('.').map(Number);
   if (major < 24 || (major === 24 && minor < 15)) {

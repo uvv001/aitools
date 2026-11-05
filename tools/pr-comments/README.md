@@ -27,7 +27,7 @@ pnpm build --out <folder>/pr-comments.mjs       # writes it elsewhere
 node <folder>/pr-comments.mjs --version
 ```
 
-The bundle needs only Node 24.15: no `node_modules`, no installation. It behaves exactly like the global command. `--version` shows the version and, for a bundle, the commit it was built from (`pr-comments 0.1.0+75c05c9`, with `-dirty` when the sources had uncommitted changes).
+The bundle needs only Node 24.15: no `node_modules`, no installation (the runtime guard refuses Node 22.13–24.14 with a version error; older Node versions fail when loading `node:sqlite`). It behaves exactly like the global command. `--version` shows the version and, for a bundle, the commit it was built from (`pr-comments 0.1.0+75c05c9`, with `-dirty` when the sources had uncommitted changes).
 
 ### Token
 
