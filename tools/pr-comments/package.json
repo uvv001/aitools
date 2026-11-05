@@ -10,7 +10,7 @@
     "pr-comments": "./src/cli.ts"
   },
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning src/cli.ts",
+    "start": "node src/cli.ts",
     "build": "node scripts/build.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

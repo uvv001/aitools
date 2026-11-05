@@ -1980,7 +1980,7 @@ describe.skipIf(!hasGit)('the textconv recipe of the README', () => {
     try {
       await git('init', '-q');
       await write('.gitattributes', '*_review.sqlite diff=review\n');
-      await git('config', 'diff.review.textconv', `node --disable-warning=ExperimentalWarning "${CLI}" report dump --db`);
+      await git('config', 'diff.review.textconv', `node "${CLI}" report dump --db`);
       const report = await sampleReview('demo_review.md');
       const db = reviewPaths(report).db;
       await git('add', '-A');
@@ -2030,7 +2030,6 @@ setTimeout(() => {
 `;
 
 const REVIEW_FILES = new URL('./review-files.ts', import.meta.url).href;
-const NODE_FLAGS = ['--disable-warning=ExperimentalWarning'];
 
 interface Run {
   code: number | string;
@@ -2040,7 +2039,7 @@ interface Run {
 
 const runNode = (args: string[]): Promise<Run> =>
   new Promise((done) => {
-    execFile(process.execPath, [...NODE_FLAGS, ...args], (error, stdout, stderr) => {
+    execFile(process.execPath, args, (error, stdout, stderr) => {
       done({ code: error ? (error.code ?? 1) : 0, stdout, stderr });
     });
   });
@@ -2068,7 +2067,7 @@ describe('mutateReviewFile with several processes', () => {
   }, 60_000);
 
   it('waits for a lock that another process holds instead of failing with "database is locked"', async () => {
-    const holder = spawn(process.execPath, [...NODE_FLAGS, '-e', HOLDER, db, '1000'], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const holder = spawn(process.execPath, ['-e', HOLDER, db, '1000'], { stdio: ['ignore', 'pipe', 'inherit'] });
     const exited = once(holder, 'exit');
     try {
       await once(holder.stdout, 'data');
@@ -2167,7 +2166,7 @@ describe('changeReviewState with several processes', () => {
 
   it('waits for a lock that another process holds instead of failing with "database is locked"', async () => {
     const { db } = await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW });
-    const holder = spawn(process.execPath, [...NODE_FLAGS, '-e', HOLDER, db, '1000'], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const holder = spawn(process.execPath, ['-e', HOLDER, db, '1000'], { stdio: ['ignore', 'pipe', 'inherit'] });
     const exited = once(holder, 'exit');
     try {
       await once(holder.stdout, 'data');
@@ -2220,7 +2219,7 @@ describe('syncReviewFile with several processes', () => {
 
   it('waits for a lock that another process holds instead of failing with "database is locked"', async () => {
     const { db } = await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW, pr: PULL_REQUEST });
-    const holder = spawn(process.execPath, [...NODE_FLAGS, '-e', HOLDER, db, '1000'], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const holder = spawn(process.execPath, ['-e', HOLDER, db, '1000'], { stdio: ['ignore', 'pipe', 'inherit'] });
     const exited = once(holder, 'exit');
     try {
       await once(holder.stdout, 'data');

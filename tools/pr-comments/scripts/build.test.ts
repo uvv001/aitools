@@ -56,7 +56,7 @@ async function bundled(args: string[], cwd = work) {
 // The same command line run from the sources.
 async function sourced(args: string[], cwd = work) {
   try {
-    const { stdout, stderr } = await run(process.execPath, ['--disable-warning=ExperimentalWarning', sourceCli, ...args], { cwd });
+    const { stdout, stderr } = await run(process.execPath, [sourceCli, ...args], { cwd });
     return { code: 0, stdout, stderr };
   } catch (error) {
     const { code, stdout, stderr } = error as { code: number; stdout: string; stderr: string };

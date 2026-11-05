@@ -509,7 +509,7 @@ describe('cli', () => {
     });
 
     it('exits with 0 from a real process, with the help on standard output', () => {
-      const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'finding', 'list', '--help'], { encoding: 'utf8', cwd: work });
+      const result = spawnSync(process.execPath, [CLI, 'finding', 'list', '--help'], { encoding: 'utf8', cwd: work });
       expect(result).toMatchObject({ status: 0, stderr: '' });
       expect(result.stdout).toContain(`Usage: ${synopsis(command('finding list'))}`);
     });
@@ -734,7 +734,7 @@ describe('cli', () => {
     });
 
     it('exits with 1 from a real process, with the message on standard error and nothing on standard output', () => {
-      const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'finding', 'list', '--bogus'], { encoding: 'utf8', cwd: work });
+      const result = spawnSync(process.execPath, [CLI, 'finding', 'list', '--bogus'], { encoding: 'utf8', cwd: work });
       expect(result).toMatchObject({ status: 1, stdout: '', stderr: `${mistake('finding list', 'unknown option --bogus').message}\n` });
     });
 
@@ -742,7 +742,7 @@ describe('cli', () => {
       [['rule', 'add', 'a rule'], 'rule'],
       [['commit', 'add'], 'commit'],
     ])('exits with 1 from a real process for the removed command %j, naming it', (argv, name) => {
-      const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, ...argv], { encoding: 'utf8', cwd: work });
+      const result = spawnSync(process.execPath, [CLI, ...argv], { encoding: 'utf8', cwd: work });
       expect(result).toMatchObject({ status: 1, stdout: '', stderr: `unknown command "${name}"\nRun "pr-comments help" for the commands.\n` });
     });
 
@@ -751,7 +751,7 @@ describe('cli', () => {
       await writeFile(report, '# Review\n', 'utf8');
       const before = await tree();
 
-      const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'import', report], { encoding: 'utf8', cwd: work });
+      const result = spawnSync(process.execPath, [CLI, 'import', report], { encoding: 'utf8', cwd: work });
 
       expect(result).toMatchObject({ status: 1, stdout: '', stderr: 'unknown command "import"\nRun "pr-comments help" for the commands.\n' });
       expect(await tree()).toEqual(before);
@@ -1498,7 +1498,7 @@ describe('cli', () => {
 
       it('exits with 1 and the message on standard error from a real process', async () => {
         const before = await bytes();
-        const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, ...add('--description-file', '-')], {
+        const result = spawnSync(process.execPath, [CLI, ...add('--description-file', '-')], {
           input: PNG,
           encoding: 'utf8',
           cwd: work,
