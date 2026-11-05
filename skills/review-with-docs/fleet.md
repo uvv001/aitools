@@ -50,7 +50,7 @@ One more agent, `recheck`, re-checks every finding step 7 of
 re-check rules of step 7: an open or fixed finding is re-checked against the
 code at the new revision, a fix the way the finding was verified, since a fix
 regresses; a closed finding is re-checked only where the code it points at
-changed. Its coverage file holds one line per finding — finding, outcome
+changed. Its coverage file also holds one line per finding — finding, outcome
 (`fixed`, `holds`, `partial`, `regressed` or `defective`), and the evidence
 at the new revision — and it writes a finding file for each new defect it
 meets, a defective fix included, and for each closed finding whose concern
