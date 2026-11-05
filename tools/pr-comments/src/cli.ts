@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, relative } from 'node:path';
+import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { ParseArgsOptionsConfig } from 'node:util';
 import { isLinkRef } from './comment-ref.ts';
@@ -1283,7 +1285,27 @@ async function execute(command: Command, argv: string[], env: CliEnvironment): P
   return code;
 }
 
+export function checkNodeVersion(version: string = process.versions.node): void {
+  const [major = 0, minor = 0] = version.split('.').map(Number);
+  if (major < 24 || (major === 24 && minor < 15)) {
+    throw new Error(`pr-comments requires Node 24.15 or newer (running on Node ${version})`);
+  }
+}
+
+export function isMainModule(meta: ImportMeta, argv1: string | undefined = process.argv[1]): boolean {
+  if (typeof meta.main === 'boolean') return meta.main;
+  if (argv1 === undefined) return false;
+  const self = fileURLToPath(meta.url);
+  if (resolve(argv1) === self) return true;
+  try {
+    return realpathSync(argv1) === realpathSync(self);
+  } catch {
+    return false;
+  }
+}
+
 export async function run(argv: string[], env: CliEnvironment = defaultEnvironment): Promise<number> {
+  checkNodeVersion();
   if (argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')) {
     env.print(`${versionText()}\n`);
     return 0;
@@ -1331,7 +1353,7 @@ export async function run(argv: string[], env: CliEnvironment = defaultEnvironme
   return execute(topic.command, argv, env);
 }
 
-if (import.meta.main) {
+if (isMainModule(import.meta)) {
   run(process.argv.slice(2))
     .then((code) => {
       process.exitCode = code;

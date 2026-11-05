@@ -3,7 +3,7 @@ import { access, chmod, copyFile, link, mkdir, readdir, readFile, symlink, write
 import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { COMMANDS, defaultEnvironment, readFailure, run, synopsis } from './cli.ts';
+import { COMMANDS, checkNodeVersion, defaultEnvironment, isMainModule, readFailure, run, synopsis } from './cli.ts';
 import type { CliEnvironment } from './cli.ts';
 import { annotationRef } from './comment-ref.ts';
 import { samplePullRequest } from './fixtures.ts';
@@ -512,6 +512,20 @@ describe('cli', () => {
       const result = spawnSync(process.execPath, [CLI, 'finding', 'list', '--help'], { encoding: 'utf8', cwd: work });
       expect(result).toMatchObject({ status: 0, stderr: '' });
       expect(result.stdout).toContain(`Usage: ${synopsis(command('finding list'))}`);
+    });
+
+    it('detects the main module when import.meta.main is absent and refuses Node versions older than 24.15', () => {
+      const withoutMain = { url: new URL('./cli.ts', import.meta.url).href } as ImportMeta;
+      expect(isMainModule(withoutMain, CLI)).toBe(true);
+      expect(isMainModule(withoutMain, join(work, 'other.ts'))).toBe(false);
+      expect(isMainModule(withoutMain, undefined)).toBe(false);
+
+      for (const old of ['20.11.0', '22.17.0', '24.2.0', '24.14.9']) {
+        expect(() => checkNodeVersion(old)).toThrow(`pr-comments requires Node 24.15 or newer (running on Node ${old})`);
+      }
+      for (const supported of ['24.15.0', '24.16.0', '25.0.0']) {
+        expect(() => checkNodeVersion(supported)).not.toThrow();
+      }
     });
   });
 
