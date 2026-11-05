@@ -55,10 +55,7 @@ finding — finding, outcome (`fixed`, `holds`, `partial`, `regressed` or
 `defective`), and the evidence at the new revision — and it writes a finding
 file for each new defect it meets, a defective fix included, and for each
 closed finding whose concern returns, naming it. It replies with those lines,
-plus the reply line of a rule brief for each new finding file. The
-orchestrator turns each re-check line into `finding update --round <n>`, or
-`set-state` where the state moves, `fixed` per the States paragraph of
-[SKILL.md](SKILL.md).
+plus the reply line of a rule brief for each new finding file.
 
 ## Files
 
