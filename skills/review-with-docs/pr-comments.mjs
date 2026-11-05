@@ -3784,7 +3784,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+c4145b5`;
+	return `pr-comments ${VERSION}+29b5c4b`;
 }
 //#endregion
 //#region src/cli.ts
@@ -5016,7 +5016,7 @@ async function run(argv, env = defaultEnvironment) {
 	const topic = topicOf(positionals);
 	if (help) return showHelp(env, positionals, true);
 	if (unknown !== void 0) {
-		const message = unknown.startsWith("--") ? `unknown option ${unknown}` : `unknown option ${/\s/u.test(unknown) ? `"${unknown}"` : unknown}; to give a text that starts with "-", put -- before it`;
+		const message = unknown.startsWith("--") ? `unknown option ${unknown}` : `unknown option ${/\s/u.test(unknown) ? `"${unknown}"` : unknown}; to give a text that starts with "-", put options such as --db first, then -- and the text`;
 		if (topic.kind === "command") throw usageError(topic.command, message);
 		if (topic.kind === "help") throw usageError(HELP, message);
 		throw new Error(`${message}\nRun "pr-comments help" for the commands.`);
