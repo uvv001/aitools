@@ -1619,7 +1619,7 @@ function readReport(text, path) {
 }
 //#endregion
 //#region src/review-evidence.ts
-const ANCHOR$1 = /^\s*`([^`\s]+):(\d+)(?:-(\d+))?`\s*$/;
+const ANCHOR = /^\s*`([^\s`]+(?: [^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
 const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
 const CLOSING = /^\s*(`{3,}|~{3,})\s*$/;
 const isBlank$1 = (line) => line.trim() === "";
@@ -1629,7 +1629,7 @@ function splitLines$1(text) {
 	return lines;
 }
 function parseAnchor(line) {
-	const match = ANCHOR$1.exec(line);
+	const match = ANCHOR.exec(line);
 	if (!match) return void 0;
 	const [, path = "", from = "", to] = match;
 	const start = Number(from);
@@ -3346,7 +3346,6 @@ function pendingJson(items) {
 //#endregion
 //#region src/report-extract.ts
 const FENCE = /^\s*(`{3,}|~{3,})/;
-const ANCHOR = /^\s*`([^`\s]+):(\d+)(?:-(\d+))?`\s*$/;
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
 const REFERENCE_LINK = /\[[^\]]+\]\[[^\]]*\]/;
 const REFERENCE_DEFINITION = /^\s{0,3}\[[^\]]+\]:\s*\S/;
@@ -3781,7 +3780,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+2ae9704`;
+	return `pr-comments ${VERSION}+bd0097e`;
 }
 //#endregion
 //#region src/cli.ts
