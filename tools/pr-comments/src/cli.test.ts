@@ -47,7 +47,7 @@ const LINKED = {
   c624100: '[c624100](https://ghe.example.com/acme/widgets/pull/157#issuecomment-624100)',
 };
 
-// What the fake git answers: the 8-character hash of the commit.
+// What the fake git answers: the short hash of the commit.
 const HASHES: Record<string, string> = { HEAD: '1a2b3c4d', 'origin/main': '5e6f7a8b', feature: '9c0d1e2f', abc1234: 'abc12345' };
 
 const SONAR = 'sq-community-pr-decoration';
@@ -1357,7 +1357,7 @@ describe('cli', () => {
         env.resolveRevision = (revision) => resolveRevision(revision, repo);
       });
 
-      it('stores the 8-character hash of HEAD, of a tag, of an abbreviation and of an expression', async () => {
+      it('stores the short hash of HEAD, of a tag, of an abbreviation and of an expression', async () => {
         expect(first).not.toBe(second);
 
         await step('round', 'open', '--revision', 'HEAD', '--base', 'v1', '--db', review);

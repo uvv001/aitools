@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { resolveRevision } from './git-revision.ts';
 
 const NOT_A_REPOSITORY = 'not inside a git repository (run the command in the reviewed repository)';
-const EIGHT_HEX = /^[0-9a-f]{8}$/u;
+const SHORT_HEX = /^[0-9a-f]{8,}$/u;
 
 // Real repositories under the git-ignored out/, each with a repository of its own inside the one of the project.
 const out = join(import.meta.dirname, '..', 'out');
@@ -58,9 +58,9 @@ describe('resolveRevision in a repository', () => {
 
   const short = (hash: string): string => hash.slice(0, 8);
 
-  it('resolves HEAD to the 8 lower-case hex digits of its commit', async () => {
+  it('resolves HEAD to the short lower-case hex hash of its commit', async () => {
     const head = await resolveRevision('HEAD', repository);
-    expect(head).toMatch(EIGHT_HEX);
+    expect(head).toMatch(SHORT_HEX);
     expect(head).toBe(short(hashes[2]!));
   });
 
@@ -89,11 +89,11 @@ describe('resolveRevision in a repository', () => {
     expect(await resolveRevision(git(repository, ['merge-base', 'main', 'feature']), repository)).toBe(short(hashes[1]!));
   });
 
-  it('gives the same 8 characters for every spelling of the same commit', async () => {
+  it('gives the same hash for every spelling of the same commit', async () => {
     const spellings = ['feature', 'v2', 'HEAD~1', 'main~1', 'HEAD^', hashes[1]!, hashes[1]!.slice(0, 7), hashes[1]!.slice(0, 40).toUpperCase()];
     const results = await Promise.all(spellings.map((spelling) => resolveRevision(spelling, repository)));
     expect(new Set(results)).toStrictEqual(new Set([short(hashes[1]!)]));
-    for (const result of results) expect(result).toMatch(EIGHT_HEX);
+    for (const result of results) expect(result).toMatch(SHORT_HEX);
   });
 
   it('works from a folder inside the repository', async () => {

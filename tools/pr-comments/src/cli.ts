@@ -50,7 +50,7 @@ export interface CliEnvironment {
     hooks: PublishHooks,
   ) => Promise<PublishResult>;
   reply: (ref: PullRequestRef, request: ReplyRequest, options: ReplyOptions) => Promise<ReplyResult>;
-  // The 8-character hash of the commit that a revision names in the repository of the working directory.
+  // The short hash (at least 8 characters) of the commit that a revision names in the repository of the working directory.
   resolveRevision: (revision: string) => Promise<string>;
   print: (text: string) => void;
   warn: (text: string) => void;
