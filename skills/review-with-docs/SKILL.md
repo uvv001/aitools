@@ -106,8 +106,8 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
    stayed unsettled — a fleet's reply line marks it ❓; the description follows
    [Evidence](#evidence). With a fleet, findings on a shared anchor merge per
    [fleet.md](fleet.md). An empty pass is a result: record it with
-   `round update 'no findings'` (`'no new findings'` in a later round), tell
-   the user, and hand over the report's path.
+   `round update 'no findings'` (`'no new findings'` in a later round). Then
+   tell the user and hand over the report's path.
    **Ready when:** every finding carries severity, evidence, and a suggested
    fix in its description and `finding list` shows each of them — or, on an
    empty pass, the round records `no findings` (`no new findings` in a later
