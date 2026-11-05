@@ -684,7 +684,7 @@ const postOptions: OptionSpec[] = [
 ];
 
 const REVISIONS =
-  'A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the 8-character hash of the commit.';
+  'A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the short hash (at least 8 characters) of the commit.';
 
 const FINDING: ArgSpec = { name: '<finding>', description: 'the finding, such as F7 (any case)' };
 

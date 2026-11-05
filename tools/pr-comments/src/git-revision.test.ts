@@ -162,6 +162,21 @@ describe('resolveRevision with an ambiguous abbreviation', () => {
     expect(await resolveRevision(one.id.slice(0, 7), repository)).toBe(one.id.slice(0, 8));
     expect(await resolveRevision(other.id, repository)).toBe(other.id.slice(0, 8));
   });
+
+  it('keeps the full unique short hash when two commits share the first 8 hex digits', async () => {
+    const repository = initRepository('collision-8');
+    commit(repository, 'base');
+    const emptyTree = git(repository, ['rev-parse', 'HEAD^{tree}']);
+    for (const nonce of [33501, 64089]) {
+      const body = `tree ${emptyTree}\nauthor A <a@example.com> 1700000000 +0000\ncommitter A <a@example.com> 1700000000 +0000\n\nm${nonce}\n`;
+      git(repository, ['hash-object', '-t', 'commit', '-w', '--stdin'], body);
+    }
+    await expect(resolveRevision('2c99c0d4', repository)).rejects.toThrow(
+      new Error('revision "2c99c0d4" is ambiguous in this repository; use a longer abbreviation'),
+    );
+    expect(await resolveRevision('2c99c0d4df33d16f60fd5d45f7da0dca68d6ba5d', repository)).toBe('2c99c0d4d');
+    expect(await resolveRevision('2c99c0d4899391c8a007f317a7134953112efa32', repository)).toBe('2c99c0d48');
+  });
 });
 
 describe('resolveRevision outside a repository', () => {

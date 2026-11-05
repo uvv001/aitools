@@ -41,8 +41,9 @@ async function explain(error: unknown, revision: string, cwd: string): Promise<u
   return error;
 }
 
-// The 8-character lower-case hash of the commit that `revision` (HEAD, a branch, a tag, any abbreviation or
-// expression such as HEAD~1) names in the repository of `cwd`; what the review stores instead of what was typed.
+// The short lower-case hash (at least 8 characters, longer when git needs more to disambiguate) of the commit that
+// `revision` (HEAD, a branch, a tag, any abbreviation or expression such as HEAD~1) names in the repository of `cwd`;
+// what the review stores instead of what was typed.
 export async function resolveRevision(revision: string, cwd: string): Promise<string> {
   if (revision.trim() === '') throw new Error('revision is empty');
   // git would read it as an option; no revision starts with a dash, and a control character cannot be passed on.
@@ -57,5 +58,5 @@ export async function resolveRevision(revision: string, cwd: string): Promise<st
   }
   const hash = stdout.trim().toLowerCase();
   if (!HASH.test(hash)) throw new Error(`git answered "${stdout.trim()}" for revision "${revision}", not a commit hash`);
-  return hash.slice(0, SHORT);
+  return hash;
 }

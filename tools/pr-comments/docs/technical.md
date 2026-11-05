@@ -413,7 +413,7 @@ The lookup loop never gives up. …
 git rev-parse --verify --quiet --short=8 <rev>^{commit}
 ```
 
-and stores the 8-character lower-case hash. `HEAD`, branches, tags, abbreviations and expressions such as `HEAD~1` work, and none is stored as typed. `round open --revision` defaults to `HEAD`. `--base <rev>` or `--no-base` is required for `round open`.
+and stores the short lower-case hash (at least 8 characters, longer when git needs more to disambiguate). `HEAD`, branches, tags, abbreviations and expressions such as `HEAD~1` work, and none is stored as typed. `round open --revision` defaults to `HEAD`. `--base <rev>` or `--no-base` is required for `round open`.
 
 Errors: no git repository (`not inside a git repository (run the command in the reviewed repository)`), a revision that does not exist, an ambiguous abbreviation, something that is not a commit (`HEAD^{tree}`), a revision that starts with `-` or holds a control character, and git that cannot be started. git runs with `LC_ALL=C`, because its messages are matched by their English text.
 

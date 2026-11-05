@@ -71,7 +71,7 @@ pr-comments round open --base origin/main --note "scope: src/tenants only" --db 
 Round 1 opened
 ```
 
-The revision is `HEAD` unless you say `--revision`. The tool stores the 8-character hash of the commit.
+The revision is `HEAD` unless you say `--revision`. The tool stores the short hash (at least 8 characters) of the commit.
 
 **3. Raise findings.** The description is a markdown file (or `-` for standard input). A line that holds only `` `path:lines` `` is an anchor. It says where the comment goes in the pull request.
 
@@ -459,7 +459,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 
 ### Revisions
 
-`round open --revision` and `--base`, and `finding set-state … --revision` take anything git names a commit by: `HEAD`, a branch, a tag, an abbreviation, `HEAD~1`. The tool resolves it with git in the working directory and stores the 8-character lower-case hash, never what you typed. An unknown revision, or no git repository, is an error. (`finding post --commit` is different: it takes 7 to 40 hex digits, and GitHub resolves it.)
+`round open --revision` and `--base`, and `finding set-state … --revision` take anything git names a commit by: `HEAD`, a branch, a tag, an abbreviation, `HEAD~1`. The tool resolves it with git in the working directory and stores the short lower-case hash (at least 8 characters, longer when git needs more to disambiguate), never what you typed. An unknown revision, or no git repository, is an error. (`finding post --commit` is different: it takes 7 to 40 hex digits, and GitHub resolves it.)
 
 ### The review database and `--db`
 
