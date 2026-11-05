@@ -1622,7 +1622,6 @@ function readReport(text, path) {
 const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
 const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
 const CLOSING = /^\s*(`{3,}|~{3,})\s*$/;
-const isBlank$1 = (line) => line.trim() === "";
 function splitLines$1(text) {
 	const lines = text.split(/\r?\n/);
 	if (lines.at(-1) === "") lines.pop();
@@ -1665,17 +1664,31 @@ function readFence(lines, open, marker) {
 		next: close + 1
 	};
 }
-const nextNonBlank = (lines, from) => lines.findIndex((line, index) => index >= from && !isBlank$1(line));
+function nextFenceBeforeAnchor(lines, from) {
+	for (let scan = from; scan < lines.length; scan += 1) {
+		const line = lines[scan] ?? "";
+		if (parseAnchor(line)) return void 0;
+		const opening = openingFence(line);
+		if (opening) return {
+			at: scan,
+			opening
+		};
+	}
+}
 function extractEvidence(description) {
 	const lines = splitLines$1(description);
 	const found = [];
 	let index = 0;
 	while (index < lines.length) {
 		const anchor = parseAnchor(lines[index] ?? "");
-		const fenceAt = anchor ? nextNonBlank(lines, index + 1) : index;
-		const opening = fenceAt < 0 ? void 0 : openingFence(lines[fenceAt] ?? "");
-		if (!opening) {
-			if (anchor) found.push({
+		if (!anchor) {
+			const opening = openingFence(lines[index] ?? "");
+			index = opening ? readFence(lines, index, opening.marker).next : index + 1;
+			continue;
+		}
+		const nextFence = nextFenceBeforeAnchor(lines, index + 1);
+		if (!nextFence) {
+			found.push({
 				...anchor,
 				snippet: void 0,
 				fence: "",
@@ -1685,11 +1698,11 @@ function extractEvidence(description) {
 			index += 1;
 			continue;
 		}
-		const fence = readFence(lines, fenceAt, opening.marker);
-		if (anchor) found.push({
+		const fence = readFence(lines, nextFence.at, nextFence.opening.marker);
+		found.push({
 			...anchor,
 			snippet: fence.snippet,
-			fence: opening.info,
+			fence: nextFence.opening.info,
 			unclosed: fence.unclosed,
 			line: index + 1
 		});
@@ -3783,7 +3796,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+b2ca557`;
+	return `pr-comments ${VERSION}+42e4d0b`;
 }
 //#endregion
 //#region src/cli.ts
