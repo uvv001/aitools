@@ -29,8 +29,6 @@ export const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
 const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
 const CLOSING = /^\s*(`{3,}|~{3,})\s*$/;
 
-const isBlank = (line: string) => line.trim() === '';
-
 function splitLines(text: string): string[] {
   const lines = text.split(/\r?\n/);
   if (lines.at(-1) === '') lines.pop();
@@ -65,29 +63,39 @@ function readFence(lines: string[], open: number, marker: string): Fence {
   return { snippet: lines.slice(open + 1, close), unclosed: false, next: close + 1 };
 }
 
-const nextNonBlank = (lines: string[], from: number) =>
-  lines.findIndex((line, index) => index >= from && !isBlank(line));
+function nextFenceBeforeAnchor(lines: string[], from: number): { at: number; opening: Opening } | undefined {
+  for (let scan = from; scan < lines.length; scan += 1) {
+    const line = lines[scan] ?? '';
+    if (parseAnchor(line)) return undefined;
+    const opening = openingFence(line);
+    if (opening) return { at: scan, opening };
+  }
+  return undefined;
+}
 
-// Evidence is an anchor line followed, past blank lines, by a code fence. Fences that follow no anchor are
-// skipped whole, so an anchor-shaped line inside one is content, not an anchor; the report parser, which rejects
-// a report with an unclosed fence, is what guards against such a fence swallowing the anchors below it.
+// Evidence is an anchor line followed, past blank lines or explanation prose before the next anchor, by a code fence.
+// Fences that follow no anchor are skipped whole, so an anchor-shaped line inside one is content, not an anchor; the
+// report parser, which rejects a report with an unclosed fence, is what guards against such a fence swallowing the
+// anchors below it.
 export function extractEvidence(description: string): Evidence[] {
   const lines = splitLines(description);
   const found: Evidence[] = [];
   let index = 0;
   while (index < lines.length) {
     const anchor = parseAnchor(lines[index] ?? '');
-    const fenceAt = anchor ? nextNonBlank(lines, index + 1) : index;
-    const opening = fenceAt < 0 ? undefined : openingFence(lines[fenceAt] ?? '');
-    if (!opening) {
-      if (anchor) found.push({ ...anchor, snippet: undefined, fence: '', unclosed: false, line: index + 1 });
+    if (!anchor) {
+      const opening = openingFence(lines[index] ?? '');
+      index = opening ? readFence(lines, index, opening.marker).next : index + 1;
+      continue;
+    }
+    const nextFence = nextFenceBeforeAnchor(lines, index + 1);
+    if (!nextFence) {
+      found.push({ ...anchor, snippet: undefined, fence: '', unclosed: false, line: index + 1 });
       index += 1;
       continue;
     }
-    const fence = readFence(lines, fenceAt, opening.marker);
-    if (anchor) {
-      found.push({ ...anchor, snippet: fence.snippet, fence: opening.info, unclosed: fence.unclosed, line: index + 1 });
-    }
+    const fence = readFence(lines, nextFence.at, nextFence.opening.marker);
+    found.push({ ...anchor, snippet: fence.snippet, fence: nextFence.opening.info, unclosed: fence.unclosed, line: index + 1 });
     index = fence.next;
   }
   return found;

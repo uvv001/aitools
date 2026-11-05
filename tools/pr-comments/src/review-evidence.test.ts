@@ -74,9 +74,15 @@ describe('extractEvidence', () => {
     expect(found?.snippet).toEqual(['a', '', 'b']);
   });
 
+  it('reads the fenced snippet after explanation prose, as SKILL.md orders descriptions', () => {
+    expect(extractEvidence(doc('`a.ts:1`', '', 'Explanation prose.', '', '```ts', 'x', '```', '', 'Suggested fix.'))).toEqual([
+      { path: 'a.ts', start: 1, end: 1, snippet: ['x'], fence: 'ts', unclosed: false, line: 1 },
+    ]);
+  });
+
   it('keeps an anchor without a fence, with no snippet', () => {
     const none = { snippet: undefined, fence: '', unclosed: false };
-    expect(extractEvidence(doc('`a.ts:1`', 'Prose.', '```ts', 'x', '```'))).toEqual([
+    expect(extractEvidence(doc('`a.ts:1`', 'Prose.'))).toEqual([
       { path: 'a.ts', start: 1, end: 1, ...none, line: 1 },
     ]);
     expect(extractEvidence('`a.ts:1`')).toMatchObject([none]);
