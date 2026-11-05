@@ -1619,7 +1619,7 @@ function readReport(text, path) {
 }
 //#endregion
 //#region src/review-evidence.ts
-const ANCHOR = /^\s*`([^\s`]+(?: [^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
+const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
 const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
 const CLOSING = /^\s*(`{3,}|~{3,})\s*$/;
 const isBlank$1 = (line) => line.trim() === "";
@@ -3783,7 +3783,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+326080e`;
+	return `pr-comments ${VERSION}+f87c76f-dirty`;
 }
 //#endregion
 //#region src/cli.ts
