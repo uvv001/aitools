@@ -514,12 +514,17 @@ describe('cli', () => {
       expect(result.stdout).toContain(`Usage: ${synopsis(command('finding list'))}`);
     });
 
-    it('detects the main module when import.meta.main is absent and refuses Node versions older than 24.15', () => {
+    it('detects the main module directly and through a symlink when import.meta.main is absent', async () => {
       const withoutMain = { url: new URL('./cli.ts', import.meta.url).href } as ImportMeta;
+      const binLink = join(work, 'pr-comments-bin.ts');
+      await symlink(CLI, binLink);
       expect(isMainModule(withoutMain, CLI)).toBe(true);
+      expect(isMainModule(withoutMain, binLink)).toBe(true);
       expect(isMainModule(withoutMain, join(work, 'other.ts'))).toBe(false);
       expect(isMainModule(withoutMain, undefined)).toBe(false);
+    });
 
+    it('refuses Node versions older than 24.15', () => {
       for (const old of ['22.13.0', '22.17.0', '24.2.0', '24.14.9']) {
         expect(() => checkNodeVersion(old)).toThrow(`pr-comments requires Node 24.15 or newer (running on Node ${old})`);
       }
