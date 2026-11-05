@@ -636,6 +636,8 @@ describe('cli', () => {
         [['help', '--db', 'x.sqlite'], '--db does not apply to help'],
         [['help', '--state'], '--state needs a value'],
         [['help', '--json=yes'], '--json is a flag and takes no value'],
+        [['help', '--help=yes'], '--help is a flag and takes no value'],
+        [['finding', '--help=yes'], '--help is a flag and takes no value'],
       ])('refuses %j like any other command: the problem, the usage line of help and exit code 1', async (argv, problem) => {
         await expect(step(...argv)).rejects.toThrow(ofHelp(problem));
         expect(printed).toBe('');
