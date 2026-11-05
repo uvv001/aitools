@@ -675,6 +675,8 @@ describe('initReviewFile', () => {
       await writeFile(globalConfig, '', 'utf8');
       vi.stubEnv('GIT_CONFIG_GLOBAL', globalConfig);
       vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+      vi.stubEnv('GIT_CONFIG_COUNT', '0');
+      vi.stubEnv('GIT_CONFIG_PARAMETERS', '');
       vi.stubEnv('XDG_CONFIG_HOME', dir);
       vi.stubEnv('HOME', dir);
       vi.stubEnv('USERPROFILE', dir);

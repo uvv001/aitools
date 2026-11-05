@@ -208,8 +208,7 @@ describe('cli', () => {
 
   beforeEach(async () => {
     work = scratchDir();
-    // A folder with a `.git` is all a git root is to the tool, so no real repository is needed, and the search for the
-    // review stays below it, away from the repository this test runs in.
+    // A folder with a `.git` marks the git root for the scratch directory, away from the repository this test runs in.
     await mkdir(join(work, '.git'));
     docs = join(work, 'docs');
     await mkdir(docs);
