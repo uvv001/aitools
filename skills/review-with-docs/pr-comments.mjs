@@ -2660,6 +2660,7 @@ const DERIVED = [
 	"revision",
 	"base"
 ];
+const SQLITE_CANTOPEN = 14;
 const SQLITE_NOTADB = 26;
 function userVersion(db, path) {
 	try {
@@ -2710,6 +2711,8 @@ function openReviewDb(path, mode) {
 	} catch (error) {
 		db?.close();
 		if (mode === "create") rmSync(path, { force: true });
+		const { errcode, message } = error;
+		if (errcode !== void 0 && (errcode & 255) === SQLITE_CANTOPEN) throw new Error(`cannot open ${path}: ${message}`);
 		throw error;
 	}
 }
@@ -3780,7 +3783,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+bd0097e`;
+	return `pr-comments ${VERSION}+326080e`;
 }
 //#endregion
 //#region src/cli.ts
