@@ -531,7 +531,7 @@ async function resolveRevision(revision, cwd) {
 	}
 	const hash = stdout.trim().toLowerCase();
 	if (!HASH.test(hash)) throw new Error(`git answered "${stdout.trim()}" for revision "${revision}", not a commit hash`);
-	return hash.slice(0, SHORT);
+	return hash;
 }
 //#endregion
 //#region src/markdown.ts
@@ -3783,7 +3783,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+f87c76f-dirty`;
+	return `pr-comments ${VERSION}+b2ca557`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4319,7 +4319,7 @@ const postOptions = [
 		description: "check everything and say what would happen, without writing anything"
 	}
 ];
-const REVISIONS = "A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the 8-character hash of the commit.";
+const REVISIONS = "A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the short hash (at least 8 characters) of the commit.";
 const FINDING = {
 	name: "<finding>",
 	description: "the finding, such as F7 (any case)"
