@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { access, link, lstat, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual, promisify } from 'node:util';
 import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
@@ -350,7 +350,7 @@ export async function initReviewFile(
   if (!created) throw existingDatabase(dbPath);
   try {
     await writeReportUntilStable(reportTarget, rendered, () => {
-      const handle = new DatabaseSync(dbPath, { readOnly: true, timeout: 10_000 });
+      const handle = openReviewDb(dbPath, 'readonly');
       try {
         return renderReport(loadReview(handle));
       } finally {
