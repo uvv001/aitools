@@ -3784,7 +3784,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+99ab9f7`;
+	return `pr-comments ${VERSION}+4e321af`;
 }
 //#endregion
 //#region src/cli.ts
@@ -5025,8 +5025,14 @@ async function run(argv, env = defaultEnvironment) {
 		checkedOptions(HELP, parseStrictly(HELP, argv));
 		return showHelp(env, positionals.slice(1));
 	}
-	if (positionals.length === 0) throw new Error("Usage: pr-comments <command> [options]\nRun \"pr-comments help\" for the commands.");
-	if (topic.kind === "group") return showHelp(env, positionals);
+	if (positionals.length === 0) {
+		checkedOptions(HELP, parseStrictly(HELP, argv));
+		throw new Error("Usage: pr-comments <command> [options]\nRun \"pr-comments help\" for the commands.");
+	}
+	if (topic.kind === "group") {
+		checkedOptions(HELP, parseStrictly(HELP, argv));
+		return showHelp(env, positionals);
+	}
 	if (topic.kind === "unknown") throw unknownCommand(topic.text, topic.group);
 	return execute(topic.command, argv, env);
 }
