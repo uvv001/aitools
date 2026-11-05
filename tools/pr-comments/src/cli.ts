@@ -1197,8 +1197,8 @@ function locate(argv: string[]) {
   let unknown: string | undefined;
   for (const token of tokens) {
     if (token.kind === 'positional') positionals.push(token.value);
-    else if (token.kind === 'option' && token.name === 'help') help = true;
-    else if (token.kind === 'option' && !Object.hasOwn(OPTIONS, token.name)) {
+    else if (token.kind === 'option' && token.name === 'help' && (argv[token.index] === '-h' || argv[token.index] === '--help')) help = true;
+    else if (token.kind === 'option' && (!Object.hasOwn(OPTIONS, token.name) || token.name === 'help')) {
       // A long name stands for the option; a single dash is more likely the start of a text, so the whole argument is shown.
       unknown ??= token.rawName.startsWith('--') ? token.rawName : argv[token.index];
     }

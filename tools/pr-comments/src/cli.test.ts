@@ -525,6 +525,8 @@ describe('cli', () => {
       ['a text that starts with a dash', ['finding', 'update', 'F1', '-5'], 'finding update', `unknown option -5; ${DASH}`],
       ['a text that is a dash and a word', ['finding', 'update', 'F1', '- item'], 'finding update', `unknown option "- item"; ${DASH}`],
       ['a text that starts with a dash and has several words', ['finding', 'update', 'F1', '-5 is wrong'], 'finding update', `unknown option "-5 is wrong"; ${DASH}`],
+      ['a text that starts with a dash and contains h', ['finding', 'update', 'F1', '- see the fix'], 'finding update', `unknown option "- see the fix"; ${DASH}`],
+      ['a text that starts with -h and has words', ['finding', 'update', 'F1', '-h is wrong'], 'finding update', `unknown option "-h is wrong"; ${DASH}`],
       ['a text that starts with two dashes', ['finding', 'update', 'F1', '--force'], 'finding update', 'unknown option --force'],
       ['--json on init', ['init', 'Demo', '--json'], 'init', '--json does not apply to init'],
       ['--json on a command that has none to say', ['finding', 'update', 'F1', 'x', '--json'], 'finding update', '--json does not apply to finding update'],
