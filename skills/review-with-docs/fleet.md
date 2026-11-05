@@ -47,8 +47,10 @@ concern a closed finding (❌ 📌 🔀) covers comes back only with better
 evidence, in a finding that names it.
 One more agent, `recheck`, re-checks every finding step 7 of
 [SKILL.md](SKILL.md) puts in the round's scope. Its brief also carries,
-verbatim, the re-check sentences of step 7 and the fix test of the States
-paragraph of [SKILL.md](SKILL.md). Its coverage file also holds one line per
+verbatim, step 7 from "Every round reads the **full changeset**" to "whose
+state stands until the user rules", and the States paragraph from "verifies
+it the way the finding was verified" to "confirms it" of
+[SKILL.md](SKILL.md). Its coverage file also holds one line per
 finding — finding, outcome (`fixed`, `holds`, `partial`, `regressed` or
 `defective`), and the evidence at the new revision — and it writes a finding
 file for each new defect it meets, a defective fix included, and for each
