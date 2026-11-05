@@ -480,7 +480,8 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
   Run "pr-comments finding list --help" for details.
   ```
 
-- A text that starts with `-` is written after `--`.
+- On a group line (`pr-comments finding --db x.sqlite`) an option error names the group (and an example command when one in the group takes that option) and ends with `Run "pr-comments <group> --help" for the commands of the group.` instead of a usage line; on an empty command line an option error (or a valid option with no command) ends with `Run "pr-comments help" for the commands.`.
+- A text that starts with `-` is written after `--` (put options such as `--db` before `--`).
 - `--help` works on every command and group. It prints to stdout and exits with 0.
 - Errors exit with 1. Pending work in `link pending` is not an error.
 - `--json` exists only where a program must act on the result: `finding add`, `finding list`, `finding show`, `finding post`, `link reply`, `link pending`, `pr show`. Anywhere else it is an error.
