@@ -15,8 +15,9 @@ range, a PR, a working tree, a set of files. The protocol does not assume a
 PR; where the target has one, [pull-request.md](pull-request.md) adds reading
 its comments and publishing findings.
 
-**The user's call** is a stop: put the evidence and the options to the user,
-and act on the answer.
+**The user's call** is a stop — put the evidence and the options to the user,
+and act on the answer — and is the default for any situation these
+instructions do not cover.
 
 ## The tool
 

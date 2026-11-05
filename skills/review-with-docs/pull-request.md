@@ -35,7 +35,7 @@ orchestrator:
 | chatter or a status comment that raises no concern | `link note <ref> '<reason>'` |
 | a concern no finding covers yet | `finding add`, then `link duplicate <F> <ref>` |
 | a check annotation, always | `link duplicate <F> <ref>` |
-| a review verdict body repeating, written by the user on, or giving counter-evidence on a finding | `finding update <F> '<review-url>: <text>'` |
+| a review verdict body repeating a finding, written by the user as that finding, or giving counter-evidence on it | `finding update <F> '<review-url>: <text>'` |
 | a review verdict body raising a concern no finding covers yet | `finding add --note '<review-url>'` |
 
 Links are records in the database; nothing reaches GitHub. A note attaches to
