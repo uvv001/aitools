@@ -127,8 +127,8 @@ describe('extractEvidence', () => {
   });
 
   it('extracts an anchor whose path contains spaces', () => {
-    const [found] = extractEvidence(doc('`src/My Dir/a b.ts:3-5`', '```ts', 'x', '```'));
-    expect(found).toMatchObject({ path: 'src/My Dir/a b.ts', start: 3, end: 5, snippet: ['x'] });
+    const [found] = extractEvidence(doc('`src/My  Dir/a b.ts:3-5`', '```ts', 'x', '```'));
+    expect(found).toMatchObject({ path: 'src/My  Dir/a b.ts', start: 3, end: 5, snippet: ['x'] });
   });
 
   it('takes the last colon of the path part for the line numbers', () => {
