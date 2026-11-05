@@ -1294,7 +1294,7 @@ export async function run(argv: string[], env: CliEnvironment = defaultEnvironme
 
   if (unknown !== undefined) {
     const shown = /\s/u.test(unknown) ? `"${unknown}"` : unknown;
-    const takesText = topic.kind === 'command' || topic.kind === 'help';
+    const takesText = topic.kind === 'command' && topic.command.args.length > 0;
     const message =
       unknown.startsWith('--') || !takesText
         ? `unknown option ${shown}`

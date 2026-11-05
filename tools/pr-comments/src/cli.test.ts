@@ -519,7 +519,8 @@ describe('cli', () => {
     // [what is wrong, the arguments, the command whose usage is named, the problem]
     const MISTAKES: [string, string[], string, string][] = [
       ['an unknown option', ['finding', 'list', '--bogus'], 'finding list', 'unknown option --bogus'],
-      ['an unknown short option', ['finding', 'list', '-x'], 'finding list', `unknown option -x; ${DASH}`],
+      ['an unknown short option', ['finding', 'list', '-x'], 'finding list', 'unknown option -x'],
+      ['an unknown short option on a command that takes text', ['round', 'update', '-x'], 'round update', `unknown option -x; ${DASH}`],
       ['an unknown option of a command that creates', ['init', 'Demo', '--bogus'], 'init', 'unknown option --bogus'],
       ['an unknown option given a value', ['finding', 'list', '--bogus=1'], 'finding list', 'unknown option --bogus'],
       ['a text that starts with a dash', ['finding', 'update', 'F1', '-5'], 'finding update', `unknown option -5; ${DASH}`],
@@ -630,7 +631,7 @@ describe('cli', () => {
       it.each([
         [['help', '--bogus'], 'unknown option --bogus'],
         [['help', 'finding', '--bogus'], 'unknown option --bogus'],
-        [['help', '-x'], `unknown option -x; ${DASH}`],
+        [['help', '-x'], 'unknown option -x'],
         [['help', '--json'], '--json does not apply to help'],
         [['help', 'finding', 'list', '--state', 'approved'], '--state does not apply to help'],
         [['help', '--db', 'x.sqlite'], '--db does not apply to help'],
