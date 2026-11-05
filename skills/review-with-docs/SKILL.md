@@ -142,9 +142,9 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR;
    where in doubt, it is the user's call. A pull request target is synced
-   first (`pr sync`, then `link pending` for what is new), so the round sees
-   what others wrote. Where the new work is really a different target, that
-   is the user's call.
+   first per [pull-request.md](pull-request.md), so the round sees what others
+   wrote. Where the new work is really a different target, that is the user's
+   call.
    Every round reads the **full changeset** at the new revision — never a
    diff between revisions, because authors amend and force-push and
    per-commit attribution misleads. `round open --revision --base --note`

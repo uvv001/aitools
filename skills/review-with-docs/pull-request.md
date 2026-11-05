@@ -19,10 +19,13 @@ the user to create it.
 `pr sync` downloads the PR into the database — comments, reviews, threads,
 check annotations. Run it after every push and before every publish.
 `link pending` then lists each top-level comment and check annotation that no
-link names yet; empty output means every one is handled. Read the full pending
-threads and annotations with `report comments --pending` — past a handful of
-pending items, the parallel agents below read them instead — then classify
-each ref and record it from the orchestrator:
+link names yet; empty output means every top-level item is linked. Read the
+full pending threads and annotations with `report comments --pending`, and on
+a re-sync also read `report comments --ref <linked-ref>` (or unfiltered
+`report comments`) for new or edited replies in already linked threads — past
+a handful of refs to read, the parallel agents below read them instead — then
+classify each unlinked ref (and any reply in a linked thread that raises a new
+concern or counter-evidence) and record it from the orchestrator:
 
 | The comment or annotation | Command |
 |---|---|
@@ -39,9 +42,9 @@ rule — goes to a finding (with the counter-evidence recorded there) for the
 user to triage. A doubtful classification is the user's call
 ([SKILL.md](SKILL.md)); `link remove <ref>` undoes a link.
 
-Past a handful of pending items, slice the refs across parallel agents (each
-given its model, the shared brief, and the read-only contract per
-[fleet.md](fleet.md)) that run
+Past a handful of refs to read, slice the pending and linked-thread refs
+across parallel agents (each given its model, the shared brief, and the
+read-only contract per [fleet.md](fleet.md)) that run
 `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
 in the reviewed repository, read the comments against the findings the review
 carries (listed as in the Later rounds of [fleet.md](fleet.md)), the user's
