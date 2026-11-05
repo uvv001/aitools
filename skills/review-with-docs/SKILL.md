@@ -165,11 +165,12 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
    that subset.
    **Ready when:** the round stands in the database with its revision, its
    base, and a note carrying any narrowing; step 3's and step 4's Ready-when
-   hold for the round's scope at the new revision (with `recheck` in the index
-   on a family other than the orchestrator's where the orchestrator wrote the
-   fixes); every finding the re-check covers carries a `Round <n>:` entry; and
-   on a pull request target, `link pending` prints nothing (with the index
-   showing the tier bound of [fleet.md](fleet.md) for any PR-comment dispatch).
+   hold for the round's scope at the new revision (with a fleet, `recheck` in
+   the index on a family other than the orchestrator's where the orchestrator
+   wrote the fixes); every finding the re-check covers carries a `Round <n>:`
+   entry; and on a pull request target, `link pending` prints nothing (with
+   the index showing the tier bound of [fleet.md](fleet.md) for any PR-comment
+   dispatch).
 
 Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 
