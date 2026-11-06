@@ -18,9 +18,8 @@ the user to create it.
 
 A **verdict marker** is `<review-url> (<timestamp>)`: the `[link]` URL and the
 `edited` (or submit) timestamp that `report comments` prints for a submitted
-review (skip a `pending` review until submitted). An **edited-comment marker**
-is `<ref> edited <timestamp>`: the comment's ref and the `edited` timestamp in
-its `report comments` header.
+review. An **edited-comment marker** is `<ref> edited <timestamp>`: the
+comment's ref and the `edited` timestamp in its `report comments` header.
 
 `pr sync` downloads the PR into the database — comments, reviews, threads,
 check annotations. Run it after every push and before every publish.
