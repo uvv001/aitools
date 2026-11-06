@@ -1461,8 +1461,39 @@ function groups(match) {
 }
 const HTML_TAG = /<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*|!--[\s\S]*?--)>/g;
 const EMPHASIS = /(?<![\p{L}\p{N}_])(_+)(?!\s)(.+?)(?<!\s)\1(?![\p{L}\p{N}_])/gu;
+function stripLinks(text) {
+	let current = text;
+	let replaced = true;
+	while (replaced) {
+		replaced = false;
+		for (let mid = current.indexOf("]("); mid !== -1; mid = current.indexOf("](", mid + 2)) {
+			let bracketDepth = 1;
+			let open = mid;
+			while (open > 0 && bracketDepth > 0) {
+				open--;
+				if (current[open] === "]") bracketDepth++;
+				else if (current[open] === "[") bracketDepth--;
+			}
+			if (bracketDepth !== 0) continue;
+			let parenDepth = 1;
+			let close = mid + 2;
+			while (close < current.length && parenDepth > 0) {
+				if (current[close] === "(") parenDepth++;
+				else if (current[close] === ")") parenDepth--;
+				close++;
+			}
+			if (parenDepth !== 0) continue;
+			const isImage = open > 0 && current[open - 1] === "!";
+			const label = isImage ? "" : current.slice(open + 1, mid);
+			current = current.slice(0, isImage ? open - 1 : open) + label + current.slice(close);
+			replaced = true;
+			break;
+		}
+	}
+	return current;
+}
 function stripInlineMarkup(text) {
-	let current = text.replace(/!\[(?:[^[\]]|\[[^[\]]*\])*\]\((?:[^()]|\([^()]*\))*\)/g, "").replace(/\[((?:[^[\]]|\[[^[\]]*\])*)\]\((?:[^()]|\([^()]*\))*\)/g, "$1").replace(HTML_TAG, "");
+	let current = stripLinks(text).replace(HTML_TAG, "");
 	for (let next = current.replace(EMPHASIS, "$2"); next !== current; next = current.replace(EMPHASIS, "$2")) current = next;
 	return current;
 }
@@ -3851,7 +3882,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+12fe154`;
+	return `pr-comments ${VERSION}+d0cc49a`;
 }
 //#endregion
 //#region src/cli.ts
