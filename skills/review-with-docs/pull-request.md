@@ -24,8 +24,12 @@ full pending threads and annotations with `report comments --pending`, and
 read unfiltered `report comments` for nonempty review verdict bodies whose
 `<review-url> (<editedAt-or-submittedAt>)` marker does not yet appear in
 `report dump` and, on a re-sync, for unlinked replies in already linked
-threads (`report dump` lists every linked ref). Then classify each item and
-record it from the orchestrator:
+threads and for already linked comments whose `edited <timestamp>` in
+`report comments` does not yet appear in `report dump` (`report dump` lists
+every linked ref, note, and finding update). Then classify each item (`link
+remove <ref>` first when an edited linked comment's classification changes, and
+include `edited <timestamp>` in `--note` or `finding update`) and record it
+from the orchestrator:
 
 | The comment, annotation, or review verdict body | Command |
 |---|---|
