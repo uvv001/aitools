@@ -177,7 +177,7 @@ describe('parseReport — heading anchors', () => {
   });
 
   it('strips inline Markdown markup outside code spans when building the anchor', () => {
-    expect(anchor('⏳ ⚪ F1 — _Emphasized_, __strong__, and [Documentation](https://example.com/a_(b)/c)')).toBe(
+    expect(anchor('⏳ ⚪ F1 — _Emphasized_, __strong__, and [Documentation](https://example.com/a_(b_(c))/d)')).toBe(
       '--f1--emphasized-strong-and-documentation',
     );
     expect(anchor('🔧 🔴 F2 — Commit subject does not follow <category>: <entity> format')).toBe(
