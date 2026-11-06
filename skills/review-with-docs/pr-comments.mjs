@@ -949,10 +949,13 @@ function threadLines(thread) {
 }
 function originalLines(thread) {
 	if (thread.originalLine === null) return void 0;
-	if (thread.line !== null && thread.line !== thread.originalLine) return thread.startLine === null || thread.startLine === thread.line ? {
-		start: thread.originalLine,
-		end: thread.originalLine
-	} : void 0;
+	if (thread.line !== null && thread.startLine !== null) {
+		const start = thread.originalLine - (thread.line - thread.startLine);
+		return start >= 1 ? {
+			start,
+			end: thread.originalLine
+		} : void 0;
+	}
 	return {
 		start: thread.startLine !== null && thread.startLine !== thread.originalLine ? thread.startLine : thread.originalLine,
 		end: thread.originalLine
@@ -3812,7 +3815,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+4d425c0`;
+	return `pr-comments ${VERSION}+e2e1fa9-dirty`;
 }
 //#endregion
 //#region src/cli.ts
