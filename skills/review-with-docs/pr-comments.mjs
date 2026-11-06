@@ -2758,7 +2758,7 @@ function openReviewDb(path, mode) {
 	else if (statSync(path).isDirectory()) throw new Error(`${path} is a directory, not a review database`);
 	let db;
 	try {
-		db = new DatabaseSync(toNamespacedPath(resolve(path)), {
+		db = new DatabaseSync(toNamespacedPath(path), {
 			timeout: BUSY_TIMEOUT_MS,
 			readOnly: mode === "readonly"
 		});
@@ -3840,7 +3840,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+6468509`;
+	return `pr-comments ${VERSION}+679b1ed-dirty`;
 }
 //#endregion
 //#region src/cli.ts
