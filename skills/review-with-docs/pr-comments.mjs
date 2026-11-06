@@ -3851,7 +3851,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+360e1ad-dirty`;
+	return `pr-comments ${VERSION}+c442ce7-dirty`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4782,7 +4782,7 @@ const DEFINITIONS = [
 	{
 		words: "report comments",
 		summary: "writes the pull request conversation as markdown",
-		description: ["Writes the downloaded pull request (description, reviews, threads, comments and the Checks section) as markdown, to the", "screen unless --out is given. Run \"pr-comments pr sync --db <file.sqlite>\" first."],
+		description: ["Writes the downloaded pull request (reviews, threads, comments and the Checks section) as markdown, to the", "screen unless --out is given. Run \"pr-comments pr sync --db <file.sqlite>\" first."],
 		args: [],
 		options: [
 			{
