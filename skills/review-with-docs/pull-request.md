@@ -49,9 +49,10 @@ no finding and leaves no trace in the report, so every comment or review
 verdict body that raises a concern on the changeset — even one the agent
 refutes or that collides with a rule — goes to a finding (with the
 counter-evidence recorded there) for the user to triage. `link remove <ref>`
-undoes a link; for an edited linked comment, run `link remove <ref>` first and
-put its edited-comment marker in `--note`, the `link note` reason, or the
-`finding update` text.
+undoes a link; every record of a comment whose header shows `edited` carries
+its edited-comment marker in `--note`, the `link note` reason, or the `finding
+update` text (run `link remove <ref>` first when the comment is already
+linked).
 
 Past a handful of refs to read, the orchestrator reads the review verdict
 bodies and slices the pending, linked-thread, and edited linked refs across
