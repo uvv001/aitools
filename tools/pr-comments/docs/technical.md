@@ -259,7 +259,7 @@ All of this was found with live runs against one GitHub Enterprise Server (3.19.
 
 - A file-level thread (`subjectType: FILE`) is read back with thread `line` = 1, comment `line` = `null` and `diffHunk` = `""`. So the tool tells a file-level thread by the empty diff hunk, not by the line.
 - For a single-line thread, GitHub gives the thread `startLine` = `line`, and the comment `startLine` = `null`. A range has `startLine` different from `line`.
-- For an outdated range thread, GitHub gives `line` = `null` and `startLine` = `null`, keeping the range in `originalStartLine` and `originalLine` (`threadRange` in `model.ts` and `originalLines` in `publish.ts` read `originalStartLine` when `line` is `null` or when a comment is pinned to its original commit).
+- For an outdated range thread, GitHub gives `line` = `null` and `startLine` = `null`, keeping the range in `originalStartLine` and `originalLine` (`threadRange` in `model.ts` reads `originalStartLine` when `line` is `null`, and `originalLines` in `publish.ts` reads it for an outdated thread or a comment pinned to another commit).
 
 ### Replies
 
