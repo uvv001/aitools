@@ -16,22 +16,23 @@ the user to create it.
 
 ## Read what others wrote
 
+A **verdict marker** is `<review-url> (<timestamp>)`: the `[link]` URL and the
+`edited` (or submit) timestamp that `report comments` prints for a submitted
+review (skip a `pending` review until submitted). An **edited-comment marker**
+is `<ref> edited <timestamp>`: the comment's ref and the `edited` timestamp in
+its `report comments` header.
+
 `pr sync` downloads the PR into the database — comments, reviews, threads,
 check annotations. Run it after every push and before every publish.
 `link pending` then lists each top-level comment and check annotation that no
 link names yet; empty output means every top-level item is linked. Read the
 full pending threads and annotations with `report comments --pending`, and
 read unfiltered `report comments` for nonempty submitted review verdict bodies
-whose **verdict marker** — `<review-url> (<timestamp>)` from the `[link]` URL
-and `edited` (or submit) timestamp that `report comments` prints for the
-review (skip a `pending` review until submitted) — does not yet appear in
-`report dump` and, on a re-sync, for unlinked replies in already linked
-threads and for already linked comments whose `<ref> edited <timestamp>`
-marker (from `report comments`) does not yet appear in `report dump` (`report
+whose verdict marker does not yet appear in `report dump` and, on a re-sync,
+for unlinked replies in already linked threads and for already linked comments
+whose edited-comment marker does not yet appear in `report dump` (`report
 dump` lists every linked ref, note, and finding update). Then classify each
-item (`link remove <ref>` first for an edited linked comment, and include
-`<ref> edited <timestamp>` in `--note`, the `link note` reason, or `finding
-update`) and record it from the orchestrator:
+item and record it from the orchestrator:
 
 | The comment, annotation, or review verdict body | Command |
 |---|---|
@@ -49,7 +50,9 @@ no finding and leaves no trace in the report, so every comment or review
 verdict body that raises a concern on the changeset — even one the agent
 refutes or that collides with a rule — goes to a finding (with the
 counter-evidence recorded there) for the user to triage. `link remove <ref>`
-undoes a link.
+undoes a link; for an edited linked comment, run `link remove <ref>` first and
+put its edited-comment marker in `--note`, the `link note` reason, or the
+`finding update` text.
 
 Past a handful of refs to read, the orchestrator reads the review verdict
 bodies and slices the pending, linked-thread, and edited linked refs across
