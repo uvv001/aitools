@@ -295,17 +295,17 @@ function describeLines(run: Run, existing: Comment, thread: ReviewThread, commen
   return thread.originalLine === null ? undefined : `${thread.originalLine}`;
 }
 
-function describePlace({ path, lines }: PublishComment): string {
+function describePlace({ path, lines }: PublishComment, commitSuffix = ''): string {
   if (path === undefined) return 'the conversation';
-  return lines ? `${path}:${formatLines(lines)}` : path;
+  return `${lines ? `${path}:${formatLines(lines)}` : path}${commitSuffix}`;
 }
 
-function describeAnchor(run: Run, existing: Comment, comment: PublishComment): string {
+function describeAnchor(run: Run, existing: Comment, comment: PublishComment, commitSuffix = ''): string {
   if (existing.kind === 'issue') return 'the conversation';
   const thread = run.data.threads.find((t) => t.id === existing.threadId);
   if (!thread) return 'an unknown place in the diff';
   const lines = describeLines(run, existing, thread, comment);
-  return lines ? `${thread.path}:${lines}` : thread.path;
+  return `${lines ? `${thread.path}:${lines}` : thread.path}${commitSuffix}`;
 }
 
 const isPending = (run: Run, comment: Comment) =>
@@ -348,11 +348,15 @@ async function publishExisting(
   ref: string,
   body: string,
 ): Promise<PublishResult> {
+  const samePlace = sameAnchor(run, existing, comment);
   const pinned = comment.path !== undefined && existing.kind === 'review' ? explicitCommit(run, comment) : undefined;
-  const pinnedOid = pinned && sameAnchor(run, existing, comment) ? await resolveCommit(run, pinned) : undefined;
+  const pinnedOid = pinned && samePlace ? await resolveCommit(run, pinned) : undefined;
   if (!sameAnchor(run, existing, comment, pinnedOid)) {
+    const existingCommit = existing.originalCommitSha ?? existing.commitSha;
+    const oldCommit = samePlace && existingCommit ? `@${existingCommit.slice(0, 7)}` : '';
+    const newCommit = samePlace && pinnedOid ? `@${pinnedOid.slice(0, 7)}` : '';
     throw new OwnCommentError(
-      `comment ${ref} is on ${describeAnchor(run, existing, comment)}, the finding says ${describePlace(comment)}; ` +
+      `comment ${ref} is on ${describeAnchor(run, existing, comment, oldCommit)}, the finding says ${describePlace(comment, newCommit)}; ` +
         'an existing comment cannot be moved',
       'moved',
     );

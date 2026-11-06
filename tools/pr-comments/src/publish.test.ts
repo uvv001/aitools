@@ -961,8 +961,8 @@ describe('anchor conflicts with an existing comment', () => {
       'the same range on a different pinned commit',
       tied({ ...at(10, 20), commit: SHORT }),
       { comment: { originalCommitSha: 'a'.repeat(40) }, thread: { startLine: 10, originalStartLine: 10, line: 20, originalLine: 20 } },
-      'src/a.ts:10-20',
-      'src/a.ts:10-20',
+      'src/a.ts:10-20@aaaaaaa',
+      `src/a.ts:10-20@${SHORT}`,
     ],
     [
       'a changed range start when pinned to another commit',
