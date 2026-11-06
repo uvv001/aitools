@@ -1459,8 +1459,17 @@ const SECTIONS = [
 function groups(match) {
 	return match.groups;
 }
+const HTML_TAG = /<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*|!--[\s\S]*?--)>/g;
+const EMPHASIS = /(?<![\p{L}\p{N}_])(_+)(?!\s)(.+?)(?<!\s)\1(?![\p{L}\p{N}_])/gu;
+function stripInlineMarkup(text) {
+	let current = text.replace(/!\[(?:[^[\]]|\[[^[\]]*\])*\]\((?:[^()]|\([^()]*\))*\)/g, "").replace(/\[((?:[^[\]]|\[[^[\]]*\])*)\]\((?:[^()]|\([^()]*\))*\)/g, "$1").replace(HTML_TAG, "");
+	for (let next = current.replace(EMPHASIS, "$2"); next !== current; next = current.replace(EMPHASIS, "$2")) current = next;
+	return current;
+}
 function slug(heading) {
-	return heading.toLowerCase().replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, "").replace(/ /gu, "-");
+	const literals = [];
+	const hold = (value) => `\0${literals.push(value) - 1}\0`;
+	return stripInlineMarkup(heading.replace(/(?<!\\)(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g, (_, _ticks, code) => hold(code)).replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, (_, char) => hold(char))).replace(/\0(\d+)\0/g, (_, id) => literals[Number(id)]).toLowerCase().replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, "").replace(/ /gu, "-");
 }
 const same = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
 function insideFences(lines) {
@@ -3842,7 +3851,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+bedc79a-dirty`;
+	return `pr-comments ${VERSION}+360e1ad-dirty`;
 }
 //#endregion
 //#region src/cli.ts
