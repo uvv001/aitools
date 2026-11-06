@@ -172,7 +172,7 @@ describe('parseReport — heading anchors', () => {
   });
 
   it('lower-cases and keeps Unicode letters, marks, digits, spaces, underscores and hyphens', () => {
-    expect(anchor('❓ 🔴 F3 — Café Déjà Vu — 日本語 + 🎉')).toBe('--f3--café-déjà-vu--日本語--');
+    expect(anchor('❓ 🔴 F3 — Café Déjà Vu — 日本語 2² + 🎉')).toBe('--f3--café-déjà-vu--日本語-2--');
     expect(anchor('📌 🟡 F5 — ALL CAPS and snake_case-and-kebab')).toBe('--f5--all-caps-and-snake_case-and-kebab');
   });
 

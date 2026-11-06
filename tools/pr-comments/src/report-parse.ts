@@ -67,7 +67,7 @@ function groups<K extends string>(match: RegExpExecArray): Record<K, string> {
 export function slug(heading: string): string {
   return heading
     .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
+    .replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, '')
     .replace(/ /gu, '-');
 }
 
