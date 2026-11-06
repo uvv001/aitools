@@ -19,19 +19,22 @@ the user to create it.
 A **verdict marker** is `<review-url> (<timestamp>)`: the `[link]` URL and the
 `edited` (or submit) timestamp that `report comments` prints for a submitted
 review. An **edited-comment marker** is `<ref> edited <timestamp>`: the
-comment's ref and the `edited` timestamp in its `report comments` header.
+comment's ref and the `edited` timestamp in its `report comments` header. An
+**unlinked reply** is a reply ref that `report comments` shows in a thread and
+that has no `link` line in `report dump`.
 
 `pr sync` downloads the PR into the database — comments, reviews, threads,
 check annotations. Run it after every push and before every publish.
 `link pending` then lists each top-level comment and check annotation that no
 link names yet; empty output means every top-level item is linked. Read the
-full pending threads and annotations with `report comments --pending`, and
-read unfiltered `report comments` for nonempty submitted review verdict bodies
-whose verdict marker does not yet appear in `report dump` and, on a re-sync,
-for unlinked replies in already linked threads and for already linked comments
-whose edited-comment marker does not yet appear in `report dump` (`report
-dump` lists every linked ref, note, and finding update). Then classify each
-item and record it from the orchestrator:
+full pending threads and annotations with `report comments --pending`
+(unlinked replies in those threads included), and read unfiltered
+`report comments` for nonempty submitted review verdict bodies whose verdict
+marker does not yet appear in `report dump` and, on a re-sync, for unlinked
+replies in already linked threads and for already linked comments whose
+edited-comment marker does not yet appear in `report dump` (`report dump`
+lists every linked ref, note, and finding update). Then classify each item and
+record it from the orchestrator:
 
 | The comment, annotation, or review verdict body | Command |
 |---|---|
@@ -55,16 +58,16 @@ update` text (run `link remove <ref>` first when the comment is already
 linked).
 
 Past a handful of refs to read, the orchestrator reads the review verdict
-bodies and slices the pending, linked-thread, and edited linked refs across
-parallel **PR-comment agents** (each given its model, the shared brief, and
-the read-only contract per [fleet.md](fleet.md)) that run
+bodies and slices the pending refs, unlinked replies, and edited linked refs
+across parallel **PR-comment agents** (each given its model, the shared brief,
+and the read-only contract per [fleet.md](fleet.md)) that run
 `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
 in the reviewed repository, read the comments against the findings the review
 carries (listed as in the Later rounds of [fleet.md](fleet.md)), the already
 linked refs, the user's login, the edited-comment marker definition, and the
 table and the paragraph above, write a description file per [fleet.md](fleet.md)
 for each concern no finding covers yet, a refuted one included, and reply with
-one classification per pending, unlinked-reply, or edited linked ref
+one classification per pending ref, unlinked reply, or edited linked ref
 (`own <F>`, `duplicate <F>`, `counter-evidence <F> '<counter-evidence>'`,
 `note '<reason>'`, or the new finding's reply line per [fleet.md](fleet.md)),
 plus its edited-comment marker where its header shows `edited`, for the
