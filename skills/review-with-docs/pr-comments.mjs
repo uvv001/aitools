@@ -1459,8 +1459,8 @@ const SECTIONS = [
 function groups(match) {
 	return match.groups;
 }
-function slug$1(heading) {
-	return heading.toLowerCase().replace(/[^a-z0-9 _-]/gu, "").replace(/ /gu, "-");
+function slug(heading) {
+	return heading.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, "").replace(/ /gu, "-");
 }
 const same = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
 function insideFences(lines) {
@@ -1518,7 +1518,7 @@ function parseReport(text, path) {
 			blocks.push({ finding: {
 				...fields,
 				headerLine: index,
-				anchor: slug$1(title)
+				anchor: slug(title)
 			} });
 		} else {
 			const block = blocks.at(-1);
@@ -2265,9 +2265,6 @@ function buildDashboard(findings) {
 //#endregion
 //#region src/review-render.ts
 const bullet = ({ text }) => `- ${text}`;
-function slug(heading) {
-	return heading.toLowerCase().replace(/[^a-z0-9 _-]/gu, "").replace(/ /gu, "-");
-}
 const heading = ({ state, severity, id, title }) => `${state} ${severity} ${id} — ${title}`;
 function dashboardFinding(finding) {
 	const { id, state, severity, title } = finding;
@@ -3845,7 +3842,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+deb2fcb`;
+	return `pr-comments ${VERSION}+99bfde4`;
 }
 //#endregion
 //#region src/cli.ts
