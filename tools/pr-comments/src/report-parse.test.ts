@@ -176,6 +176,24 @@ describe('parseReport — heading anchors', () => {
     expect(anchor('📌 🟡 F5 — ALL CAPS and snake_case-and-kebab')).toBe('--f5--all-caps-and-snake_case-and-kebab');
   });
 
+  it('strips inline Markdown markup outside code spans when building the anchor', () => {
+    expect(anchor('⏳ ⚪ F1 — _Emphasized_, __strong__, and [Documentation](https://example.com/a_(b)/c)')).toBe(
+      '--f1--emphasized-strong-and-documentation',
+    );
+    expect(anchor('🔧 🔴 F2 — Commit subject does not follow <category>: <entity> format')).toBe(
+      '--f2--commit-subject-does-not-follow---format',
+    );
+    expect(anchor('🔧 🔴 F3 — Commit subject does not follow `<category>`: `_entity_` format')).toBe(
+      '--f3--commit-subject-does-not-follow-category-_entity_-format',
+    );
+    expect(anchor('⏳ ⚪ F4 — Link with [`code_span`](https://example.com) and ![alt](https://example.com/a.png)')).toBe(
+      '--f4--link-with-code_span-and-',
+    );
+    expect(anchor('⏳ ⚪ F5 — <https://example.com/path>, <file.sqlite>, Use \\_literal_, and __outer _inner_ end__')).toBe(
+      '--f5--httpsexamplecompath-filesqlite-use-_literal_-and-outer-inner-end',
+    );
+  });
+
   it('keeps consecutive spaces as consecutive hyphens', () => {
     expect(anchor('🔀 ⚪ F6 — two  spaces')).toBe('--f6--two--spaces');
   });

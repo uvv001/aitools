@@ -64,8 +64,29 @@ function groups<K extends string>(match: RegExpExecArray): Record<K, string> {
   return match.groups as Record<K, string>;
 }
 
+const HTML_TAG =
+  /<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*|!--[\s\S]*?--)>/g;
+const EMPHASIS = /(?<![\p{L}\p{N}_])(_+)(?!\s)(.+?)(?<!\s)\1(?![\p{L}\p{N}_])/gu;
+
+function stripInlineMarkup(text: string): string {
+  let current = text
+    .replace(/!\[(?:[^[\]]|\[[^[\]]*\])*\]\((?:[^()]|\([^()]*\))*\)/g, '')
+    .replace(/\[((?:[^[\]]|\[[^[\]]*\])*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1')
+    .replace(HTML_TAG, '');
+  for (let next = current.replace(EMPHASIS, '$2'); next !== current; next = current.replace(EMPHASIS, '$2')) {
+    current = next;
+  }
+  return current;
+}
+
 export function slug(heading: string): string {
-  return heading
+  const literals: string[] = [];
+  const hold = (value: string): string => `\0${literals.push(value) - 1}\0`;
+  const withPlaceholders = heading
+    .replace(/(?<!\\)(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g, (_, _ticks: string, code: string) => hold(code))
+    .replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, (_, char: string) => hold(char));
+  return stripInlineMarkup(withPlaceholders)
+    .replace(/\0(\d+)\0/g, (_, id: string) => literals[Number(id)]!)
     .toLowerCase()
     .replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, '')
     .replace(/ /gu, '-');
