@@ -56,8 +56,8 @@ linked).
 
 Past a handful of refs to read, the orchestrator reads the review verdict
 bodies and slices the pending, linked-thread, and edited linked refs across
-parallel agents (each given its model, the shared brief, and the read-only
-contract per [fleet.md](fleet.md)) that run
+parallel **PR-comment agents** (each given its model, the shared brief, and
+the read-only contract per [fleet.md](fleet.md)) that run
 `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
 in the reviewed repository, read the comments against the findings the review
 carries (listed as in the Later rounds of [fleet.md](fleet.md)), the already
