@@ -89,7 +89,7 @@ const REVIEW_COMMENT_FIELDS = `
 const ISSUE_COMMENT_FIELDS = "id body createdAt updatedAt lastEditedAt url author { login }";
 const REVIEW_FIELDS = "id state body submittedAt lastEditedAt url author { login } commit { oid }";
 const THREAD_FIELDS = `
-  id path line originalLine startLine isResolved isOutdated
+  id path line originalLine startLine originalStartLine isResolved isOutdated
   comments(first: ${PAGE_SIZE}) { nodes {${REVIEW_COMMENT_FIELDS}} ${PAGE_INFO} }`;
 const PULL_REQUEST_QUERY = `
 query($owner: String!, $repo: String!, $number: Int!) {
@@ -314,6 +314,7 @@ async function fetchPullRequest(client, ref, now = () => /* @__PURE__ */ new Dat
 			line: thread.line,
 			originalLine: thread.originalLine,
 			startLine: thread.startLine,
+			...thread.originalStartLine == null ? {} : { originalStartLine: thread.originalStartLine },
 			isResolved: thread.isResolved,
 			isOutdated: thread.isOutdated
 		});
@@ -949,15 +950,9 @@ function threadLines(thread) {
 }
 function originalLines(thread) {
 	if (thread.originalLine === null) return void 0;
-	if (thread.line !== null && thread.startLine !== null) {
-		const start = thread.originalLine - (thread.line - thread.startLine);
-		return start >= 1 ? {
-			start,
-			end: thread.originalLine
-		} : void 0;
-	}
+	const fallbackStart = (thread.line === null || thread.line === thread.originalLine) && thread.startLine !== null ? thread.startLine : thread.originalLine;
 	return {
-		start: thread.startLine !== null && thread.startLine !== thread.originalLine ? thread.startLine : thread.originalLine,
+		start: thread.originalStartLine !== void 0 ? thread.originalStartLine ?? thread.originalLine : fallbackStart,
 		end: thread.originalLine
 	};
 }
@@ -2331,6 +2326,7 @@ CREATE TABLE pr_threads (
   line INTEGER,
   original_line INTEGER,
   start_line INTEGER,
+  original_start_line INTEGER,
   is_resolved INTEGER NOT NULL,
   is_outdated INTEGER NOT NULL
 );
@@ -2470,6 +2466,7 @@ function savePullRequest(db, data) {
 			line: t.line,
 			original_line: t.originalLine,
 			start_line: t.startLine,
+			original_start_line: t.originalStartLine ?? null,
 			is_resolved: t.isResolved ? 1 : 0,
 			is_outdated: t.isOutdated ? 1 : 0
 		});
@@ -2564,6 +2561,7 @@ function loadPullRequest(db) {
 		line: t.line,
 		originalLine: t.original_line,
 		startLine: t.start_line,
+		...t.original_start_line == null ? {} : { originalStartLine: t.original_start_line },
 		isResolved: t.is_resolved === 1,
 		isOutdated: t.is_outdated === 1
 	}));
@@ -3815,7 +3813,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+e2e1fa9-dirty`;
+	return `pr-comments ${VERSION}+407d364`;
 }
 //#endregion
 //#region src/cli.ts
