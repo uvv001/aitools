@@ -310,7 +310,7 @@ describe('bundle', () => {
     await mkdir(skillDir, { recursive: true });
     await writeFile(join(pkgRoot, 'src.ts'), 'export const x = 1;\n', 'utf8');
     await writeFile(join(skillDir, 'pr-comments.mjs'), '// bundle\n', 'utf8');
-    const gitConfig = ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'core.autocrlf=false'];
+    const gitConfig = ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false'];
     await run('git', [...gitConfig, 'add', '.']);
     await run('git', [...gitConfig, 'commit', '-q', '-m', 'add files']);
     const head = (await run('git', ['-C', repo, 'rev-parse', '--short', 'HEAD'])).stdout.trim();
