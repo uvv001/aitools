@@ -947,6 +947,17 @@ function threadLines(thread) {
 		end: thread.line
 	};
 }
+function originalLines(thread) {
+	if (thread.originalLine === null) return void 0;
+	if (thread.line !== null && thread.line !== thread.originalLine) return thread.startLine === null || thread.startLine === thread.line ? {
+		start: thread.originalLine,
+		end: thread.originalLine
+	} : void 0;
+	return {
+		start: thread.startLine !== null && thread.startLine !== thread.originalLine ? thread.startLine : thread.originalLine,
+		end: thread.originalLine
+	};
+}
 function explicitCommit(run, comment) {
 	const { commit } = comment;
 	return commit && !run.data.pullRequest.headSha.toLowerCase().startsWith(commit.toLowerCase()) ? commit : void 0;
@@ -969,14 +980,13 @@ function sameAnchor(run, existing, comment) {
 	if (existing.kind !== "review" || thread?.path !== comment.path) return false;
 	if (existing.diffHunk === "" !== (comment.lines === void 0)) return false;
 	if (!comment.lines) return true;
-	const current = headLines(run, thread, comment);
-	if (current) return current.start === comment.lines.start && current.end === comment.lines.end;
-	return thread.originalLine === comment.lines.end;
+	const target = headLines(run, thread, comment) ?? originalLines(thread);
+	return target !== void 0 && target.start === comment.lines.start && target.end === comment.lines.end;
 }
 function describeLines(run, existing, thread, comment) {
 	if (existing.diffHunk === "") return void 0;
-	const current = headLines(run, thread, comment);
-	if (current) return formatLines(current);
+	const target = headLines(run, thread, comment) ?? originalLines(thread);
+	if (target) return formatLines(target);
 	return thread.originalLine === null ? void 0 : `${thread.originalLine}`;
 }
 function describePlace({ path, lines }) {
@@ -3802,7 +3812,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+9d0aa29`;
+	return `pr-comments ${VERSION}+4d425c0`;
 }
 //#endregion
 //#region src/cli.ts
