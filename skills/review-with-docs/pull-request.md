@@ -46,8 +46,7 @@ Links are records in the database; nothing reaches GitHub. A note attaches to
 no finding and leaves no trace in the report, so every comment or review
 verdict body that raises a concern on the changeset — even one the agent
 refutes or that collides with a rule — goes to a finding (with the
-counter-evidence recorded there) for the user to triage. A doubtful
-classification is the user's call ([SKILL.md](SKILL.md)); `link remove <ref>`
+counter-evidence recorded there) for the user to triage. `link remove <ref>`
 undoes a link.
 
 Past a handful of refs to read, the orchestrator reads the review verdict

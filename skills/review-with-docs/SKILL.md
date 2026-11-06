@@ -17,7 +17,7 @@ its comments and publishing findings.
 
 **The user's call** is a stop — put the evidence and the options to the user,
 and act on the answer — and is the default for any situation these
-instructions do not cover.
+instructions do not cover or leave in doubt.
 
 ## The tool
 
@@ -51,7 +51,7 @@ session's `files/review-with-docs/` folder that the user names — means the
 request continues it: read `finding list` and start at the step the request
 calls for — a verdict is step 5, a publish or sync request step 6, new changes
 (a moved PR head included) step 7, a fix request the paragraph under States.
-With no match, step 1 starts a new review; a doubtful match is the user's call.
+With no match, step 1 starts a new review.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions — so where the target is not in a
@@ -81,9 +81,8 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
    A review question the user raises opens a discussion; the check it settles
    on joins the rule set, is named in the note of the round that first applies
    it, in a few words, and carries into later rounds only where the user says
-   so. A scope that is genuinely unclear is the user's call. The database
-   stores no rules: the pairing travels in the briefs of a fleet
-   ([fleet.md](fleet.md)). Then
+   so. The database stores no rules: the pairing travels in the briefs of a
+   fleet ([fleet.md](fleet.md)). Then
    `round open --revision <pinned> (--base <rev> | --no-base) --note <text>`
    records round 1, carrying the dirty-tree remark, the scope with its
    exclusions, and the rule sources in one line —
@@ -146,11 +145,10 @@ With no match, step 1 starts a new review; a doubtful match is the user's call.
    tier bound of [fleet.md](fleet.md), and the user knows the pending review
    waits for their submit.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
-   reviewed area, which the user reports or picks up by syncing the PR;
-   where in doubt, it is the user's call. A pull request target is synced
-   first (`pr sync`, then [pull-request.md](pull-request.md) for what is new),
-   so the round sees what others wrote. Where the new work is really a
-   different target, that is the user's call.
+   reviewed area, which the user reports or picks up by syncing the PR. A pull
+   request target is synced first (`pr sync`, then
+   [pull-request.md](pull-request.md) for what is new), so the round sees what
+   others wrote.
    Every round reads the **full changeset** at the new revision — never a
    diff between revisions, because authors amend and force-push and
    per-commit attribution misleads. `round open --revision --base --note`
@@ -221,7 +219,7 @@ the pushed head confirms it. Both end in
   `linguist-generated` or `linguist-vendored` in `.gitattributes` or by a
   "generated — do not edit" header. A changed generated file gets one check:
   did its source change with it? The round note's scope names the exclusions,
-  so the user can overrule them; a file in doubt is the user's call.
+  so the user can overrule them.
 - Challenge the implementation. A review that summarizes the diff finds
   nothing.
 - Past a handful of files or a few hundred changed lines, dispatch a fleet
