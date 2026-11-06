@@ -452,4 +452,4 @@ Tests (`pnpm test` runs `vitest run`; `pnpm typecheck` runs `tsc --noEmit`):
 - The text of a review verdict has no comment id, so it cannot be linked and `link pending` does not list it.
 - Only the head commit's check annotations are kept. After a push, run `pr sync` again.
 - A database is one writer at a time. A binary file cannot be merged: after a git conflict take one side and redo the other changes with the commands.
-- No cross-version migration. A database of an older schema version must be started again with `init` (within schema 5, `pr sync` adds `pr_threads.original_start_line` if absent).
+- No cross-version migration. A database of an older schema version must be started again with `init` (within schema 5, `savePullRequest` — run by `pr sync`, `finding post`, and `link reply` — adds `pr_threads.original_start_line` if absent).
