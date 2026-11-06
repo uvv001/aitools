@@ -972,10 +972,15 @@ async function resolveCommit(run, commit) {
 	return oid;
 }
 const headLines = (run, thread, comment) => explicitCommit(run, comment) ? void 0 : threadLines(thread);
-function sameAnchor(run, existing, comment) {
+function sameCommit(existing, pinnedOid) {
+	if (pinnedOid === void 0) return true;
+	const commit = existing.originalCommitSha ?? existing.commitSha;
+	return commit !== null && commit.toLowerCase() === pinnedOid.toLowerCase();
+}
+function sameAnchor(run, existing, comment, pinnedOid) {
 	if (comment.path === void 0) return existing.kind === "issue";
 	const thread = run.data.threads.find((t) => t.id === existing.threadId);
-	if (existing.kind !== "review" || thread?.path !== comment.path) return false;
+	if (existing.kind !== "review" || thread?.path !== comment.path || !sameCommit(existing, pinnedOid)) return false;
 	if (existing.diffHunk === "" !== (comment.lines === void 0)) return false;
 	if (!comment.lines) return true;
 	const target = headLines(run, thread, comment) ?? originalLines(thread);
@@ -999,14 +1004,19 @@ function describeAnchor(run, existing, comment) {
 	return lines ? `${thread.path}:${lines}` : thread.path;
 }
 const isPending$1 = (run, comment) => run.data.reviews.find((r) => r.id === comment.reviewId)?.state === "PENDING";
-function findIdentical(run, comment, body) {
-	for (const existing of run.data.comments) {
+async function findIdentical(run, comment, body) {
+	const candidates = run.data.comments.filter((existing) => {
 		const ref = commentRefFromUrl(existing.url);
-		if (ref && sameLogin$1(existing.author, run.viewer) && sameText$1(existing.body, body) && sameAnchor(run, existing, comment)) return {
-			existing,
-			ref
-		};
-	}
+		return Boolean(ref && sameLogin$1(existing.author, run.viewer) && sameText$1(existing.body, body) && sameAnchor(run, existing, comment));
+	});
+	if (candidates.length === 0) return void 0;
+	const pinned = comment.path !== void 0 ? explicitCommit(run, comment) : void 0;
+	const pinnedOid = pinned ? await resolveCommit(run, pinned) : void 0;
+	const existing = candidates.find((candidate) => sameCommit(candidate, pinnedOid));
+	return existing ? {
+		existing,
+		ref: commentRefFromUrl(existing.url)
+	} : void 0;
 }
 async function updateBody(run, existing, body) {
 	const [query, input] = existing.kind === "review" ? [UPDATE_REVIEW_COMMENT, {
@@ -1027,7 +1037,8 @@ function existingFields(run, existing, ref) {
 	};
 }
 async function publishExisting(run, comment, existing, ref, body) {
-	if (!sameAnchor(run, existing, comment)) throw new OwnCommentError(`comment ${ref} is on ${describeAnchor(run, existing, comment)}, the finding says ${describePlace(comment)}; an existing comment cannot be moved`, "moved");
+	const pinned = comment.path !== void 0 && existing.kind === "review" ? explicitCommit(run, comment) : void 0;
+	if (!sameAnchor(run, existing, comment, pinned && sameAnchor(run, existing, comment) ? await resolveCommit(run, pinned) : void 0)) throw new OwnCommentError(`comment ${ref} is on ${describeAnchor(run, existing, comment)}, the finding says ${describePlace(comment)}; an existing comment cannot be moved`, "moved");
 	if (run.options.now && isPending$1(run, existing)) throw new Error(pendingCannotBeNow(ref));
 	const fields = existingFields(run, existing, ref);
 	if (sameText$1(existing.body, body)) return outcome(run, comment, "unchanged", fields);
@@ -1150,7 +1161,7 @@ async function createComment(run, comment, body) {
 async function dispatch(run, comment) {
 	const body = composeBody(comment.body, run.options.byAgent);
 	if (comment.commentRef !== void 0) return publishExisting(run, comment, findOwn(run, comment.commentRef), comment.commentRef, body);
-	const identical = findIdentical(run, comment, body);
+	const identical = await findIdentical(run, comment, body);
 	if (!identical) return createComment(run, comment, body);
 	return outcome(run, comment, "unchanged", {
 		...existingFields(run, identical.existing, identical.ref),
@@ -3813,7 +3824,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+407d364`;
+	return `pr-comments ${VERSION}+610fad4`;
 }
 //#endregion
 //#region src/cli.ts
