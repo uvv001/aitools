@@ -271,10 +271,16 @@ async function resolveCommit(run: Run, commit: string): Promise<string> {
 const headLines = (run: Run, thread: ReviewThread, comment: PublishComment) =>
   explicitCommit(run, comment) ? undefined : threadLines(thread);
 
-function sameAnchor(run: Run, existing: Comment, comment: PublishComment): boolean {
+function sameCommit(existing: Comment, pinnedOid: string | undefined): boolean {
+  if (pinnedOid === undefined) return true;
+  const commit = existing.originalCommitSha ?? existing.commitSha;
+  return commit !== null && commit.toLowerCase() === pinnedOid.toLowerCase();
+}
+
+function sameAnchor(run: Run, existing: Comment, comment: PublishComment, pinnedOid?: string): boolean {
   if (comment.path === undefined) return existing.kind === 'issue';
   const thread = run.data.threads.find((t) => t.id === existing.threadId);
-  if (existing.kind !== 'review' || thread?.path !== comment.path) return false;
+  if (existing.kind !== 'review' || thread?.path !== comment.path || !sameCommit(existing, pinnedOid)) return false;
   const fileLevel = existing.diffHunk === '';
   if (fileLevel !== (comment.lines === undefined)) return false;
   if (!comment.lines) return true;
@@ -306,14 +312,16 @@ const isPending = (run: Run, comment: Comment) =>
   run.data.reviews.find((r) => r.id === comment.reviewId)?.state === 'PENDING';
 
 // The first comment of the viewer that already says exactly this at this place.
-function findIdentical(run: Run, comment: PublishComment, body: string): { existing: Comment; ref: string } | undefined {
-  for (const existing of run.data.comments) {
+async function findIdentical(run: Run, comment: PublishComment, body: string): Promise<{ existing: Comment; ref: string } | undefined> {
+  const candidates = run.data.comments.filter((existing) => {
     const ref = commentRefFromUrl(existing.url);
-    if (ref && sameLogin(existing.author, run.viewer) && sameText(existing.body, body) && sameAnchor(run, existing, comment)) {
-      return { existing, ref };
-    }
-  }
-  return undefined;
+    return Boolean(ref && sameLogin(existing.author, run.viewer) && sameText(existing.body, body) && sameAnchor(run, existing, comment));
+  });
+  if (candidates.length === 0) return undefined;
+  const pinned = comment.path !== undefined ? explicitCommit(run, comment) : undefined;
+  const pinnedOid = pinned ? await resolveCommit(run, pinned) : undefined;
+  const existing = candidates.find((candidate) => sameCommit(candidate, pinnedOid));
+  return existing ? { existing, ref: commentRefFromUrl(existing.url)! } : undefined;
 }
 
 async function updateBody(run: Run, existing: Comment, body: string): Promise<void> {
@@ -340,7 +348,9 @@ async function publishExisting(
   ref: string,
   body: string,
 ): Promise<PublishResult> {
-  if (!sameAnchor(run, existing, comment)) {
+  const pinned = comment.path !== undefined && existing.kind === 'review' ? explicitCommit(run, comment) : undefined;
+  const pinnedOid = pinned && sameAnchor(run, existing, comment) ? await resolveCommit(run, pinned) : undefined;
+  if (!sameAnchor(run, existing, comment, pinnedOid)) {
     throw new OwnCommentError(
       `comment ${ref} is on ${describeAnchor(run, existing, comment)}, the finding says ${describePlace(comment)}; ` +
         'an existing comment cannot be moved',
@@ -479,7 +489,7 @@ async function dispatch(run: Run, comment: PublishComment): Promise<PublishResul
   if (comment.commentRef !== undefined) {
     return publishExisting(run, comment, findOwn(run, comment.commentRef), comment.commentRef, body);
   }
-  const identical = findIdentical(run, comment, body);
+  const identical = await findIdentical(run, comment, body);
   if (!identical) return createComment(run, comment, body);
   return outcome(run, comment, 'unchanged', { ...existingFields(run, identical.existing, identical.ref), message: ADOPTED });
 }

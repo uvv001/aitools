@@ -877,6 +877,7 @@ describe('adopting an identical comment', () => {
     ['a range instead of a single line', at(20, 22)],
     ['a file-level anchor', { path: 'src/a.ts', lines: undefined }],
     ['no anchor', { path: undefined, lines: undefined }],
+    ['another pinned commit with the same lines', { ...at(22), commit: SHORT }],
   ];
 
   it.each(anchors)('does not adopt an identical comment on %s', async (_name, anchor) => {
@@ -957,6 +958,13 @@ describe('anchor conflicts with an existing comment', () => {
       'src/a.ts:60-63',
     ],
     [
+      'the same range on a different pinned commit',
+      tied({ ...at(10, 20), commit: SHORT }),
+      { comment: { originalCommitSha: 'a'.repeat(40) }, thread: { startLine: 10, originalStartLine: 10, line: 20, originalLine: 20 } },
+      'src/a.ts:10-20',
+      'src/a.ts:10-20',
+    ],
+    [
       'a changed range start when pinned to another commit',
       tied({ ...at(15, 20), commit: SHORT }),
       { thread: { startLine: 10, line: 20, originalLine: 20 } },
@@ -1021,14 +1029,18 @@ describe('anchor conflicts with an existing comment', () => {
     ['an outdated thread when the file gives its original line', tied(at(63)), { thread: outdated }],
     ['an outdated range thread when both start and end match', tied(at(60, 63)), { thread: outdatedRange }],
     ['the same range', tied(at(20, 22)), { thread: { startLine: 20 } }],
-    ['the same range when pinned to another commit', tied({ ...at(10, 20), commit: SHORT }), { thread: { startLine: 10, originalStartLine: 10, line: 20, originalLine: 20 } }],
+    [
+      'the same range when pinned to another commit',
+      tied({ ...at(10, 20), commit: SHORT }),
+      { comment: { originalCommitSha: FULL }, thread: { startLine: 10, originalStartLine: 10, line: 20, originalLine: 20 } },
+    ],
     [
       'a moved range whose head width changed when pinned to its original commit',
       tied({ ...at(16, 19), commit: SHORT }),
-      { thread: { startLine: 16, originalStartLine: 16, line: 25, originalLine: 19 } },
+      { comment: { originalCommitSha: FULL }, thread: { startLine: 16, originalStartLine: 16, line: 25, originalLine: 19 } },
     ],
     ['a file-level thread', tied({ lines: undefined }), { comment: { diffHunk: '' }, thread: { line: 1 } }],
-    ['the original line when pinned to another commit', tied({ ...at(63), commit: SHORT }), { thread: moved }],
+    ['the original line when pinned to another commit', tied({ ...at(63), commit: SHORT }), { comment: { originalCommitSha: FULL }, thread: moved }],
   ];
 
   it.each(matches)('accepts %s', async (_name, tiedComment, existing) => {
