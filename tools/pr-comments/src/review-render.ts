@@ -1,5 +1,5 @@
 import { buildDashboard } from './report-dashboard.ts';
-import type { ReportFinding } from './report-parse.ts';
+import { slug, type ReportFinding } from './report-parse.ts';
 import type { Finding, IntroEntry, ReviewData } from './review-model.ts';
 
 interface Line {
@@ -7,14 +7,6 @@ interface Line {
 }
 
 const bullet = ({ text }: Line): string => `- ${text}`;
-
-// The GitHub heading slug; report-parse.ts keeps its copy private.
-function slug(heading: string): string {
-  return heading
-    .toLowerCase()
-    .replace(/[^a-z0-9 _-]/gu, '')
-    .replace(/ /gu, '-');
-}
 
 const heading = ({ state, severity, id, title }: Finding): string => `${state} ${severity} ${id} — ${title}`;
 

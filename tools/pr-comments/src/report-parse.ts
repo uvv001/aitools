@@ -64,10 +64,10 @@ function groups<K extends string>(match: RegExpExecArray): Record<K, string> {
   return match.groups as Record<K, string>;
 }
 
-function slug(heading: string): string {
+export function slug(heading: string): string {
   return heading
     .toLowerCase()
-    .replace(/[^a-z0-9 _-]/gu, '')
+    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
     .replace(/ /gu, '-');
 }
 

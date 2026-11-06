@@ -171,8 +171,8 @@ describe('parseReport — heading anchors', () => {
     expect(anchor('🔧 ⚪ F2 — Uses v1.2.3: really?!')).toBe('--f2--uses-v123-really');
   });
 
-  it('lower-cases and drops characters outside a-z0-9, space, underscore and hyphen', () => {
-    expect(anchor('❓ 🔴 F3 — Café Déjà Vu — 日本語 + 🎉')).toBe('--f3--caf-dj-vu----');
+  it('lower-cases and keeps Unicode letters, marks, digits, spaces, underscores and hyphens', () => {
+    expect(anchor('❓ 🔴 F3 — Café Déjà Vu — 日本語 + 🎉')).toBe('--f3--café-déjà-vu--日本語--');
     expect(anchor('📌 🟡 F5 — ALL CAPS and snake_case-and-kebab')).toBe('--f5--all-caps-and-snake_case-and-kebab');
   });
 
