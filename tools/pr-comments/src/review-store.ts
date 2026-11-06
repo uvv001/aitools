@@ -1,5 +1,5 @@
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve, toNamespacedPath } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { CommentLink, LinkRole } from './review-links.ts';
 import type { Finding, Intro, IntroEntry, ReviewData, ReviewedItem, UpdateItem } from './review-model.ts';
@@ -159,7 +159,7 @@ export function openReviewDb(path: string, mode: OpenMode): DatabaseSync {
   else if (statSync(path).isDirectory()) throw new Error(`${path} is a directory, not a review database`);
   let db: DatabaseSync | undefined;
   try {
-    db = new DatabaseSync(path, { timeout: BUSY_TIMEOUT_MS, readOnly: mode === 'readonly' });
+    db = new DatabaseSync(toNamespacedPath(resolve(path)), { timeout: BUSY_TIMEOUT_MS, readOnly: mode === 'readonly' });
     configure(db, path, mode);
     return db;
   } catch (error) {

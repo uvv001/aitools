@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { join } from 'node:path';
+import { join, toNamespacedPath } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommentLink } from './review-links.ts';
 import type { Finding, IntroEntry, ReviewData } from './review-model.ts';
@@ -101,6 +101,15 @@ describe('openReviewDb', () => {
     }
   });
 
+  it('names the path when SQLite cannot open it', () => {
+    const pad = Math.max(20, 248 - dir.length - '/r.sqlite'.length);
+    const longPath = join(dir, 'a'.repeat(pad), 'r.sqlite');
+    expect(`${longPath}.12345678.tmp`.length).toBeGreaterThan(255);
+    const db = openReviewDb(`${longPath}.12345678.tmp`, 'create');
+    expect(pragma(db, 'user_version')).toBe(REVIEW_SCHEMA_VERSION);
+    db.close();
+  });
+
   it('removes the file it created when the database cannot be opened, and only then', () => {
     const path = reviewFile();
     vi.mocked(DatabaseSync).mockImplementationOnce(function () {
@@ -162,7 +171,7 @@ describe('openReviewDb', () => {
       const before = bytesOf(path);
       vi.mocked(DatabaseSync).mockClear();
       const db = openReviewDb(path, 'readonly');
-      expect(vi.mocked(DatabaseSync)).toHaveBeenCalledWith(path, expect.objectContaining({ readOnly: true }));
+      expect(vi.mocked(DatabaseSync)).toHaveBeenCalledWith(toNamespacedPath(path), expect.objectContaining({ readOnly: true }));
       expect(loadReview(db)).toStrictEqual(sample());
       expect(loadLinks(db)).toStrictEqual([{ ref: 'r12', role: 'own', finding: 'F1' }]);
       expect(getMeta(db, 'k')).toBe('v');
