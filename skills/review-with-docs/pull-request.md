@@ -61,13 +61,14 @@ contract per [fleet.md](fleet.md)) that run
 `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
 in the reviewed repository, read the comments against the findings the review
 carries (listed as in the Later rounds of [fleet.md](fleet.md)), the already
-linked refs, the user's login, and the table and the paragraph above, write a
-description file per [fleet.md](fleet.md) for each concern no finding covers
-yet, a refuted one included, and reply with one classification per pending,
-unlinked-reply, or edited linked ref (`own <F>`, `duplicate <F>`,
-`counter-evidence <F> '<counter-evidence>'`, `note '<reason>'`, or the new
-finding's reply line per [fleet.md](fleet.md)), plus its edited-comment marker
-where its header shows `edited`, for the orchestrator to record.
+linked refs, the user's login, the edited-comment marker definition, and the
+table and the paragraph above, write a description file per [fleet.md](fleet.md)
+for each concern no finding covers yet, a refuted one included, and reply with
+one classification per pending, unlinked-reply, or edited linked ref
+(`own <F>`, `duplicate <F>`, `counter-evidence <F> '<counter-evidence>'`,
+`note '<reason>'`, or the new finding's reply line per [fleet.md](fleet.md)),
+plus its edited-comment marker where its header shows `edited`, for the
+orchestrator to record.
 
 ## Publish
 
