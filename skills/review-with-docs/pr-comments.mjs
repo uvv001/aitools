@@ -1460,7 +1460,7 @@ function groups(match) {
 	return match.groups;
 }
 function slug(heading) {
-	return heading.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, "").replace(/ /gu, "-");
+	return heading.toLowerCase().replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, "").replace(/ /gu, "-");
 }
 const same = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
 function insideFences(lines) {
@@ -3842,7 +3842,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+99bfde4`;
+	return `pr-comments ${VERSION}+bedc79a-dirty`;
 }
 //#endregion
 //#region src/cli.ts
