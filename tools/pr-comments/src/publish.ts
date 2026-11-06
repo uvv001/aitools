@@ -240,6 +240,17 @@ function threadLines(thread: ReviewThread): LineRange | undefined {
   return { start: isRange ? thread.startLine! : thread.line, end: thread.line };
 }
 
+function originalLines(thread: ReviewThread): LineRange | undefined {
+  if (thread.originalLine === null) return undefined;
+  if (thread.line !== null && thread.line !== thread.originalLine) {
+    return thread.startLine === null || thread.startLine === thread.line
+      ? { start: thread.originalLine, end: thread.originalLine }
+      : undefined;
+  }
+  const isRange = thread.startLine !== null && thread.startLine !== thread.originalLine;
+  return { start: isRange ? thread.startLine! : thread.originalLine, end: thread.originalLine };
+}
+
 function explicitCommit(run: Run, comment: PublishComment): string | undefined {
   const { commit } = comment;
   return commit && !run.data.pullRequest.headSha.toLowerCase().startsWith(commit.toLowerCase()) ? commit : undefined;
@@ -270,15 +281,14 @@ function sameAnchor(run: Run, existing: Comment, comment: PublishComment): boole
   const fileLevel = existing.diffHunk === '';
   if (fileLevel !== (comment.lines === undefined)) return false;
   if (!comment.lines) return true;
-  const current = headLines(run, thread, comment);
-  if (current) return current.start === comment.lines.start && current.end === comment.lines.end;
-  return thread.originalLine === comment.lines.end;
+  const target = headLines(run, thread, comment) ?? originalLines(thread);
+  return target !== undefined && target.start === comment.lines.start && target.end === comment.lines.end;
 }
 
 function describeLines(run: Run, existing: Comment, thread: ReviewThread, comment: PublishComment): string | undefined {
   if (existing.diffHunk === '') return undefined;
-  const current = headLines(run, thread, comment);
-  if (current) return formatLines(current);
+  const target = headLines(run, thread, comment) ?? originalLines(thread);
+  if (target) return formatLines(target);
   return thread.originalLine === null ? undefined : `${thread.originalLine}`;
 }
 

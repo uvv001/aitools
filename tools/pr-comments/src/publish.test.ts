@@ -941,6 +941,7 @@ describe('adopting an identical comment', () => {
 
 describe('anchor conflicts with an existing comment', () => {
   const outdated = { line: null, startLine: null, isOutdated: true, originalLine: 63 };
+  const outdatedRange = { line: null, startLine: 60, isOutdated: true, originalLine: 63 };
   // Re-mapped to line 56 at the head, but written at line 63 of its own commit.
   const moved = { line: 56, startLine: 56, originalLine: 63 };
 
@@ -948,6 +949,20 @@ describe('anchor conflicts with an existing comment', () => {
     ['another path', tied({ path: 'src/b.ts' }), {}, 'src/a.ts:22', 'src/b.ts:22'],
     ['other lines', tied(at(30)), {}, 'src/a.ts:22', 'src/a.ts:30'],
     ['other lines than the original line of an outdated thread', tied(at(30)), { thread: outdated }, 'src/a.ts:63', 'src/a.ts:30'],
+    [
+      'a range on a single-line outdated thread even when the end matches originalLine',
+      tied(at(60, 63)),
+      { thread: outdated },
+      'src/a.ts:63',
+      'src/a.ts:60-63',
+    ],
+    [
+      'a changed range start when pinned to another commit',
+      tied({ ...at(15, 20), commit: SHORT }),
+      { thread: { startLine: 10, line: 20, originalLine: 20 } },
+      'src/a.ts:10-20',
+      'src/a.ts:15-20',
+    ],
     [
       'other lines than the original line when pinned to another commit',
       tied({ ...at(60), commit: SHORT }),
@@ -1004,8 +1019,9 @@ describe('anchor conflicts with an existing comment', () => {
 
   const matches: [string, PublishComment, Existing][] = [
     ['an outdated thread when the file gives its original line', tied(at(63)), { thread: outdated }],
-    ['an outdated thread when only the end line is the original line', tied(at(60, 63)), { thread: outdated }],
+    ['an outdated range thread when both start and end match', tied(at(60, 63)), { thread: outdatedRange }],
     ['the same range', tied(at(20, 22)), { thread: { startLine: 20 } }],
+    ['the same range when pinned to another commit', tied({ ...at(10, 20), commit: SHORT }), { thread: { startLine: 10, line: 20, originalLine: 20 } }],
     ['a file-level thread', tied({ lines: undefined }), { comment: { diffHunk: '' }, thread: { line: 1 } }],
     ['the original line when pinned to another commit', tied({ ...at(63), commit: SHORT }), { thread: moved }],
   ];
