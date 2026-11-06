@@ -1318,7 +1318,12 @@ async function replyInThread(run, answered, target) {
 }
 async function replyInConversation(run, answered, target) {
 	const answeredAt = Date.parse(answered.createdAt);
-	const identical = run.data.comments.find((c) => c.kind === "issue" && sameLogin(c.author, run.viewer) && sameText(c.body, run.body) && Date.parse(c.createdAt) > answeredAt);
+	const answeredIndex = run.data.comments.indexOf(answered);
+	const identical = run.data.comments.find((c, index) => {
+		const createdAt = Date.parse(c.createdAt);
+		const after = createdAt > answeredAt || createdAt === answeredAt && index > answeredIndex;
+		return c.kind === "issue" && sameLogin(c.author, run.viewer) && sameText(c.body, run.body) && after;
+	});
 	if (identical) return unchanged(run, identical, target);
 	if (!run.options.now) throw new Error(NEEDS_NOW);
 	if (run.options.dryRun) return created(run, target, "posted");
@@ -3840,7 +3845,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+679b1ed-dirty`;
+	return `pr-comments ${VERSION}+deb2fcb`;
 }
 //#endregion
 //#region src/cli.ts
