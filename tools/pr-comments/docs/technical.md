@@ -43,7 +43,7 @@ Every module that changes a review is pure: it takes the review (and links) and 
 - Every other command opens an existing file. A missing file is `<path> does not exist`. Nothing is created as a side effect.
 - The file uses a rollback journal (`journal_mode = DELETE`). There is no `-wal` or `-shm` file. A `-journal` file exists only while a command writes.
 - `foreign_keys = ON` on every connection. The review tables are `STRICT`.
-- `PRAGMA user_version` holds the schema version, now 5 (`REVIEW_SCHEMA_VERSION`). There is no migration. An older database (version 4 included) is refused with `<path> was written by an older pr-comments (schema <n>); start again with "pr-comments init"`. A newer one is refused with `… was written by a newer pr-comments (schema <n>); update the tool`. A SQLite file without the review tables is `<path> is not a review database`.
+- `PRAGMA user_version` holds the schema version, now 5 (`REVIEW_SCHEMA_VERSION`). There is no cross-version migration (within schema 5, `savePullRequest` adds `pr_threads.original_start_line` if absent). An older database (version 4 included) is refused with `<path> was written by an older pr-comments (schema <n>); start again with "pr-comments init"`. A newer one is refused with `… was written by a newer pr-comments (schema <n>); update the tool`. A SQLite file without the review tables is `<path> is not a review database`.
 - Meta keys: `pull_request` (the connected pull request, canonical URL).
 
 ### 2.2 Tables
@@ -451,4 +451,4 @@ Tests (`pnpm test` runs `vitest run`; `pnpm typecheck` runs `tsc --noEmit`):
 - The text of a review verdict has no comment id, so it cannot be linked and `link pending` does not list it.
 - Only the head commit's check annotations are kept. After a push, run `pr sync` again.
 - A database is one writer at a time. A binary file cannot be merged: after a git conflict take one side and redo the other changes with the commands.
-- No migration. A database of an older schema must be started again with `init`.
+- No cross-version migration. A database of an older schema version must be started again with `init` (within schema 5, `pr sync` adds `pr_threads.original_start_line` if absent).
