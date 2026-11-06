@@ -211,8 +211,11 @@ const PULL_REQUEST = 'pull_request';
 const runGit = promisify(execFile);
 const EXCLUDE_RULE = '/.ai/review-with-docs/';
 const IGNORE_PROBES = [
+  '.ai/review-with-docs/',
+  '.ai/review-with-docs/probe',
   '.ai/review-with-docs/probe_review.md',
   '.ai/review-with-docs/probe_review.sqlite',
+  '.ai/review-with-docs/probe_review/round-1/probe',
   '.ai/review-with-docs/probe_review/round-1/probe.md',
 ];
 

@@ -728,6 +728,7 @@ describe('initReviewFile', () => {
       ['un-ignoring .ai/ to version it', '/.ai/\n!/.ai/\n'],
       ['un-ignoring .ai/ and *.md without un-ignoring .ai/review-with-docs/', '/.ai/\n!/.ai/\n!*.md\n'],
       ['markdown negation under .ai/review-with-docs/ without directory negation', '/.ai/review-with-docs/**\n!/.ai/review-with-docs/*.md\n'],
+      ['extension-only rules under .ai/review-with-docs/', '.ai/review-with-docs/**/*.md\n.ai/review-with-docs/**/*.sqlite\n'],
     ])('adds /.ai/review-with-docs/ to .git/info/exclude when .gitignore has %s', async (_name, gitignoreText) => {
       const excludePath = join(repo, '.git', 'info', 'exclude');
       await writeFile(join(repo, '.gitignore'), gitignoreText, 'utf8');
