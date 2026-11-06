@@ -1022,6 +1022,7 @@ describe('anchor conflicts with an existing comment', () => {
     ['an outdated range thread when both start and end match', tied(at(60, 63)), { thread: outdatedRange }],
     ['the same range', tied(at(20, 22)), { thread: { startLine: 20 } }],
     ['the same range when pinned to another commit', tied({ ...at(10, 20), commit: SHORT }), { thread: { startLine: 10, line: 20, originalLine: 20 } }],
+    ['a moved range when pinned to its original commit', tied({ ...at(10, 20), commit: SHORT }), { thread: { startLine: 15, line: 25, originalLine: 20 } }],
     ['a file-level thread', tied({ lines: undefined }), { comment: { diffHunk: '' }, thread: { line: 1 } }],
     ['the original line when pinned to another commit', tied({ ...at(63), commit: SHORT }), { thread: moved }],
   ];

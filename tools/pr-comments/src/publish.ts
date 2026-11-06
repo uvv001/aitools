@@ -242,10 +242,9 @@ function threadLines(thread: ReviewThread): LineRange | undefined {
 
 function originalLines(thread: ReviewThread): LineRange | undefined {
   if (thread.originalLine === null) return undefined;
-  if (thread.line !== null && thread.line !== thread.originalLine) {
-    return thread.startLine === null || thread.startLine === thread.line
-      ? { start: thread.originalLine, end: thread.originalLine }
-      : undefined;
+  if (thread.line !== null && thread.startLine !== null) {
+    const start = thread.originalLine - (thread.line - thread.startLine);
+    return start >= 1 ? { start, end: thread.originalLine } : undefined;
   }
   const isRange = thread.startLine !== null && thread.startLine !== thread.originalLine;
   return { start: isRange ? thread.startLine! : thread.originalLine, end: thread.originalLine };
