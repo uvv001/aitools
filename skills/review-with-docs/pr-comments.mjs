@@ -48,6 +48,28 @@ function annotationRef(app, path, startLine, endLine, message) {
 //#endregion
 //#region src/github.ts
 var AccessDeniedError = class extends Error {};
+function summarizeError(error) {
+	if (typeof error === "string") return error;
+	return error.message ?? [error.field, error.code].filter(Boolean).join(" ");
+}
+async function errorDetails(response) {
+	let body;
+	try {
+		body = await response.json();
+	} catch {
+		return "";
+	}
+	const errors = Array.isArray(body?.errors) ? body.errors.map(summarizeError).filter(Boolean).join(", ") : "";
+	return [body?.message, errors].filter(Boolean).join(": ");
+}
+async function httpFailure(response) {
+	const bodyDetails = await errorDetails(response);
+	const retryAfter = response.headers.get("retry-after")?.trim() || "";
+	const details = [bodyDetails, retryAfter ? `retry after ${/^\d+$/.test(retryAfter) ? `${retryAfter}s` : retryAfter}` : ""].filter(Boolean).join(": ");
+	const message = `GitHub API request failed: ${`${response.status} ${response.statusText}`.trim()}` + (details ? `: ${details}` : "");
+	const rateLimited = retryAfter !== "" || response.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(bodyDetails);
+	return response.status === 401 || response.status === 403 && !rateLimited ? new AccessDeniedError(message) : new Error(message);
+}
 function graphqlEndpoint(host) {
 	return host === "github.com" ? "https://api.github.com/graphql" : `https://${host}/api/graphql`;
 }
@@ -64,14 +86,11 @@ function createGraphQLClient(host, token, fetchImpl = fetch) {
 				variables
 			})
 		});
-		if (!response.ok) {
-			const message = `GitHub API request failed: ${response.status} ${response.statusText}`;
-			throw response.status === 401 || response.status === 403 ? new AccessDeniedError(message) : new Error(message);
-		}
+		if (!response.ok) throw await httpFailure(response);
 		const payload = await response.json();
 		if (payload.errors?.length) {
 			const message = `GitHub GraphQL errors: ${payload.errors.map((e) => e.message || (e.type ? `(${e.type}, no message)` : "(no message)")).join("; ")}`;
-			throw payload.errors.some((e) => e.type === "FORBIDDEN" || /Resource not accessible/.test(e.message)) ? new AccessDeniedError(message) : new Error(message);
+			throw !payload.errors.some((e) => e.type === "RATE_LIMITED" || /rate limit/i.test(e.message)) && payload.errors.some((e) => e.type === "FORBIDDEN" || /Resource not accessible/.test(e.message)) ? new AccessDeniedError(message) : new Error(message);
 		}
 		return payload.data;
 	};
@@ -800,25 +819,6 @@ function rightHunkRanges(patch) {
 function restBaseUrl(host) {
 	return host === "github.com" ? "https://api.github.com" : `https://${host}/api/v3`;
 }
-function summarizeError(error) {
-	if (typeof error === "string") return error;
-	return error.message ?? [error.field, error.code].filter(Boolean).join(" ");
-}
-async function errorDetails(response) {
-	let body;
-	try {
-		body = await response.json();
-	} catch {
-		return "";
-	}
-	const errors = Array.isArray(body?.errors) ? body.errors.map(summarizeError).filter(Boolean).join(", ") : "";
-	return [body?.message, errors].filter(Boolean).join(": ");
-}
-async function failure$1(response) {
-	const details = await errorDetails(response);
-	const message = `GitHub API request failed: ${`${response.status} ${response.statusText}`.trim()}` + (details ? `: ${details}` : "");
-	return response.status === 401 || response.status === 403 ? new AccessDeniedError(message) : new Error(message);
-}
 function createRestClient(host, token, fetchImpl = fetch) {
 	const baseUrl = restBaseUrl(host);
 	return async (method, path, body) => {
@@ -832,7 +832,7 @@ function createRestClient(host, token, fetchImpl = fetch) {
 			headers,
 			body: body === void 0 ? void 0 : JSON.stringify(body)
 		});
-		if (!response.ok) throw await failure$1(response);
+		if (!response.ok) throw await httpFailure(response);
 		const text = await response.text();
 		return text ? JSON.parse(text) : void 0;
 	};
@@ -3851,7 +3851,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+c442ce7-dirty`;
+	return `pr-comments ${VERSION}+12fe154`;
 }
 //#endregion
 //#region src/cli.ts
