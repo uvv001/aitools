@@ -85,6 +85,7 @@ interface ThreadNode {
   line: number | null;
   originalLine: number | null;
   startLine: number | null;
+  originalStartLine?: number | null;
   isResolved: boolean;
   isOutdated: boolean;
   comments: Connection<ReviewCommentNode>;
@@ -150,7 +151,7 @@ const ISSUE_COMMENT_FIELDS = 'id body createdAt updatedAt lastEditedAt url autho
 const REVIEW_FIELDS = 'id state body submittedAt lastEditedAt url author { login } commit { oid }';
 
 const THREAD_FIELDS = `
-  id path line originalLine startLine isResolved isOutdated
+  id path line originalLine startLine originalStartLine isResolved isOutdated
   comments(first: ${PAGE_SIZE}) { nodes {${REVIEW_COMMENT_FIELDS}} ${PAGE_INFO} }`;
 
 const PULL_REQUEST_QUERY = `
@@ -438,6 +439,7 @@ export async function fetchPullRequest(
       line: thread.line,
       originalLine: thread.originalLine,
       startLine: thread.startLine,
+      ...(thread.originalStartLine == null ? {} : { originalStartLine: thread.originalStartLine }),
       isResolved: thread.isResolved,
       isOutdated: thread.isOutdated,
     });

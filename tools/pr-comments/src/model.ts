@@ -33,6 +33,7 @@ export interface ReviewThread {
   line: number | null;
   originalLine: number | null;
   startLine: number | null;
+  originalStartLine?: number | null;
   isResolved: boolean;
   isOutdated: boolean;
 }

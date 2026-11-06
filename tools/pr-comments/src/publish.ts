@@ -242,12 +242,10 @@ function threadLines(thread: ReviewThread): LineRange | undefined {
 
 function originalLines(thread: ReviewThread): LineRange | undefined {
   if (thread.originalLine === null) return undefined;
-  if (thread.line !== null && thread.startLine !== null) {
-    const start = thread.originalLine - (thread.line - thread.startLine);
-    return start >= 1 ? { start, end: thread.originalLine } : undefined;
-  }
-  const isRange = thread.startLine !== null && thread.startLine !== thread.originalLine;
-  return { start: isRange ? thread.startLine! : thread.originalLine, end: thread.originalLine };
+  const fallbackStart =
+    (thread.line === null || thread.line === thread.originalLine) && thread.startLine !== null ? thread.startLine : thread.originalLine;
+  const start = thread.originalStartLine !== undefined ? (thread.originalStartLine ?? thread.originalLine) : fallbackStart;
+  return { start, end: thread.originalLine };
 }
 
 function explicitCommit(run: Run, comment: PublishComment): string | undefined {

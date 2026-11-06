@@ -66,7 +66,7 @@ The pull request half (the snapshot of the last `pr sync`):
 | --- | --- |
 | `pr_pull_requests` | The one pull request: host, owner, repo, number, title, body, state, author, base and head, head sha, URL, `created_at`, `fetched_at` |
 | `pr_reviews` | Reviews: author, state (`COMMENTED`, `PENDING`, …), body, times, commit, URL |
-| `pr_threads` | Review threads: path, `line`, `original_line`, `start_line`, `is_resolved`, `is_outdated` |
+| `pr_threads` | Review threads: path, `line`, `original_line`, `start_line`, `original_start_line`, `is_resolved`, `is_outdated` |
 | `pr_comments` | Review comments and conversation comments (`kind` is `review` or `issue`), with `ref` (see section 3), thread, review, reply-to, body, times, commits, diff hunk, URL |
 | `pr_check_runs` | Check runs of the head commit that have annotations |
 | `pr_check_annotations` | Their annotations, with `ref`, path, lines, `level`, title, message, raw details |

@@ -941,7 +941,7 @@ describe('adopting an identical comment', () => {
 
 describe('anchor conflicts with an existing comment', () => {
   const outdated = { line: null, startLine: null, isOutdated: true, originalLine: 63 };
-  const outdatedRange = { line: null, startLine: 60, isOutdated: true, originalLine: 63 };
+  const outdatedRange = { line: null, startLine: null, originalStartLine: 60, isOutdated: true, originalLine: 63 };
   // Re-mapped to line 56 at the head, but written at line 63 of its own commit.
   const moved = { line: 56, startLine: 56, originalLine: 63 };
 
@@ -1021,8 +1021,12 @@ describe('anchor conflicts with an existing comment', () => {
     ['an outdated thread when the file gives its original line', tied(at(63)), { thread: outdated }],
     ['an outdated range thread when both start and end match', tied(at(60, 63)), { thread: outdatedRange }],
     ['the same range', tied(at(20, 22)), { thread: { startLine: 20 } }],
-    ['the same range when pinned to another commit', tied({ ...at(10, 20), commit: SHORT }), { thread: { startLine: 10, line: 20, originalLine: 20 } }],
-    ['a moved range when pinned to its original commit', tied({ ...at(10, 20), commit: SHORT }), { thread: { startLine: 15, line: 25, originalLine: 20 } }],
+    ['the same range when pinned to another commit', tied({ ...at(10, 20), commit: SHORT }), { thread: { startLine: 10, originalStartLine: 10, line: 20, originalLine: 20 } }],
+    [
+      'a moved range whose head width changed when pinned to its original commit',
+      tied({ ...at(16, 19), commit: SHORT }),
+      { thread: { startLine: 16, originalStartLine: 16, line: 25, originalLine: 19 } },
+    ],
     ['a file-level thread', tied({ lines: undefined }), { comment: { diffHunk: '' }, thread: { line: 1 } }],
     ['the original line when pinned to another commit', tied({ ...at(63), commit: SHORT }), { thread: moved }],
   ];

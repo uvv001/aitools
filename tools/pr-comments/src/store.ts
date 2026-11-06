@@ -53,6 +53,7 @@ CREATE TABLE pr_threads (
   line INTEGER,
   original_line INTEGER,
   start_line INTEGER,
+  original_start_line INTEGER,
   is_resolved INTEGER NOT NULL,
   is_outdated INTEGER NOT NULL
 );
@@ -209,6 +210,7 @@ export function savePullRequest(db: DatabaseSync, data: PullRequestData): void {
         line: t.line,
         original_line: t.originalLine,
         start_line: t.startLine,
+        original_start_line: t.originalStartLine ?? null,
         is_resolved: t.isResolved ? 1 : 0,
         is_outdated: t.isOutdated ? 1 : 0,
       });
@@ -312,6 +314,7 @@ export function loadPullRequest(db: DatabaseSync): PullRequestData | undefined {
     line: t.line as number | null,
     originalLine: t.original_line as number | null,
     startLine: t.start_line as number | null,
+    ...(t.original_start_line == null ? {} : { originalStartLine: t.original_start_line as number }),
     isResolved: t.is_resolved === 1,
     isOutdated: t.is_outdated === 1,
   }));
