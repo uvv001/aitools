@@ -559,6 +559,25 @@ describe('a conversation comment', () => {
     expect(mutations).toEqual([]);
   });
 
+  it('adopts a later conversation reply in the same second and ignores an earlier one in the same second', async () => {
+    const sameSecond = '2026-01-02T10:00:00Z';
+    const after = await reply({
+      data: conversationData([ownConversationReply(6, { createdAt: sameSecond })]),
+      commentRef: 'c5',
+      options: { now: true },
+    });
+    expect(after.result).toMatchObject({ action: 'unchanged', comment: 'c6', message: IDENTICAL });
+    expect(after.mutations).toEqual([]);
+
+    const before = await reply({
+      data: pullRequestData({ comments: [ownConversationReply(3, { createdAt: sameSecond }), issueComment(5)] }),
+      commentRef: 'c5',
+      options: { now: true },
+    });
+    expect(before.result.action).toBe('created');
+    expect(before.mutations.map((m) => m.op)).toEqual(['addComment']);
+  });
+
   it('is unchanged without now too, because nothing would be written', async () => {
     const { result } = await reply({ data: conversationData([ownConversationReply(6)]), commentRef: 'c5' });
 

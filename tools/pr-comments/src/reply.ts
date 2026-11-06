@@ -208,13 +208,12 @@ async function replyInThread(run: Run, answered: Comment, target: ReplyTarget): 
 
 async function replyInConversation(run: Run, answered: Comment, target: ReplyTarget): Promise<ReplyResult> {
   const answeredAt = Date.parse(answered.createdAt);
-  const identical = run.data.comments.find(
-    (c) =>
-      c.kind === 'issue' &&
-      sameLogin(c.author, run.viewer) &&
-      sameText(c.body, run.body) &&
-      Date.parse(c.createdAt) > answeredAt,
-  );
+  const answeredIndex = run.data.comments.indexOf(answered);
+  const identical = run.data.comments.find((c, index) => {
+    const createdAt = Date.parse(c.createdAt);
+    const after = createdAt > answeredAt || (createdAt === answeredAt && index > answeredIndex);
+    return c.kind === 'issue' && sameLogin(c.author, run.viewer) && sameText(c.body, run.body) && after;
+  });
   if (identical) return unchanged(run, identical, target);
   if (!run.options.now) throw new Error(NEEDS_NOW);
   if (run.options.dryRun) return created(run, target, 'posted');
