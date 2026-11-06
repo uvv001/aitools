@@ -66,7 +66,8 @@ description file per [fleet.md](fleet.md) for each concern no finding covers
 yet, a refuted one included, and reply with one classification per pending,
 unlinked-reply, or edited linked ref (`own <F>`, `duplicate <F>`,
 `counter-evidence <F> '<counter-evidence>'`, `note '<reason>'`, or the new
-finding's reply line per [fleet.md](fleet.md)) for the orchestrator to record.
+finding's reply line per [fleet.md](fleet.md)), plus its edited-comment marker
+where its header shows `edited`, for the orchestrator to record.
 
 ## Publish
 
