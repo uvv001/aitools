@@ -3007,8 +3007,11 @@ const PULL_REQUEST = "pull_request";
 const runGit = promisify(execFile);
 const EXCLUDE_RULE = "/.ai/review-with-docs/";
 const IGNORE_PROBES = [
+	".ai/review-with-docs/",
+	".ai/review-with-docs/probe",
 	".ai/review-with-docs/probe_review.md",
 	".ai/review-with-docs/probe_review.sqlite",
+	".ai/review-with-docs/probe_review/round-1/probe",
 	".ai/review-with-docs/probe_review/round-1/probe.md"
 ];
 function isInsideReviewFolder(targetDir, repoRoot) {
@@ -3837,7 +3840,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+2b1029d`;
+	return `pr-comments ${VERSION}+375a487`;
 }
 //#endregion
 //#region src/cli.ts
