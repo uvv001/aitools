@@ -538,6 +538,29 @@ describe('createGraphQLClient', () => {
     expect(await failure(failing(() => okResponse({ errors: [{ message: 'bad field' }] })))).not.toBeInstanceOf(AccessDeniedError);
   });
 
+  it('keeps HTTP 403 rate limits as plain errors with the body message and Retry-After', async () => {
+    const failing = (response: () => Response) => createGraphQLClient('ghe.example.com', 's', (async () => response()) as typeof fetch)('q', {});
+    const failure = (promise: Promise<unknown>) => promise.catch((e: unknown) => e as Error);
+
+    const secondary = await failure(
+      failing(() =>
+        new Response(
+          JSON.stringify({ message: 'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' }),
+          { status: 403, statusText: 'Forbidden', headers: { 'Content-Type': 'application/json', 'Retry-After': '60' } },
+        ),
+      ),
+    );
+    expect(secondary).not.toBeInstanceOf(AccessDeniedError);
+    expect(secondary.message).toBe(
+      'GitHub API request failed: 403 Forbidden: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.: retry after 60s',
+    );
+
+    const exhausted = await failure(
+      failing(() => new Response('', { status: 403, statusText: 'Forbidden', headers: { 'x-ratelimit-remaining': '0' } })),
+    );
+    expect(exhausted).not.toBeInstanceOf(AccessDeniedError);
+  });
+
   it('treats an unresolvable repository as refused access', async () => {
     const client: GraphQLClient = async () => {
       throw new Error("GitHub GraphQL errors: Could not resolve to a Repository with the name 'acme/widgets'.");

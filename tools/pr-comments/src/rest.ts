@@ -1,4 +1,4 @@
-import { AccessDeniedError } from './github.ts';
+import { httpFailure } from './github.ts';
 
 export type RestMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
@@ -7,34 +7,6 @@ export type RestClient = <T>(method: RestMethod, path: string, body?: unknown) =
 
 export function restBaseUrl(host: string): string {
   return host === 'github.com' ? 'https://api.github.com' : `https://${host}/api/v3`;
-}
-
-interface ErrorBody {
-  message?: string;
-  errors?: (string | { message?: string; field?: string; code?: string })[];
-}
-
-function summarizeError(error: NonNullable<ErrorBody['errors']>[number]): string {
-  if (typeof error === 'string') return error;
-  return error.message ?? [error.field, error.code].filter(Boolean).join(' ');
-}
-
-async function errorDetails(response: Response): Promise<string> {
-  let body: ErrorBody | null;
-  try {
-    body = (await response.json()) as ErrorBody | null;
-  } catch {
-    return '';
-  }
-  const errors = Array.isArray(body?.errors) ? body.errors.map(summarizeError).filter(Boolean).join(', ') : '';
-  return [body?.message, errors].filter(Boolean).join(': ');
-}
-
-async function failure(response: Response): Promise<Error> {
-  const details = await errorDetails(response);
-  const status = `${response.status} ${response.statusText}`.trim();
-  const message = `GitHub API request failed: ${status}` + (details ? `: ${details}` : '');
-  return response.status === 401 || response.status === 403 ? new AccessDeniedError(message) : new Error(message);
 }
 
 export function createRestClient(host: string, token: string, fetchImpl: typeof fetch = fetch): RestClient {
@@ -47,7 +19,7 @@ export function createRestClient(host: string, token: string, fetchImpl: typeof 
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (!response.ok) throw await failure(response);
+    if (!response.ok) throw await httpFailure(response);
     const text = await response.text();
     return (text ? JSON.parse(text) : undefined) as T;
   };

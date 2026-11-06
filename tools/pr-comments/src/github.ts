@@ -7,6 +7,40 @@ export type GraphQLClient = <T>(query: string, variables: Record<string, unknown
 // The token was rejected or cannot see the pull request, so another token may succeed.
 export class AccessDeniedError extends Error {}
 
+interface ErrorBody {
+  message?: string;
+  errors?: (string | { message?: string; field?: string; code?: string })[];
+}
+
+function summarizeError(error: NonNullable<ErrorBody['errors']>[number]): string {
+  if (typeof error === 'string') return error;
+  return error.message ?? [error.field, error.code].filter(Boolean).join(' ');
+}
+
+async function errorDetails(response: Response): Promise<string> {
+  let body: ErrorBody | null;
+  try {
+    body = (await response.json()) as ErrorBody | null;
+  } catch {
+    return '';
+  }
+  const errors = Array.isArray(body?.errors) ? body.errors.map(summarizeError).filter(Boolean).join(', ') : '';
+  return [body?.message, errors].filter(Boolean).join(': ');
+}
+
+export async function httpFailure(response: Response): Promise<Error> {
+  const bodyDetails = await errorDetails(response);
+  const retryAfter = response.headers.get('retry-after')?.trim() || '';
+  const retryText = retryAfter ? `retry after ${/^\d+$/.test(retryAfter) ? `${retryAfter}s` : retryAfter}` : '';
+  const details = [bodyDetails, retryText].filter(Boolean).join(': ');
+  const status = `${response.status} ${response.statusText}`.trim();
+  const message = `GitHub API request failed: ${status}` + (details ? `: ${details}` : '');
+  const rateLimited =
+    retryAfter !== '' || response.headers.get('x-ratelimit-remaining') === '0' || /rate limit/i.test(bodyDetails);
+  const denied = response.status === 401 || (response.status === 403 && !rateLimited);
+  return denied ? new AccessDeniedError(message) : new Error(message);
+}
+
 export function graphqlEndpoint(host: string): string {
   return host === 'github.com' ? 'https://api.github.com/graphql' : `https://${host}/api/graphql`;
 }
@@ -18,16 +52,15 @@ export function createGraphQLClient(host: string, token: string, fetchImpl: type
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables }),
     });
-    if (!response.ok) {
-      const message = `GitHub API request failed: ${response.status} ${response.statusText}`;
-      throw response.status === 401 || response.status === 403 ? new AccessDeniedError(message) : new Error(message);
-    }
+    if (!response.ok) throw await httpFailure(response);
     const payload = (await response.json()) as { data?: T; errors?: { message: string; type?: string }[] };
     if (payload.errors?.length) {
       // GitHub sometimes refuses with an empty message (UNPROCESSABLE for a body it dislikes).
       const described = payload.errors.map((e) => e.message || (e.type ? `(${e.type}, no message)` : '(no message)'));
       const message = `GitHub GraphQL errors: ${described.join('; ')}`;
-      const denied = payload.errors.some((e) => e.type === 'FORBIDDEN' || /Resource not accessible/.test(e.message));
+      const rateLimited = payload.errors.some((e) => e.type === 'RATE_LIMITED' || /rate limit/i.test(e.message));
+      const denied =
+        !rateLimited && payload.errors.some((e) => e.type === 'FORBIDDEN' || /Resource not accessible/.test(e.message));
       throw denied ? new AccessDeniedError(message) : new Error(message);
     }
     return payload.data as T;

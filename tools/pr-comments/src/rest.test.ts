@@ -130,6 +130,16 @@ describe('createRestClient', () => {
     const forbidden = await failure(() => json({ message: 'Resource not accessible by personal access token' }, 403, 'Forbidden'));
     expect(forbidden).toBeInstanceOf(AccessDeniedError);
     expect(forbidden.message).toBe('GitHub API request failed: 403 Forbidden: Resource not accessible by personal access token');
+
+    const rateLimited = await failure(() =>
+      new Response(JSON.stringify({ message: 'API rate limit exceeded' }), {
+        status: 403,
+        statusText: 'Forbidden',
+        headers: { 'Content-Type': 'application/json', 'Retry-After': '120' },
+      }),
+    );
+    expect(rateLimited).not.toBeInstanceOf(AccessDeniedError);
+    expect(rateLimited.message).toBe('GitHub API request failed: 403 Forbidden: API rate limit exceeded: retry after 120s');
   });
 
   it('keeps 404 and other failures as plain errors', async () => {
