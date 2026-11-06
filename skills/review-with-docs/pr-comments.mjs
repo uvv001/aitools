@@ -536,6 +536,14 @@ async function resolveRevision(revision, cwd) {
 	return hash;
 }
 //#endregion
+//#region src/model.ts
+function threadRange(thread, separator = "-") {
+	const end = thread.line ?? thread.originalLine;
+	if (end === null) return void 0;
+	const start = thread.line !== null ? thread.startLine : thread.originalStartLine ?? thread.startLine;
+	return start !== null && start !== void 0 && start !== end ? `${start}${separator}${end}` : `${end}`;
+}
+//#endregion
 //#region src/markdown.ts
 const REVIEW_STATE_LABELS = {
 	APPROVED: "approved",
@@ -563,9 +571,9 @@ function listItem(header, body, children = []) {
 	return parts.join("\n\n");
 }
 function lineLabel(thread) {
-	const end = thread.line ?? thread.originalLine;
-	if (end === null) return "File";
-	const span = thread.startLine !== null && thread.startLine !== end ? `s ${thread.startLine}–${end}` : ` ${end}`;
+	const range = threadRange(thread, "–");
+	if (range === void 0) return "File";
+	const span = range.includes("–") ? `s ${range}` : ` ${range}`;
 	return `${thread.line === null ? "Original line" : "Line"}${span}`;
 }
 function commentHeader(comment, isContext = false) {
@@ -1227,9 +1235,8 @@ const messageOf = (error) => error instanceof Error ? error.message : String(err
 function placeOf(data, thread) {
 	if (!thread) return {};
 	const root = data.comments.filter((c) => c.threadId === thread.id).sort((a, b) => (a.threadPosition ?? 0) - (b.threadPosition ?? 0))[0];
-	const end = thread.line ?? thread.originalLine;
-	const wholeFile = end === null || root?.diffHunk === "";
-	const range = thread.startLine !== null && thread.startLine !== end ? `${thread.startLine}-${end}` : `${end}`;
+	const range = threadRange(thread);
+	const wholeFile = range === void 0 || root?.diffHunk === "";
 	return {
 		path: thread.path,
 		...wholeFile ? {} : { lines: range },
@@ -3299,10 +3306,8 @@ function indexThreads(data) {
 		placeOf(comment) {
 			const thread = comment.kind === "review" && comment.threadId !== null ? threads.get(comment.threadId) : void 0;
 			if (!thread) return {};
-			const end = thread.line ?? thread.originalLine;
-			const wholeFile = end === null || threadOf(comment)[0]?.diffHunk === "";
-			const range = thread.startLine !== null && thread.startLine !== end ? `${thread.startLine}-${end}` : `${end}`;
-			const lines = wholeFile ? void 0 : range;
+			const range = threadRange(thread);
+			const lines = range === void 0 || threadOf(comment)[0]?.diffHunk === "" ? void 0 : range;
 			return {
 				path: thread.path,
 				...lines === void 0 ? {} : { lines },
@@ -3832,7 +3837,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+eb370f5`;
+	return `pr-comments ${VERSION}+2b1029d`;
 }
 //#endregion
 //#region src/cli.ts
