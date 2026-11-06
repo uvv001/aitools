@@ -67,7 +67,7 @@ export function samplePullRequest(): PullRequestData {
     ],
     threads: [
       { id: 't-retry', path: 'src/retry.ts', line: 42, originalLine: 42, startLine: null, isResolved: true, isOutdated: false },
-      { id: 't-doc', path: 'docs/readme.md', line: null, originalLine: 7, startLine: 5, isResolved: false, isOutdated: true },
+      { id: 't-doc', path: 'docs/readme.md', line: null, originalLine: 7, startLine: null, originalStartLine: 5, isResolved: false, isOutdated: true },
     ],
     comments: [
       {

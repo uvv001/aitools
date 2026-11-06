@@ -257,7 +257,7 @@ describe('pendingItems: the place of a review comment', () => {
       thread('t-single', { line: 7 }),
       thread('t-same', { line: 7, startLine: 7 }),
       thread('t-range', { line: 12, startLine: 9 }),
-      thread('t-old-range', { line: null, originalLine: 30, startLine: 25, isOutdated: true }),
+      thread('t-old-range', { line: null, originalLine: 30, startLine: null, originalStartLine: 25, isOutdated: true }),
     ]);
     expect(items.map(({ lines }) => lines)).toEqual(['7', '7', '9-12', '25-30']);
   });

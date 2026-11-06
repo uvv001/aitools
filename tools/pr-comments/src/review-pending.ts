@@ -1,5 +1,5 @@
 import { commentRefFromUrl } from './comment-ref.ts';
-import type { AnnotationLevel, CheckAnnotation, CheckRun, Comment, PullRequestData } from './model.ts';
+import { threadRange, type AnnotationLevel, type CheckAnnotation, type CheckRun, type Comment, type PullRequestData } from './model.ts';
 import type { CommentLink } from './review-links.ts';
 
 // A comment that nothing in the review links to yet: the root of a thread whose root is not linked, or a
@@ -67,9 +67,8 @@ function indexThreads(data: PullRequestData) {
       if (!thread) return {};
       // As markdown.ts: the line, or the original one of an outdated thread; GitHub gives a file-level thread line 1
       // but no diff hunk.
-      const end = thread.line ?? thread.originalLine;
-      const wholeFile = end === null || threadOf(comment)[0]?.diffHunk === '';
-      const range = thread.startLine !== null && thread.startLine !== end ? `${thread.startLine}-${end}` : `${end}`;
+      const range = threadRange(thread);
+      const wholeFile = range === undefined || threadOf(comment)[0]?.diffHunk === '';
       const lines = wholeFile ? undefined : range;
       return {
         path: thread.path,

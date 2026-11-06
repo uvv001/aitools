@@ -2,7 +2,7 @@ import { commentRefFromUrl } from './comment-ref.ts';
 import type { TokenContext } from './download.ts';
 import { AccessDeniedError, fetchPullRequest } from './github.ts';
 import type { GraphQLClient } from './github.ts';
-import type { Comment, PullRequestData, ReviewThread } from './model.ts';
+import { threadRange, type Comment, type PullRequestData, type ReviewThread } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
 
 // What the review wants said to a PR comment that duplicates one of its findings: the text goes in as a reply to
@@ -119,9 +119,8 @@ function placeOf(data: PullRequestData, thread: ReviewThread | undefined): Parti
   const root = data.comments
     .filter((c) => c.threadId === thread.id)
     .sort((a, b) => (a.threadPosition ?? 0) - (b.threadPosition ?? 0))[0];
-  const end = thread.line ?? thread.originalLine;
-  const wholeFile = end === null || root?.diffHunk === '';
-  const range = thread.startLine !== null && thread.startLine !== end ? `${thread.startLine}-${end}` : `${end}`;
+  const range = threadRange(thread);
+  const wholeFile = range === undefined || root?.diffHunk === '';
   return { path: thread.path, ...(wholeFile ? {} : { lines: range }), resolved: thread.isResolved };
 }
 

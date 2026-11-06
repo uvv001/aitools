@@ -38,6 +38,13 @@ export interface ReviewThread {
   isOutdated: boolean;
 }
 
+export function threadRange(thread: ReviewThread, separator = '-'): string | undefined {
+  const end = thread.line ?? thread.originalLine;
+  if (end === null) return undefined;
+  const start = thread.line !== null ? thread.startLine : (thread.originalStartLine ?? thread.startLine);
+  return start !== null && start !== undefined && start !== end ? `${start}${separator}${end}` : `${end}`;
+}
+
 export type CommentKind = 'issue' | 'review';
 
 export interface Comment {

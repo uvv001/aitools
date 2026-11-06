@@ -1,5 +1,5 @@
 import { commentRefFromUrl } from './comment-ref.ts';
-import type { CheckAnnotation, CheckRun, Comment, PullRequestData, Review, ReviewThread } from './model.ts';
+import { threadRange, type CheckAnnotation, type CheckRun, type Comment, type PullRequestData, type Review, type ReviewThread } from './model.ts';
 
 export interface RenderOptions {
   authors?: string[];
@@ -46,9 +46,9 @@ function listItem(header: string, body: string | undefined, children: string[] =
 }
 
 function lineLabel(thread: ReviewThread): string {
-  const end = thread.line ?? thread.originalLine;
-  if (end === null) return 'File';
-  const span = thread.startLine !== null && thread.startLine !== end ? `s ${thread.startLine}–${end}` : ` ${end}`;
+  const range = threadRange(thread, '–');
+  if (range === undefined) return 'File';
+  const span = range.includes('–') ? `s ${range}` : ` ${range}`;
   return `${thread.line === null ? 'Original line' : 'Line'}${span}`;
 }
 
