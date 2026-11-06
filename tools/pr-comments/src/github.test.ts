@@ -34,12 +34,13 @@ const reviewComment = (id: string, replyTo: string | null = null) => ({
   pullRequestReview: { id: 'review-1' },
 });
 
-const thread = (id: string, comments: ReturnType<typeof page>) => ({
+const thread = (id: string, comments: ReturnType<typeof page>, originalStartLine: number | null = null) => ({
   id,
   path: 'src/a.ts',
   line: 10,
   originalLine: 8,
   startLine: null,
+  originalStartLine,
   isResolved: false,
   isOutdated: true,
   comments,
@@ -198,7 +199,7 @@ describe('fetchPullRequest', () => {
       pullRequest: prNode,
       threads: [
         page([
-          thread('t1', page([reviewComment('rc1'), reviewComment('rc2', 'rc1')], 'thread-cursor')),
+          thread('t1', page([reviewComment('rc1'), reviewComment('rc2', 'rc1')], 'thread-cursor'), 5),
           thread('t2', page([reviewComment('rc4')])),
         ]),
       ],
@@ -207,7 +208,7 @@ describe('fetchPullRequest', () => {
     const { threads, comments } = await fetchPullRequest(client, ref);
 
     expect(threads).toEqual([
-      { id: 't1', path: 'src/a.ts', line: 10, originalLine: 8, startLine: null, isResolved: false, isOutdated: true },
+      { id: 't1', path: 'src/a.ts', line: 10, originalLine: 8, startLine: null, originalStartLine: 5, isResolved: false, isOutdated: true },
       { id: 't2', path: 'src/a.ts', line: 10, originalLine: 8, startLine: null, isResolved: false, isOutdated: true },
     ]);
     expect(comments.map((c) => [c.id, c.threadId, c.threadPosition, c.replyToId])).toEqual([

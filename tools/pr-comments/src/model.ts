@@ -33,7 +33,7 @@ export interface ReviewThread {
   line: number | null;
   originalLine: number | null;
   startLine: number | null;
-  originalStartLine?: number | null;
+  originalStartLine?: number;
   isResolved: boolean;
   isOutdated: boolean;
 }
@@ -42,7 +42,7 @@ export function threadRange(thread: ReviewThread, separator = '-'): string | und
   const end = thread.line ?? thread.originalLine;
   if (end === null) return undefined;
   const start = thread.line !== null ? thread.startLine : (thread.originalStartLine ?? thread.startLine);
-  return start !== null && start !== undefined && start !== end ? `${start}${separator}${end}` : `${end}`;
+  return start !== null && start !== end ? `${start}${separator}${end}` : `${end}`;
 }
 
 export type CommentKind = 'issue' | 'review';

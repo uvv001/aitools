@@ -244,7 +244,7 @@ function originalLines(thread: ReviewThread): LineRange | undefined {
   if (thread.originalLine === null) return undefined;
   const fallbackStart =
     (thread.line === null || thread.line === thread.originalLine) && thread.startLine !== null ? thread.startLine : thread.originalLine;
-  const start = thread.originalStartLine !== undefined ? (thread.originalStartLine ?? thread.originalLine) : fallbackStart;
+  const start = thread.originalStartLine ?? fallbackStart;
   return { start, end: thread.originalLine };
 }
 
