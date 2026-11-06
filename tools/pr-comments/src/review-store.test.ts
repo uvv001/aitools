@@ -101,13 +101,22 @@ describe('openReviewDb', () => {
     }
   });
 
-  it('names the path when SQLite cannot open it', () => {
+  it('opens a database whose path is longer than 255 characters', () => {
     const pad = Math.max(20, 248 - dir.length - '/r.sqlite'.length);
     const longPath = join(dir, 'a'.repeat(pad), 'r.sqlite');
     expect(`${longPath}.12345678.tmp`.length).toBeGreaterThan(255);
     const db = openReviewDb(`${longPath}.12345678.tmp`, 'create');
     expect(pragma(db, 'user_version')).toBe(REVIEW_SCHEMA_VERSION);
     db.close();
+  });
+
+  it('names the path when SQLite cannot open it', () => {
+    const path = reviewFile();
+    vi.mocked(DatabaseSync).mockImplementationOnce(function () {
+      throw Object.assign(new Error('unable to open database file'), { errcode: 14 });
+    });
+    expect(() => openReviewDb(path, 'create')).toThrow(new Error(`cannot open ${path}: unable to open database file`));
+    expect(readdirSync(dir)).toEqual([]);
   });
 
   it('removes the file it created when the database cannot be opened, and only then', () => {
