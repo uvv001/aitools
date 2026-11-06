@@ -138,12 +138,12 @@ With no match, step 1 starts a new review.
    findings the user chose to hold back or whose refused post is the user's
    call, `link pending` prints nothing, every reply ref that
    `report comments` shows in a linked thread has a `link` line in
-   `report dump`, every linked comment's `edited <timestamp>` in
-   `report comments` and the verdict marker ([pull-request.md](pull-request.md))
-   of every nonempty submitted review verdict body that raises or addresses a
-   concern appear in `report dump`, with a PR-comment dispatch the index shows
-   the tier bound of [fleet.md](fleet.md), and the user knows the pending
-   review waits for their submit.
+   `report dump`, every edited linked comment's `<ref> edited <timestamp>`
+   marker and the verdict marker ([pull-request.md](pull-request.md)) of every
+   nonempty submitted review verdict body that raises or addresses a concern
+   appear in `report dump`, with a PR-comment dispatch the index shows the
+   tier bound of [fleet.md](fleet.md), and the user knows the pending review
+   waits for their submit.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR. A pull
    request target is synced first (`pr sync`, then

@@ -26,12 +26,12 @@ whose **verdict marker** — `<review-url> (<timestamp>)` from the `[link]` URL
 and `edited` (or submit) timestamp that `report comments` prints for the
 review (skip a `pending` review until submitted) — does not yet appear in
 `report dump` and, on a re-sync, for unlinked replies in already linked
-threads and for already linked comments whose `edited <timestamp>` in
-`report comments` does not yet appear in `report dump` (`report dump` lists
-every linked ref, note, and finding update). Then classify each item (`link
-remove <ref>` first when an edited linked comment's classification changes, and
-include `edited <timestamp>` in `--note` or `finding update`) and record it
-from the orchestrator:
+threads and for already linked comments whose `<ref> edited <timestamp>`
+marker (from `report comments`) does not yet appear in `report dump` (`report
+dump` lists every linked ref, note, and finding update). Then classify each
+item (`link remove <ref>` first for an edited linked comment, and include
+`<ref> edited <timestamp>` in `--note`, the `link note` reason, or `finding
+update`) and record it from the orchestrator:
 
 | The comment, annotation, or review verdict body | Command |
 |---|---|
@@ -52,18 +52,18 @@ counter-evidence recorded there) for the user to triage. `link remove <ref>`
 undoes a link.
 
 Past a handful of refs to read, the orchestrator reads the review verdict
-bodies and slices the pending and linked-thread refs across parallel agents
-(each given its model, the shared brief, and the read-only contract per
-[fleet.md](fleet.md)) that run
+bodies and slices the pending, linked-thread, and edited linked refs across
+parallel agents (each given its model, the shared brief, and the read-only
+contract per [fleet.md](fleet.md)) that run
 `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`
 in the reviewed repository, read the comments against the findings the review
 carries (listed as in the Later rounds of [fleet.md](fleet.md)), the already
 linked refs, the user's login, and the table and the paragraph above, write a
 description file per [fleet.md](fleet.md) for each concern no finding covers
-yet, a refuted one included, and reply with one classification per unlinked
-ref (`own <F>`, `duplicate <F>`, `counter-evidence <F> '<counter-evidence>'`,
-`note '<reason>'`, or the new finding's reply line per [fleet.md](fleet.md))
-for the orchestrator to record.
+yet, a refuted one included, and reply with one classification per pending,
+unlinked-reply, or edited linked ref (`own <F>`, `duplicate <F>`,
+`counter-evidence <F> '<counter-evidence>'`, `note '<reason>'`, or the new
+finding's reply line per [fleet.md](fleet.md)) for the orchestrator to record.
 
 ## Publish
 
