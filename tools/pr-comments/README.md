@@ -177,7 +177,7 @@ pr-comments report comments --author bob --out .ai/review-with-docs/pr-42_commen
 Wrote .ai/review-with-docs/pr-42_comments.md
 ```
 
-`report render` writes the review report next to the database, and prints `created`, `updated` or `unchanged` and the path. `report comments` writes the pull request as markdown (description, reviews, threads, check annotations), to the screen or to a file.
+`report render` writes the review report next to the database, and prints `created`, `updated` or `unchanged` and the path. `report comments` writes the pull request as markdown (comments, reviews, threads, check annotations), to the screen or to a file.
 
 **11. Next round.** The author pushes. Sync again, open a new round, and see what is new:
 
@@ -394,7 +394,7 @@ pr-comments report render --db $DB
 
 The default file is next to the database (`<name>.md`). `--out` writes it elsewhere.
 
-**`report comments`**: writes the downloaded pull request as markdown: the description, the conversation, the review threads with code, and the check annotations. It goes to the screen unless `--out` is given. Run `pr sync` first.
+**`report comments`**: writes the downloaded pull request as markdown: the conversation, the review threads with code, and the check annotations. It goes to the screen unless `--out` is given. Run `pr sync` first.
 
 ```
 pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] --db <file.sqlite>
