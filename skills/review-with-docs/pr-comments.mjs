@@ -541,7 +541,7 @@ function threadRange(thread, separator = "-") {
 	const end = thread.line ?? thread.originalLine;
 	if (end === null) return void 0;
 	const start = thread.line !== null ? thread.startLine : thread.originalStartLine ?? thread.startLine;
-	return start !== null && start !== void 0 && start !== end ? `${start}${separator}${end}` : `${end}`;
+	return start !== null && start !== end ? `${start}${separator}${end}` : `${end}`;
 }
 //#endregion
 //#region src/markdown.ts
@@ -960,7 +960,7 @@ function originalLines(thread) {
 	if (thread.originalLine === null) return void 0;
 	const fallbackStart = (thread.line === null || thread.line === thread.originalLine) && thread.startLine !== null ? thread.startLine : thread.originalLine;
 	return {
-		start: thread.originalStartLine !== void 0 ? thread.originalStartLine ?? thread.originalLine : fallbackStart,
+		start: thread.originalStartLine ?? fallbackStart,
 		end: thread.originalLine
 	};
 }
@@ -3840,7 +3840,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+375a487`;
+	return `pr-comments ${VERSION}+fea31b7`;
 }
 //#endregion
 //#region src/cli.ts
