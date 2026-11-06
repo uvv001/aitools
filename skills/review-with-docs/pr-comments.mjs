@@ -992,16 +992,16 @@ function describeLines(run, existing, thread, comment) {
 	if (target) return formatLines(target);
 	return thread.originalLine === null ? void 0 : `${thread.originalLine}`;
 }
-function describePlace({ path, lines }) {
+function describePlace({ path, lines }, commitSuffix = "") {
 	if (path === void 0) return "the conversation";
-	return lines ? `${path}:${formatLines(lines)}` : path;
+	return `${lines ? `${path}:${formatLines(lines)}` : path}${commitSuffix}`;
 }
-function describeAnchor(run, existing, comment) {
+function describeAnchor(run, existing, comment, commitSuffix = "") {
 	if (existing.kind === "issue") return "the conversation";
 	const thread = run.data.threads.find((t) => t.id === existing.threadId);
 	if (!thread) return "an unknown place in the diff";
 	const lines = describeLines(run, existing, thread, comment);
-	return lines ? `${thread.path}:${lines}` : thread.path;
+	return `${lines ? `${thread.path}:${lines}` : thread.path}${commitSuffix}`;
 }
 const isPending$1 = (run, comment) => run.data.reviews.find((r) => r.id === comment.reviewId)?.state === "PENDING";
 async function findIdentical(run, comment, body) {
@@ -1037,8 +1037,15 @@ function existingFields(run, existing, ref) {
 	};
 }
 async function publishExisting(run, comment, existing, ref, body) {
+	const samePlace = sameAnchor(run, existing, comment);
 	const pinned = comment.path !== void 0 && existing.kind === "review" ? explicitCommit(run, comment) : void 0;
-	if (!sameAnchor(run, existing, comment, pinned && sameAnchor(run, existing, comment) ? await resolveCommit(run, pinned) : void 0)) throw new OwnCommentError(`comment ${ref} is on ${describeAnchor(run, existing, comment)}, the finding says ${describePlace(comment)}; an existing comment cannot be moved`, "moved");
+	const pinnedOid = pinned && samePlace ? await resolveCommit(run, pinned) : void 0;
+	if (!sameAnchor(run, existing, comment, pinnedOid)) {
+		const existingCommit = existing.originalCommitSha ?? existing.commitSha;
+		const oldCommit = samePlace && existingCommit ? `@${existingCommit.slice(0, 7)}` : "";
+		const newCommit = samePlace && pinnedOid ? `@${pinnedOid.slice(0, 7)}` : "";
+		throw new OwnCommentError(`comment ${ref} is on ${describeAnchor(run, existing, comment, oldCommit)}, the finding says ${describePlace(comment, newCommit)}; an existing comment cannot be moved`, "moved");
+	}
 	if (run.options.now && isPending$1(run, existing)) throw new Error(pendingCannotBeNow(ref));
 	const fields = existingFields(run, existing, ref);
 	if (sameText$1(existing.body, body)) return outcome(run, comment, "unchanged", fields);
@@ -3824,7 +3831,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+610fad4`;
+	return `pr-comments ${VERSION}+5ba06a4-dirty`;
 }
 //#endregion
 //#region src/cli.ts
