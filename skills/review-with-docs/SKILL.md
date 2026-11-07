@@ -248,8 +248,10 @@ more. It is laid out as:
   only changes it: GitHub takes a comment only inside a diff hunk.
 - The explanation, the snippet in a closed code fence, the suggested fix.
 - Each further occurrence gets its own anchor line and snippet.
-- Headings (`#`) stay inside code fences, and links stay absolute: a
-  relative link points into the review, which the PR's author cannot open.
+- Headings (a `#` line, or a text line underlined with `===` or `---`) stay
+  inside code fences; put a blank line above a `---` rule. Links stay
+  absolute: a relative link points into the review, which the PR's author
+  cannot open.
 
 Verify before claiming: run the test, trace the call path, measure the value.
 An assumption reaches the review along one of two paths — verified (a case
