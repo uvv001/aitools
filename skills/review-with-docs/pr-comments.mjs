@@ -1917,7 +1917,7 @@ const QUOTE_LINE = /^ {0,3}>/u;
 const LIST_ITEM_WITH_CONTENT = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S/u;
 const EMPTY_LIST_ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]*$/u;
 const INTERRUPTS_PARAGRAPH = /^ {0,3}(?:(?:[-*+]|0{0,8}1[.)])[ \t]+\S|>)/u;
-const HTML_BLOCK_TAG = /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|\/?>|$)/iu;
+const HTML_BLOCK_TAG = /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t][^>]*)?\/?>/iu;
 const HTML_INLINE_LINE = /^ {0,3}<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*)>[ \t]*$/u;
 const LINK_DEFINITION = /^ {0,3}\[[^\]]+\]:[ \t]*(?:<[^<>\r\n]*>|[^\s<>]+)(?:[ \t]+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\([^()]*\)))?[ \t]*$/u;
 function openingHtmlBlock(line) {
@@ -1946,7 +1946,7 @@ function splitLines(what, text) {
 	if (lines.some((line) => LINE_SEPARATORS.test(line))) throw new Error(`${what} contains a carriage return or line separator that is not a line break`);
 	return lines;
 }
-function checkLines(what, lines) {
+function checkLines(what, lines, headings = true) {
 	let open;
 	let openHtml;
 	let inHtmlBlock = false;
@@ -1964,12 +1964,7 @@ function checkLines(what, lines) {
 			}
 			continue;
 		}
-		if (openHtml !== void 0) {
-			if (openHtml.close.test(line)) openHtml = void 0;
-			continue;
-		}
 		const marker = openingFence(line)?.marker;
-		const htmlClose = marker === void 0 ? openingHtmlBlock(line) : void 0;
 		if (marker !== void 0) {
 			open = {
 				marker,
@@ -1979,8 +1974,15 @@ function checkLines(what, lines) {
 			inQuote = false;
 			inList = false;
 			inHtmlBlock = false;
-		} else if (HEADING.test(line)) throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
-		else if (plainTextAbove && SETEXT_UNDERLINE.test(line)) {
+			continue;
+		}
+		if (headings && HEADING.test(line)) throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
+		if (openHtml !== void 0) {
+			if (openHtml.close.test(line)) openHtml = void 0;
+			continue;
+		}
+		const htmlClose = openingHtmlBlock(line);
+		if (headings && plainTextAbove && SETEXT_UNDERLINE.test(line)) {
 			const heading = lines[index - 1].replace(/^x: /u, "").trim();
 			throw new Error(`${what} contains a "${heading}" heading (line ${index + 1}) — quote it in a code fence`);
 		} else if (htmlClose !== void 0) {
@@ -1992,7 +1994,7 @@ function checkLines(what, lines) {
 				close: htmlClose,
 				line: index + 1
 			};
-		} else if (BLANK.test(line) || THEMATIC_BREAK.test(line)) {
+		} else if (BLANK.test(line)) {
 			plainTextAbove = false;
 			inQuote = false;
 			inList = false;
@@ -2002,7 +2004,11 @@ function checkLines(what, lines) {
 			inQuote = false;
 			inList = false;
 			inHtmlBlock = true;
-		} else if (inHtmlBlock) {} else if (plainTextAbove) {
+		} else if (inHtmlBlock) {} else if (THEMATIC_BREAK.test(line)) {
+			plainTextAbove = false;
+			inQuote = false;
+			inList = false;
+		} else if (plainTextAbove) {
 			if (INTERRUPTS_PARAGRAPH.test(line)) {
 				plainTextAbove = false;
 				inQuote = QUOTE_LINE.test(line);
@@ -2026,13 +2032,22 @@ function checkLines(what, lines) {
 	if (open !== void 0) throw new Error(`${what} has an unclosed code fence (opened on line ${open.line})`);
 	if (openHtml !== void 0) throw new Error(`${what} has an unclosed HTML block (opened on line ${openHtml.line})`);
 }
+function expandBulletIndent(line) {
+	let col = 2;
+	let index = 0;
+	while (index < line.length && (line[index] === " " || line[index] === "	")) {
+		col = line[index] === "	" ? col + (4 - col % 4) : col + 1;
+		index++;
+	}
+	return " ".repeat(col - 2) + line.slice(index);
+}
 function bulletText(what, text) {
 	const [head = "", ...rest] = splitLines(what, trimmed(what, text));
 	const first = head.trimEnd();
 	if (first === "") return void 0;
-	checkLines(what, [`x: ${first}`, ...rest.map((line) => line.replace(/^\t/u, "  "))]);
+	checkLines(what, [`x: ${first}`, ...rest.map(expandBulletIndent)], true);
 	const lines = [first, ...rest.map((line) => BLANK.test(line) ? "" : `  ${line}`)];
-	checkLines(what, [`x: ${first}`, ...lines.slice(1)]);
+	checkLines(what, [`x: ${first}`, ...lines.slice(1)], false);
 	return lines.join("\n");
 }
 function requiredText(what, text) {
@@ -4047,7 +4062,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+aff1385`;
+	return `pr-comments ${VERSION}+1e60c9e`;
 }
 //#endregion
 //#region src/cli.ts
