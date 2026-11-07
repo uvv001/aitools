@@ -2212,7 +2212,7 @@ function unlink$1(state, ref, now, note) {
 		links
 	};
 }
-function recordPosted(state, findingId, ref, action, where, now) {
+function recordPosted(state, findingId, ref, action, where, now, expected) {
 	refuseAnnotation(ref, ONLY_DUPLICATE);
 	const found = findFinding$1(state.data, findingId);
 	checkedRef(ref);
@@ -2221,6 +2221,7 @@ function recordPosted(state, findingId, ref, action, where, now) {
 	if (linked !== void 0 && !(linked.role === "own" && linked.finding === found.id)) throw alreadyLinked(linked);
 	const own = ownOf(state.links, found.id);
 	if (own !== void 0 && own.ref !== ref) throw alreadyHasOwn(found.id, own, "a posted comment cannot move: ");
+	if (expected !== void 0 && (found.title !== expected.title || found.severity !== expected.severity || found.description !== expected.description)) throw new Error(`${found.id} changed while its comment was being posted`);
 	if (own !== void 0 && action === "unchanged") return state;
 	const pending = where === "pending" ? " to the pending review" : "";
 	const comment = commentLink(state.pullRequest, ref);
@@ -3800,6 +3801,12 @@ async function postFinding(arg, findingId, options, deps) {
 		commit: options.commit
 	});
 	const { id } = extracted;
+	const sourceFinding = findFinding$1(data, id);
+	const expectedFinding = {
+		title: sourceFinding.title,
+		severity: sourceFinding.severity,
+		description: sourceFinding.description
+	};
 	const own = linksOf(links, id).find((link) => link.role === "own");
 	const comment = own === void 0 ? extracted.comment : {
 		...extracted.comment,
@@ -3822,9 +3829,10 @@ async function postFinding(arg, findingId, options, deps) {
 		const action = result.action;
 		const was = action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
 		const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
-		const expectedGeneration = snapshotGeneration(paths.db);
+		let expectedGeneration;
 		let snapshot;
 		try {
+			expectedGeneration = snapshotGeneration(paths.db);
 			snapshot = await deps.refresh(ref);
 		} catch (error) {
 			const message = `${was}, but the pull request could not be refreshed (${error instanceof Error ? error.message : String(error)}); run "pr-comments pr sync --db ${quotedDb}", then ${linkOwnCommand}`;
@@ -3836,7 +3844,7 @@ async function postFinding(arg, findingId, options, deps) {
 		}
 		try {
 			reportError = (await changeReviewState(arg, (state) => ({
-				state: recordPosted(state, id, posted, action, result.state, deps.now()),
+				state: recordPosted(state, id, posted, action, result.state, deps.now(), expectedFinding),
 				result: void 0
 			}), {
 				snapshot,
@@ -3845,7 +3853,10 @@ async function postFinding(arg, findingId, options, deps) {
 			})).reportError;
 			return result;
 		} catch (error) {
-			const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : `record it with ${linkOwnCommand}`}`;
+			const reason = error instanceof Error ? error.message : String(error);
+			const byAgentFlag = options.byAgent ? " --by-agent" : "";
+			const postCommand = `"pr-comments finding post --db ${quotedDb}${byAgentFlag} ${id}"`;
+			const message = `${was}, but it could not be recorded in the review (${reason}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : reason.endsWith("changed while its comment was being posted") ? own === void 0 ? `run "pr-comments pr sync --db ${quotedDb}", record it with ${linkOwnCommand}, then run ${postCommand} again to update the comment` : `run ${postCommand} again to update the comment` : `record it with ${linkOwnCommand}`}`;
 			return {
 				...result,
 				action: "error",
@@ -3910,9 +3921,10 @@ async function replyToDuplicate(arg, ref, options, deps) {
 	const replyRef = result.comment;
 	if (options.dryRun || result.action === "error" || replyRef === void 0) return replied;
 	const was = result.action === "created" ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
-	const expectedGeneration = snapshotGeneration(paths.db);
+	let expectedGeneration;
 	let snapshot;
 	try {
+		expectedGeneration = snapshotGeneration(paths.db);
 		snapshot = await deps.refresh(pullRequestRef);
 	} catch (error) {
 		const message = `${was}, but the pull request could not be refreshed (${error instanceof Error ? error.message : String(error)}); run "pr-comments pr sync --db ${quotedDb}" and run the command again to record it`;
@@ -3957,7 +3969,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+fd40377`;
+	return `pr-comments ${VERSION}+270db4f`;
 }
 //#endregion
 //#region src/cli.ts
