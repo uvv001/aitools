@@ -4,7 +4,7 @@ import { parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { composeBody } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
-import { changeReviewState, loadReviewFile, quoteCliPath } from './review-files.ts';
+import { changeReviewState, loadReviewFile, quoteCliPath, snapshotGeneration } from './review-files.ts';
 import { linksOf, recordReplied } from './review-links.ts';
 
 export interface ReplyDuplicateOptions {
@@ -106,6 +106,7 @@ export async function replyToDuplicate(
   const replyRef = result.comment;
   if (options.dryRun || result.action === 'error' || replyRef === undefined) return replied;
   const was = result.action === 'created' ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
+  const expectedGeneration = snapshotGeneration(paths.db);
   let snapshot: PullRequestData;
   try {
     snapshot = await deps.refresh(pullRequestRef);
@@ -121,7 +122,7 @@ export async function replyToDuplicate(
         state: recordReplied(state, ref, replyRef, result.state, deps.now(), { finding, own: own.ref }),
         result: undefined,
       }),
-      { snapshot, pullRequest: pullRequestRef },
+      { snapshot, pullRequest: pullRequestRef, expectedGeneration },
     );
     return reportError === undefined ? replied : { ...replied, reportError };
   } catch (error) {

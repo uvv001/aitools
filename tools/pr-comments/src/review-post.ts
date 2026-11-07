@@ -6,7 +6,7 @@ import type { PullRequestRef } from './pr-url.ts';
 import { extractComment } from './report-extract.ts';
 import type { Anchor } from './report-extract.ts';
 import { parseReport } from './report-parse.ts';
-import { changeReviewState, loadReviewFile, quoteCliPath } from './review-files.ts';
+import { changeReviewState, loadReviewFile, quoteCliPath, snapshotGeneration } from './review-files.ts';
 import { linksOf, recordPosted } from './review-links.ts';
 import type { PostedAction } from './review-links.ts';
 import { renderReport } from './review-render.ts';
@@ -113,6 +113,7 @@ export async function postFinding(
       const action: PostedAction = result.action;
       const was = action === 'created' ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
       const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
+      const expectedGeneration = snapshotGeneration(paths.db);
       let snapshot: PullRequestData;
       try {
         snapshot = await deps.refresh(ref);
@@ -127,7 +128,7 @@ export async function postFinding(
         const changed = await changeReviewState(
           arg,
           (state) => ({ state: recordPosted(state, id, posted, action, result.state, deps.now()), result: undefined }),
-          { snapshot, pullRequest: ref },
+          { snapshot, pullRequest: ref, expectedGeneration },
         );
         reportError = changed.reportError;
         return result;

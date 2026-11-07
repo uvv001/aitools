@@ -20,6 +20,7 @@ import {
   refuseDatabase,
   renderReportFile,
   reviewPaths,
+  snapshotGeneration,
   syncReviewFile,
 } from './review-files.ts';
 import { dumpReview } from './review-dump.ts';
@@ -1867,6 +1868,33 @@ describe('syncReviewFile', () => {
 
     expect((await bytes()).equals(before)).toBe(true);
     expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c2']));
+  });
+
+  it('refuses a stale snapshot when a newer one was stored first', async () => {
+    const newer = snapshotOf(['r1', 'c9999'], { fetchedAt: '2026-01-06T12:01:00Z' });
+    const older = snapshotOf(['r1'], { fetchedAt: '2026-01-06T12:00:00Z' });
+    await syncReviewFile(db, newer);
+    const before = await bytes();
+
+    await expect(syncReviewFile(db, older)).rejects.toThrow(
+      new Error(`a newer pull request snapshot (2026-01-06T12:01:00Z) is already stored; run "pr-comments pr sync --db ${db}" again`),
+    );
+    await expect(changeReviewState(db, (state) => ({ state, result: null }), { snapshot: older })).rejects.toThrow(
+      new Error(`a newer pull request snapshot (2026-01-06T12:01:00Z) is already stored; run "pr-comments pr sync --db ${db}" again`),
+    );
+    expect((await bytes()).equals(before)).toBe(true);
+
+    const sameSecondGen = snapshotGeneration(db);
+    await syncReviewFile(db, snapshotOf(['r1', 'c9999'], { fetchedAt: '2026-01-06T12:01:00Z' }));
+    const afterSameSecond = await bytes();
+    await expect(
+      syncReviewFile(db, snapshotOf(['r1'], { fetchedAt: '2026-01-06T12:01:00Z' }), { expectedGeneration: sameSecondGen }),
+    ).rejects.toThrow(
+      new Error(`a newer pull request snapshot (2026-01-06T12:01:00Z) is already stored; run "pr-comments pr sync --db ${db}" again`),
+    );
+
+    expect((await bytes()).equals(afterSameSecond)).toBe(true);
+    expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c9999']));
   });
 
   describe('with a comment whose url holds no comment id', () => {

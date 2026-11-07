@@ -27,6 +27,7 @@ import {
   refuseDatabase,
   renderReportFile,
   reviewPaths,
+  snapshotGeneration,
   syncReviewFile,
 } from './review-files.ts';
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, linksOf, unlink } from './review-links.ts';
@@ -336,7 +337,10 @@ async function syncPullRequest({ env }: Context, db: string): Promise<number> {
     throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"`);
   }
   const ref = parsePullRequestUrl(pullRequest);
-  const { reviews, threads, comments, annotations } = await syncReviewFile(db, await env.getPullRequest(ref));
+  const expectedGeneration = snapshotGeneration(db);
+  const { reviews, threads, comments, annotations } = await syncReviewFile(db, await env.getPullRequest(ref), {
+    expectedGeneration,
+  });
   env.print(`Synced ${ref.owner}/${ref.repo}#${ref.number}: ${reviews} reviews, ${threads} threads, ${comments} comments, ${annotations} annotations\n`);
   return 0;
 }

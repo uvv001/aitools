@@ -48,11 +48,15 @@ async function readExisting(path: string): Promise<string | undefined> {
   }
 }
 
+const pathKey = (path: string): string => {
+  const resolved = resolve(path);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+};
+
 // Paths are kept as given (a relative one stays relative to the working directory); `resolve` only tells whether
 // two spellings name the same file (case-insensitively on Windows).
 export function samePath(a: string, b: string): boolean {
-  const [x, y] = [resolve(a), resolve(b)];
-  return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
+  return pathKey(a) === pathKey(b);
 }
 
 async function isDatabaseFile(path: string): Promise<boolean> {
@@ -447,6 +451,23 @@ export interface StateChange<T> {
   reportError?: Error;
 }
 
+function readSnapshotGeneration(db: DatabaseSync): number {
+  return (db.prepare('PRAGMA application_id').get() as { application_id: number }).application_id;
+}
+
+function bumpSnapshotGeneration(db: DatabaseSync): void {
+  db.exec(`PRAGMA application_id = ${readSnapshotGeneration(db) + 1}`);
+}
+
+export function snapshotGeneration(arg: string): number {
+  const db = openReviewDb(reviewPaths(arg).db, 'readonly');
+  try {
+    return readSnapshotGeneration(db);
+  } finally {
+    db.close();
+  }
+}
+
 const samePullRequest = (a: PullRequestRef, b: PullRequestRef): boolean =>
   a.number === b.number &&
   a.host.toLowerCase() === b.host.toLowerCase() &&
@@ -465,22 +486,45 @@ function assertConnectedPullRequest(db: DatabaseSync, dbPath: string, expected: 
   }
 }
 
+function assertFreshSnapshot(
+  db: DatabaseSync,
+  dbPath: string,
+  snapshot: PullRequestData,
+  expectedGeneration?: number,
+): void {
+  const stored = db.prepare('SELECT host, owner, repo, number, fetched_at FROM pr_pull_requests LIMIT 1').get() as
+    | { host: string; owner: string; repo: string; number: number; fetched_at: string }
+    | undefined;
+  const staleByTime =
+    stored !== undefined &&
+    samePullRequest(stored, snapshot.pullRequest) &&
+    snapshot.pullRequest.fetchedAt < stored.fetched_at;
+  const staleByGeneration =
+    expectedGeneration !== undefined && readSnapshotGeneration(db) !== expectedGeneration;
+  if (staleByTime || staleByGeneration) {
+    const stamp = stored?.fetched_at ?? snapshot.pullRequest.fetchedAt;
+    throw new Error(
+      `a newer pull request snapshot (${stamp}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`,
+    );
+  }
+}
+
 // Loads the whole state of a review (the review, its links, its pull request, the refs a link may name), lets
 // `change` return the changed one, and saves what changed in ONE transaction: all of it or nothing, and nothing when
 // `change` throws or the changed review would not render to a valid report. `change` returning the very same state
 // object writes nothing, not even a byte of the file; otherwise only the parts that differ are written (the review
 // when its object is not the loaded one, the links when their content differs, the pull request when it differs).
 // `options.snapshot`, a pull request that was just downloaded, is saved first and always (after verifying the review
-// is still connected to `options.pullRequest` when given), so the state that `change`
-// gets (`known` included) already holds its comments, and a link to one of them is allowed; if the change fails,
-// the snapshot is rolled back with it. The transaction takes the write lock before it loads, so writers in several
-// processes run one after the other, each on what the one before saved; a writer waits for the lock (up to the busy
-// timeout) instead of working on stale data. When the review changes, the report is rendered and written after the
-// transaction commits.
+// is still connected to `options.pullRequest` when given and no newer snapshot was stored meanwhile), so the state
+// that `change` gets (`known` included) already holds its comments, and a link to one of them is allowed; if the
+// change fails, the snapshot is rolled back with it. The transaction takes the write lock before it loads, so writers
+// in several processes run one after the other, each on what the one before saved; a writer waits for the lock (up to
+// the busy timeout) instead of working on stale data. When the review changes, the report is rendered and written
+// after the transaction commits.
 export async function changeReviewState<T>(
   arg: string,
   change: (state: ReviewState) => StateChange<T> | Promise<StateChange<T>>,
-  options: { snapshot?: PullRequestData; pullRequest?: PullRequestRef } = {},
+  options: { snapshot?: PullRequestData; pullRequest?: PullRequestRef; expectedGeneration?: number } = {},
 ): Promise<StateChange<T>> {
   const paths = reviewPaths(arg);
   const db = openReviewDb(paths.db, 'existing');
@@ -490,7 +534,11 @@ export async function changeReviewState<T>(
       db,
       async () => {
         if (options.pullRequest !== undefined) assertConnectedPullRequest(db, paths.db, options.pullRequest);
-        if (options.snapshot !== undefined) savePullRequest(db, options.snapshot);
+        if (options.snapshot !== undefined) {
+          assertFreshSnapshot(db, paths.db, options.snapshot, options.expectedGeneration);
+          savePullRequest(db, options.snapshot);
+          bumpSnapshotGeneration(db);
+        }
         const before = loadState(db);
         let result: StateChange<T>;
         try {
@@ -513,7 +561,10 @@ export async function changeReviewState<T>(
             setMeta(db, PULL_REQUEST, state.pullRequest);
             // What was stored belongs to the pull request the review was connected to before, and nothing was
             // downloaded for the new one yet.
-            if (before.pullRequest !== undefined && options.snapshot === undefined) clearPullRequest(db);
+            if (before.pullRequest !== undefined && options.snapshot === undefined) {
+              clearPullRequest(db);
+              bumpSnapshotGeneration(db);
+            }
           }
         }
         if (rendered !== undefined) {
@@ -569,7 +620,11 @@ export interface SyncResult {
 // Stores a downloaded pull request in the database, in one transaction under the write lock. The review must be
 // connected to a pull request, and it must be this one (host, owner and repository compared without regard to case).
 // The links stay as they are: what they point at is kept, as gone, when the pull request no longer has it.
-export async function syncReviewFile(arg: string, data: PullRequestData): Promise<SyncResult> {
+export async function syncReviewFile(
+  arg: string,
+  data: PullRequestData,
+  options: { expectedGeneration?: number } = {},
+): Promise<SyncResult> {
   const paths = reviewPaths(arg);
   const db = openReviewDb(paths.db, 'existing');
   try {
@@ -577,7 +632,9 @@ export async function syncReviewFile(arg: string, data: PullRequestData): Promis
       db,
       () => {
         assertConnectedPullRequest(db, paths.db, data.pullRequest);
+        assertFreshSnapshot(db, paths.db, data, options.expectedGeneration);
         savePullRequest(db, data);
+        bumpSnapshotGeneration(db);
       },
       { immediate: true },
     );
