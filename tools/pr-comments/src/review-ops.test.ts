@@ -368,6 +368,8 @@ describe('addFinding', () => {
     ['2. of the loop', 'The call happens in step\n2. of the loop\n---', 3],
     ['*', 'Text\n*\n---', 3],
     ['1.', 'Text\n1.\n---', 3],
+    ['<span>', 'Text\n<span>\n===', 3],
+    ['<custom-element>', 'Text\n<custom-element>\n---', 3],
     ['Text', '- item\n<!-- status -->\nText\n===', 4],
     ['Title', '-\nTitle\n---', 3],
     ['#### Updates', '```\nx\n```\n#### Updates', 4],
@@ -397,11 +399,16 @@ describe('addFinding', () => {
         {
           ...FINDING,
           description:
-            '```markdown\n```ts\n    ```\n# quoted heading\n```\n\n```inline span```\n\n- item\n  continued\n---\n> quote\nlazy\n---\nText\n<!-- status -->\n---\n[a]: /url\n---\n    code\n---\n___\n---',
+            '```markdown\n```ts\n    ```\n# quoted heading\n```\n\n```inline span```\n\n- item\n  continued\n---\n> quote\nlazy\n---\nText\n<!-- status -->\n---\n<!--\nstatus\n===\n-->\n[a]: /url\n---\n    code\n---\n___\n---',
         },
         at(),
       ),
     ).not.toThrow();
+    refuses(
+      open(),
+      (input) => addFinding(input, { ...FINDING, description: '<!-- TODO' }, at()),
+      'description has an unclosed HTML block (opened on line 1)',
+    );
     refuses(
       open(),
       (input) => addFinding(input, { ...FINDING, note: 'first\n# heading' }, at()),
@@ -409,7 +416,22 @@ describe('addFinding', () => {
     );
     refuses(
       open(),
+      (input) => addFinding(input, { ...FINDING, note: 'first\n  # heading' }, at()),
+      'note contains a "# heading" heading (line 2) — quote it in a code fence',
+    );
+    refuses(
+      open(),
+      (input) => addFinding(input, { ...FINDING, note: 'first\n\t#### x' }, at()),
+      'note contains a "#### x" heading (line 2) — quote it in a code fence',
+    );
+    refuses(
+      open(),
       (input) => addFinding(input, { ...FINDING, note: 'first\n---' }, at()),
+      'note contains a "first" heading (line 2) — quote it in a code fence',
+    );
+    refuses(
+      open(),
+      (input) => addFinding(input, { ...FINDING, note: 'first\n   ---' }, at()),
       'note contains a "first" heading (line 2) — quote it in a code fence',
     );
   });
