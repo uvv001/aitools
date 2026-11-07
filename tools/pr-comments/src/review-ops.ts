@@ -25,6 +25,8 @@ const LINE_SEPARATORS = /[\r\n\u2028\u2029]/u;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
 const HEADING = /^ {0,3}#{1,4}\s+.*\S\s*$/u;
 const SETEXT_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/u;
+const NON_PARAGRAPH =
+  /^ {0,3}(?:(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|>|(?:_[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:-[ \t]*){3,}$)|^(?: {4}|\t)/u;
 
 const WORD = /^[^\s`]+$/u;
 
@@ -73,7 +75,7 @@ function checkLines(what: string, lines: string[], headings: boolean): void {
           `${what} contains a "${lines[index - 1]!.trim()}" heading (line ${index + 1}) — quote it in a code fence`,
         );
       } else {
-        plainTextAbove = !BLANK.test(line) && !/^ {0,3}(?:[-*+]|\d+[.)]|>)/u.test(line);
+        plainTextAbove = !BLANK.test(line) && !NON_PARAGRAPH.test(line);
       }
     } else if (closesFence(line, open.marker)) {
       open = undefined;

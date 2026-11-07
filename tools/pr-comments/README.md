@@ -111,7 +111,7 @@ pr-comments pr show --db $DB
 
 `pr show` tells when the data was downloaded, the head commit, and how much the database holds.
 
-**6. Deal with what others wrote.** `link pending` is the to-do list. It prints every comment and every check annotation of the pull request that no link names yet.
+**6. Deal with what others wrote.** `link pending` is the to-do list for top-level comments and check annotations. It prints every top-level comment and every check annotation of the pull request that no link names yet. Read full pending threads with `report comments --pending`, and read `report comments` for submitted review bodies, unlinked replies in already linked threads, and edited linked comments.
 
 ```
 pr-comments link pending --db $DB
@@ -144,7 +144,7 @@ pr-comments link duplicate F2 a8d5d4a2a --db $DB
 F2: duplicate a8d5d4a2a linked
 ```
 
-When `link pending` prints nothing, every comment and annotation is handled. Empty output is the answer. The exit code is 0 whether it printed something or not, so pending work is never a failure. (Before the first `pr sync` it is an error instead.) Replies are not listed: their thread is the first comment.
+When `link pending` prints nothing, every top-level comment and check annotation is linked. Empty output means no top-level item is left in the pending list. The exit code is 0 whether it printed something or not, so pending work is never a failure. (Before the first `pr sync` it is an error instead.) Replies are not listed in `link pending`: their thread is represented by its first comment, so read `report comments` to inspect replies, edited comments, and review bodies.
 
 **7. Post the findings.** `finding list --unposted` shows the findings that have no comment of their own yet, in any state; `--state approved` narrows it to the approved ones. First look at what would happen, then post:
 
@@ -336,7 +336,7 @@ pr-comments finding post F7 --dry-run --db $DB
 
 A link ties a comment or a check annotation of the pull request to the review. Its role is `own` (the comment of a finding, at most one per finding), `duplicate` (the same issue as a finding, any number) or `note` (a comment that is no finding, with the reason). A ref is linked once. Links are records in the database only. The refs must be in the downloaded pull request, so run `pr sync` first.
 
-**`link pending`**: the to-do list. One line per comment or check annotation that no link names (ref, author or app, place, state or level, excerpt). Nothing is printed when everything is handled. It exits with 0 whenever it ran. Before the first `pr sync` there is nothing to list, and it is an error (exit 1). `--json` prints an array (`[]` when none).
+**`link pending`**: the to-do list of top-level items. One line per top-level comment or check annotation that no link names (ref, author or app, place, state or level, excerpt). Nothing is printed when every top-level comment and annotation is linked (use `report comments` to inspect thread replies, edited comments, and submitted review bodies). It exits with 0 whenever it ran. Before the first `pr sync` there is nothing to list, and it is an error (exit 1). `--json` prints an array (`[]` when none).
 
 ```
 pr-comments link pending [--json] --db <file.sqlite>
