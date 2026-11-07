@@ -1410,6 +1410,99 @@ function dumpReview$1(data, extra = {}) {
 	return `${lines.join("\n")}\n`;
 }
 //#endregion
+//#region src/review-evidence.ts
+const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
+const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
+const CLOSING = /^\s*(`{3,}|~{3,})[ \t]*$/;
+function splitLines$1(text) {
+	const lines = text.split(/\r?\n/);
+	if (lines.at(-1) === "") lines.pop();
+	return lines;
+}
+function parseAnchor(line) {
+	const match = ANCHOR.exec(line);
+	if (!match) return void 0;
+	const [, path = "", from = "", to] = match;
+	const start = Number(from);
+	return {
+		path,
+		start,
+		end: to === void 0 ? start : Number(to)
+	};
+}
+function openingFence(line) {
+	const match = OPENING.exec(line);
+	if (!match) return void 0;
+	const [, marker = "", rest = ""] = match;
+	return marker.startsWith("`") && rest.includes("`") ? void 0 : {
+		marker,
+		info: rest.trim()
+	};
+}
+function closesFence(line, marker) {
+	const closing = CLOSING.exec(line)?.[1];
+	return closing !== void 0 && closing.startsWith(marker[0] ?? "") && closing.length >= marker.length;
+}
+function readFence(lines, open, marker) {
+	const close = lines.findIndex((line, index) => index > open && closesFence(line, marker));
+	if (close < 0) return {
+		snippet: lines.slice(open + 1),
+		unclosed: true,
+		next: lines.length
+	};
+	return {
+		snippet: lines.slice(open + 1, close),
+		unclosed: false,
+		next: close + 1
+	};
+}
+function nextFenceBeforeAnchor(lines, from) {
+	for (let scan = from; scan < lines.length; scan += 1) {
+		const line = lines[scan] ?? "";
+		if (parseAnchor(line)) return void 0;
+		const opening = openingFence(line);
+		if (opening) return {
+			at: scan,
+			opening
+		};
+	}
+}
+function extractEvidence(description) {
+	const lines = splitLines$1(description);
+	const found = [];
+	let index = 0;
+	while (index < lines.length) {
+		const anchor = parseAnchor(lines[index] ?? "");
+		if (!anchor) {
+			const opening = openingFence(lines[index] ?? "");
+			index = opening ? readFence(lines, index, opening.marker).next : index + 1;
+			continue;
+		}
+		const nextFence = nextFenceBeforeAnchor(lines, index + 1);
+		if (!nextFence) {
+			found.push({
+				...anchor,
+				snippet: void 0,
+				fence: "",
+				unclosed: false,
+				line: index + 1
+			});
+			index += 1;
+			continue;
+		}
+		const fence = readFence(lines, nextFence.at, nextFence.opening.marker);
+		found.push({
+			...anchor,
+			snippet: fence.snippet,
+			fence: nextFence.opening.info,
+			unclosed: fence.unclosed,
+			line: index + 1
+		});
+		index = fence.next;
+	}
+	return found;
+}
+//#endregion
 //#region src/report-parse.ts
 const STATES = [
 	{
@@ -1448,8 +1541,6 @@ const SEVERITIES = [
 ];
 const HEADING$1 = /^(?<hashes>#{1,4})\s+(?<title>.*\S)\s*$/u;
 const FINDING$1 = /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>[A-Za-z0-9-]+)\s+—\s+(?<title>.+)$/u;
-const FENCE$2 = /^\s*(?<marker>`{3,}(?=[^`]*$)|~{3,})/u;
-const CLOSING_FENCE$2 = /^\s*(?<marker>`{3,}|~{3,})\s*$/u;
 const TITLE$1 = /^Review — (?<target>\S.*)$/u;
 const ID = /^F(?<number>\d+)$/u;
 const SECTIONS = [
@@ -1522,11 +1613,10 @@ function insideFences(lines) {
 	let open;
 	const inside = lines.map((line) => {
 		if (open === void 0) {
-			open = FENCE$2.exec(line)?.groups?.marker;
+			open = openingFence(line)?.marker;
 			return false;
 		}
-		const closing = CLOSING_FENCE$2.exec(line)?.groups?.marker;
-		if (closing !== void 0 && closing[0] === open[0] && closing.length >= open.length) open = void 0;
+		if (closesFence(line, open)) open = void 0;
 		return true;
 	});
 	if (open !== void 0) throw new Error("a code fence is never closed");
@@ -1712,99 +1802,6 @@ function readReport(text, path) {
 	};
 }
 //#endregion
-//#region src/review-evidence.ts
-const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
-const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
-const CLOSING = /^\s*(`{3,}|~{3,})\s*$/;
-function splitLines$1(text) {
-	const lines = text.split(/\r?\n/);
-	if (lines.at(-1) === "") lines.pop();
-	return lines;
-}
-function parseAnchor(line) {
-	const match = ANCHOR.exec(line);
-	if (!match) return void 0;
-	const [, path = "", from = "", to] = match;
-	const start = Number(from);
-	return {
-		path,
-		start,
-		end: to === void 0 ? start : Number(to)
-	};
-}
-function openingFence(line) {
-	const match = OPENING.exec(line);
-	if (!match) return void 0;
-	const [, marker = "", rest = ""] = match;
-	return marker.startsWith("`") && rest.includes("`") ? void 0 : {
-		marker,
-		info: rest.trim()
-	};
-}
-function closesFence(line, marker) {
-	const closing = CLOSING.exec(line)?.[1];
-	return closing !== void 0 && closing.startsWith(marker[0] ?? "") && closing.length >= marker.length;
-}
-function readFence(lines, open, marker) {
-	const close = lines.findIndex((line, index) => index > open && closesFence(line, marker));
-	if (close < 0) return {
-		snippet: lines.slice(open + 1),
-		unclosed: true,
-		next: lines.length
-	};
-	return {
-		snippet: lines.slice(open + 1, close),
-		unclosed: false,
-		next: close + 1
-	};
-}
-function nextFenceBeforeAnchor(lines, from) {
-	for (let scan = from; scan < lines.length; scan += 1) {
-		const line = lines[scan] ?? "";
-		if (parseAnchor(line)) return void 0;
-		const opening = openingFence(line);
-		if (opening) return {
-			at: scan,
-			opening
-		};
-	}
-}
-function extractEvidence(description) {
-	const lines = splitLines$1(description);
-	const found = [];
-	let index = 0;
-	while (index < lines.length) {
-		const anchor = parseAnchor(lines[index] ?? "");
-		if (!anchor) {
-			const opening = openingFence(lines[index] ?? "");
-			index = opening ? readFence(lines, index, opening.marker).next : index + 1;
-			continue;
-		}
-		const nextFence = nextFenceBeforeAnchor(lines, index + 1);
-		if (!nextFence) {
-			found.push({
-				...anchor,
-				snippet: void 0,
-				fence: "",
-				unclosed: false,
-				line: index + 1
-			});
-			index += 1;
-			continue;
-		}
-		const fence = readFence(lines, nextFence.at, nextFence.opening.marker);
-		found.push({
-			...anchor,
-			snippet: fence.snippet,
-			fence: nextFence.opening.info,
-			unclosed: fence.unclosed,
-			line: index + 1
-		});
-		index = fence.next;
-	}
-	return found;
-}
-//#endregion
 //#region src/review-view.ts
 const SEVERITY_NAMES$1 = [
 	"high",
@@ -1913,8 +1910,6 @@ const FIXED = "🔧";
 const BLANK = /^[ \t]*$/u;
 const LINE_SEPARATORS = /[\r\n\u2028\u2029]/u;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
-const FENCE$1 = /^\s*(?<marker>`{3,}(?=[^`]*$)|~{3,})/u;
-const CLOSING_FENCE$1 = /^\s*(?<marker>`{3,}|~{3,})\s*$/u;
 const HEADING = /^#{1,4}\s+.*\S\s*$/u;
 const WORD = /^[^\s`]+$/u;
 function formatStamp(now) {
@@ -1937,16 +1932,13 @@ function splitLines(what, text) {
 function checkLines(what, lines, headings) {
 	let open;
 	for (const [index, line] of lines.entries()) if (open === void 0) {
-		const marker = FENCE$1.exec(line)?.groups?.marker;
+		const marker = openingFence(line)?.marker;
 		if (marker !== void 0) open = {
 			marker,
 			line: index + 1
 		};
 		else if (headings && HEADING.test(line)) throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
-	} else {
-		const closing = CLOSING_FENCE$1.exec(line)?.groups?.marker;
-		if (closing !== void 0 && closing[0] === open.marker[0] && closing.length >= open.marker.length) open = void 0;
-	}
+	} else if (closesFence(line, open.marker)) open = void 0;
 	if (open !== void 0) throw new Error(`${what} has an unclosed code fence (opened on line ${open.line})`);
 }
 function bulletText(what, text) {
@@ -2212,6 +2204,7 @@ function unlink$1(state, ref, now, note) {
 		links
 	};
 }
+var FindingChangedError = class extends Error {};
 function recordPosted(state, findingId, ref, action, where, now, expected) {
 	refuseAnnotation(ref, ONLY_DUPLICATE);
 	const found = findFinding$1(state.data, findingId);
@@ -2221,7 +2214,7 @@ function recordPosted(state, findingId, ref, action, where, now, expected) {
 	if (linked !== void 0 && !(linked.role === "own" && linked.finding === found.id)) throw alreadyLinked(linked);
 	const own = ownOf(state.links, found.id);
 	if (own !== void 0 && own.ref !== ref) throw alreadyHasOwn(found.id, own, "a posted comment cannot move: ");
-	if (expected !== void 0 && (found.title !== expected.title || found.severity !== expected.severity || found.description !== expected.description)) throw new Error(`${found.id} changed while its comment was being posted`);
+	if (expected !== void 0 && (found.title !== expected.title || found.severity !== expected.severity || found.description !== expected.description)) throw new FindingChangedError(`${found.id} changed while its comment was being posted`);
 	if (own !== void 0 && action === "unchanged") return state;
 	const pending = where === "pending" ? " to the pending review" : "";
 	const comment = commentLink(state.pullRequest, ref);
@@ -3266,11 +3259,13 @@ async function dumpReviewFile(arg) {
 		links
 	});
 }
+const SNAPSHOT_GENERATION = "snapshot_generation";
 function readSnapshotGeneration(db) {
-	return db.prepare("PRAGMA application_id").get().application_id;
+	return Number(getMeta(db, SNAPSHOT_GENERATION) ?? "0");
 }
 function bumpSnapshotGeneration(db) {
-	db.exec(`PRAGMA application_id = ${readSnapshotGeneration(db) + 1}`);
+	const next = String(readSnapshotGeneration(db) + 1);
+	db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(SNAPSHOT_GENERATION, next);
 }
 function snapshotGeneration(arg) {
 	const db = openReviewDb(reviewPaths(arg).db, "readonly");
@@ -3509,8 +3504,6 @@ function pendingJson(items) {
 }
 //#endregion
 //#region src/report-extract.ts
-const FENCE = /^\s*(`{3,}(?=[^`]*$)|~{3,})/;
-const CLOSING_FENCE = /^\s*(`{3,}|~{3,})\s*$/;
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
 const REFERENCE_LINK = /\[[^\]]+\]\[[^\]]*\]/;
 const REFERENCE_DEFINITION = /^\s{0,3}\[[^\]]+\]:\s*\S/;
@@ -3550,11 +3543,10 @@ function fenceMask(lines) {
 	let open;
 	return lines.map((line) => {
 		if (open === void 0) {
-			open = FENCE.exec(line)?.[1];
+			open = openingFence(line)?.marker;
 			return open !== void 0;
 		}
-		const closing = CLOSING_FENCE.exec(line)?.[1];
-		if (closing !== void 0 && closing[0] === open[0] && closing.length >= open.length) open = void 0;
+		if (closesFence(line, open)) open = void 0;
 		return true;
 	});
 }
@@ -3856,7 +3848,7 @@ async function postFinding(arg, findingId, options, deps) {
 			const reason = error instanceof Error ? error.message : String(error);
 			const byAgentFlag = options.byAgent ? " --by-agent" : "";
 			const postCommand = `"pr-comments finding post --db ${quotedDb}${byAgentFlag} ${id}"`;
-			const message = `${was}, but it could not be recorded in the review (${reason}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : reason.endsWith("changed while its comment was being posted") ? own === void 0 ? `run "pr-comments pr sync --db ${quotedDb}", record it with ${linkOwnCommand}, then run ${postCommand} again to update the comment` : `run ${postCommand} again to update the comment` : `record it with ${linkOwnCommand}`}`;
+			const message = `${was}, but it could not be recorded in the review (${reason}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : error instanceof FindingChangedError ? own === void 0 ? `run "pr-comments pr sync --db ${quotedDb}", record it with ${linkOwnCommand}, then run ${postCommand} again to update the comment` : `run ${postCommand} again to update the comment` : `record it with ${linkOwnCommand}`}`;
 			return {
 				...result,
 				action: "error",
@@ -3969,7 +3961,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+270db4f`;
+	return `pr-comments ${VERSION}+dd19a35`;
 }
 //#endregion
 //#region src/cli.ts
