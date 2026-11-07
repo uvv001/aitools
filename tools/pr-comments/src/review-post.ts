@@ -10,6 +10,7 @@ import { changeReviewState, loadReviewFile, quoteCliPath, ReconnectedError, snap
 import { linksOf, recordPosted } from './review-links.ts';
 import type { PostedAction } from './review-links.ts';
 import { renderReport } from './review-render.ts';
+import { findFinding } from './review-view.ts';
 
 export interface PostFindingOptions {
   // Publish immediately instead of adding to the pending review; start the comment with the agent disclaimer; only
@@ -94,6 +95,12 @@ export async function postFinding(
   });
 
   const { id } = extracted;
+  const sourceFinding = findFinding(data, id);
+  const expectedFinding = {
+    title: sourceFinding.title,
+    severity: sourceFinding.severity,
+    description: sourceFinding.description,
+  };
   const own = linksOf(links, id).find((link) => link.role === 'own');
   const comment = own === undefined ? extracted.comment : { ...extracted.comment, commentRef: own.ref };
   const body = composeBody(comment.body, options.byAgent);
@@ -113,9 +120,10 @@ export async function postFinding(
       const action: PostedAction = result.action;
       const was = action === 'created' ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
       const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
-      const expectedGeneration = snapshotGeneration(paths.db);
+      let expectedGeneration: number;
       let snapshot: PullRequestData;
       try {
+        expectedGeneration = snapshotGeneration(paths.db);
         snapshot = await deps.refresh(ref);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -127,17 +135,26 @@ export async function postFinding(
       try {
         const changed = await changeReviewState(
           arg,
-          (state) => ({ state: recordPosted(state, id, posted, action, result.state, deps.now()), result: undefined }),
+          (state) => ({
+            state: recordPosted(state, id, posted, action, result.state, deps.now(), expectedFinding),
+            result: undefined,
+          }),
           { snapshot, pullRequest: ref, expectedGeneration },
         );
         reportError = changed.reportError;
         return result;
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
+        const byAgentFlag = options.byAgent ? ' --by-agent' : '';
+        const postCommand = `"pr-comments finding post --db ${quotedDb}${byAgentFlag} ${id}"`;
         const advice =
           error instanceof ReconnectedError
             ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}`
-            : `record it with ${linkOwnCommand}`;
+            : reason.endsWith('changed while its comment was being posted')
+              ? own === undefined
+                ? `run "pr-comments pr sync --db ${quotedDb}", record it with ${linkOwnCommand}, then run ${postCommand} again to update the comment`
+                : `run ${postCommand} again to update the comment`
+              : `record it with ${linkOwnCommand}`;
         const message = `${was}, but it could not be recorded in the review (${reason}); ${advice}`;
         return { ...result, action: 'error', message };
       }

@@ -1,6 +1,6 @@
 import { commentLink, isAnnotationRef, isLinkRef } from './comment-ref.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
-import type { ReviewData } from './review-model.ts';
+import type { Finding, ReviewData } from './review-model.ts';
 import { amend, oneLineText } from './review-ops.ts';
 import { findFinding } from './review-view.ts';
 
@@ -187,6 +187,7 @@ export function recordPosted(
   action: PostedAction,
   where: 'pending' | 'posted' | undefined,
   now: Date,
+  expected?: { title: string; severity: Finding['severity']; description: string },
 ): ReviewState {
   refuseAnnotation(ref, ONLY_DUPLICATE);
   const found = findFinding(state.data, findingId);
@@ -196,6 +197,12 @@ export function recordPosted(
   if (linked !== undefined && !(linked.role === 'own' && linked.finding === found.id)) throw alreadyLinked(linked);
   const own = ownOf(state.links, found.id);
   if (own !== undefined && own.ref !== ref) throw alreadyHasOwn(found.id, own, 'a posted comment cannot move: ');
+  if (
+    expected !== undefined &&
+    (found.title !== expected.title || found.severity !== expected.severity || found.description !== expected.description)
+  ) {
+    throw new Error(`${found.id} changed while its comment was being posted`);
+  }
   if (own !== undefined && action === 'unchanged') return state;
   const pending = where === 'pending' ? ' to the pending review' : '';
   const comment = commentLink(state.pullRequest, ref);

@@ -106,9 +106,10 @@ export async function replyToDuplicate(
   const replyRef = result.comment;
   if (options.dryRun || result.action === 'error' || replyRef === undefined) return replied;
   const was = result.action === 'created' ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
-  const expectedGeneration = snapshotGeneration(paths.db);
+  let expectedGeneration: number;
   let snapshot: PullRequestData;
   try {
+    expectedGeneration = snapshotGeneration(paths.db);
     snapshot = await deps.refresh(pullRequestRef);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

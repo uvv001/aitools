@@ -13,7 +13,7 @@ import { parseReport } from './report-parse.ts';
 import type { PullFile } from './rest.ts';
 import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
 import { connectPullRequest, linkOwn, unlink } from './review-links.ts';
-import { addFinding, formatStamp, openRound, setState } from './review-ops.ts';
+import { addFinding, formatStamp, openRound, setDescription, setState } from './review-ops.ts';
 import { postFinding } from './review-post.ts';
 import type { PostFindingDeps, PostFindingOptions } from './review-post.ts';
 import { readReport } from './review-read.ts';
@@ -853,6 +853,30 @@ describe('a comment that could not be recorded', () => {
     await sameBytes(db, during!);
     expect((await loadReviewFile(db)).pullRequest).toBe(otherPr);
     expect((await loadSnapshot(db))?.pullRequest.number).toBe(43);
+  });
+
+  it('refuses to record the link silently when the finding content changed while the post was in flight', async () => {
+    const db = await startReview();
+    let during: Buffer | undefined;
+
+    const { posted } = await post(db, 'F1', async (comment, options) => {
+      await mutateReviewFile(db, (data) => ({
+        data: setDescription(data, 'F1', { description: 'Updated evidence.\n\n`src/other.ts:7`' }, NOW),
+        result: undefined,
+      }));
+      during = await readFile(db);
+      return answer(comment, options, 'created', 'r2');
+    });
+
+    expect(posted.result).toMatchObject({
+      action: 'error',
+      comment: 'r2',
+      message:
+        'the comment was posted as r2, but it could not be recorded in the review (F1 changed while its comment was being posted); ' +
+        `run "pr-comments pr sync --db ${db}", ${LINK_OWN(db, 'r2')}, then run "pr-comments finding post --db ${db} F1" again to update the comment`,
+    });
+    await sameBytes(db, during!);
+    expect((await loadReviewFile(db)).links).toEqual([]);
   });
 });
 
