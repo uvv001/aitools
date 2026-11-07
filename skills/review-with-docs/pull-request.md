@@ -21,7 +21,9 @@ A **verdict marker** is `<review-url> (<timestamp>)`: the `[link]` URL and the
 review. An **edited-comment marker** is `<ref> edited <timestamp>`: the
 comment's ref and the `edited` timestamp in its `report comments` header. An
 **unlinked reply** is a reply ref that `report comments` shows in a thread and
-that has no `link` line in `report dump`.
+that has no `link` line in `report dump`. An **unrecorded edit** is a linked
+comment whose `report comments` header shows `edited` and whose
+edited-comment marker does not appear in `report dump`.
 
 `pr sync` downloads the PR into the database — comments, reviews, threads,
 check annotations. Run it after every push and before every publish.
@@ -31,8 +33,7 @@ full pending threads and annotations with `report comments --pending`
 (unlinked replies in those threads included), and read unfiltered
 `report comments` for nonempty submitted review verdict bodies whose verdict
 marker does not yet appear in `report dump` and, on a re-sync, for unlinked
-replies in already linked threads and for already linked comments whose
-edited-comment marker does not yet appear in `report dump` (`report dump`
+replies in already linked threads and for unrecorded edits (`report dump`
 lists every linked ref, note, and finding update). Then classify each item and
 record it from the orchestrator:
 
@@ -58,7 +59,7 @@ update` text (run `link remove <ref>` first when the comment is already
 linked).
 
 Past a handful of refs to read, the orchestrator reads the review verdict
-bodies and slices the pending refs, unlinked replies, and edited linked refs
+bodies and slices the pending refs, unlinked replies, and unrecorded edits
 (keeping each thread's refs in one slice) across parallel **PR-comment
 agents**. Each brief carries:
 
@@ -71,8 +72,8 @@ agents**. Each brief carries:
   edited-comment marker definition, and the table and the paragraph after it;
 - the output: a description file per [fleet.md](fleet.md) for each concern no
   finding covers yet;
-- the reply: one classification per pending ref, unlinked reply, or edited
-  linked ref in its slice — `own <F>`, `duplicate <F>`,
+- the reply: one classification per pending ref, unlinked reply, or unrecorded
+  edit in its slice — `own <F>`, `duplicate <F>`,
   `counter-evidence <F> '<counter-evidence>'`, `note '<reason>'`, or the new
   finding's reply line per [fleet.md](fleet.md) — plus its edited-comment
   marker where its header shows `edited`, for the orchestrator to record.
