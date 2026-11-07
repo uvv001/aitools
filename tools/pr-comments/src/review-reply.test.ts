@@ -9,7 +9,7 @@ import { AGENT_DISCLAIMER } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
 import { parseReport } from './report-parse.ts';
 import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
-import { linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
+import { connectPullRequest, linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
 import type { ReviewState } from './review-links.ts';
 import { addFinding, formatStamp, openRound } from './review-ops.ts';
 import { readReport } from './review-read.ts';
@@ -752,6 +752,35 @@ describe('a reply that could not be recorded', () => {
         'run the command again to record it',
     });
     expect((await updatesOf(db, 'F1')).some((text) => text.includes('replied to duplicate'))).toBe(false);
+    await sameBytes(db, during.bytes!);
+  });
+
+  it('refuses to overwrite a pull request reconnected while the reply was in flight', async () => {
+    const db = await startReview();
+    const otherPr = 'https://github.com/acme/widgets/pull/43';
+    const otherSnapshot = snapshot(['r9'], { number: 43, url: otherPr, title: 'Other PR' });
+    const during: { bytes?: Buffer } = {};
+
+    const { replied } = await reply(db, 'r2', async (_ref, request, options) => {
+      await changeReviewState(db, (state) => ({
+        state: connectPullRequest({ ...state, links: [] }, otherPr),
+        result: undefined,
+      }));
+      await syncReviewFile(db, otherSnapshot);
+      during.bytes = await readFile(db);
+      return outcome('created', 'r10', request, options);
+    });
+
+    expect(replied.result).toMatchObject({
+      action: 'error',
+      comment: 'r10',
+      message:
+        `the reply was posted as r10, but it could not be recorded in the review (the review is connected to ${otherPr}, not to ${PR}); ` +
+        `reconnect with "pr-comments pr connect --db ${db} ${PR}" and "pr-comments pr sync --db ${db}", ` +
+        `restore the links with "pr-comments link own --db ${db} F1 r1" and "pr-comments link duplicate --db ${db} F1 r2", ` +
+        'then run the command again to record it',
+    });
+    expect((await loadReviewFile(db)).pullRequest).toBe(otherPr);
     await sameBytes(db, during.bytes!);
   });
 });

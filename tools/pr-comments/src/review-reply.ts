@@ -1,10 +1,10 @@
 import { commentUrl, isAnnotationRef } from './comment-ref.ts';
 import type { PullRequestData } from './model.ts';
-import { parsePullRequestUrl } from './pr-url.ts';
+import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { composeBody } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
-import { changeReviewState, loadReviewFile, quoteCliPath, snapshotGeneration } from './review-files.ts';
+import { changeReviewState, loadReviewFile, quoteCliPath, ReconnectedError, snapshotGeneration } from './review-files.ts';
 import { linksOf, recordReplied } from './review-links.ts';
 
 export interface ReplyDuplicateOptions {
@@ -127,7 +127,11 @@ export async function replyToDuplicate(
     return reportError === undefined ? replied : { ...replied, reportError };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    const message = `${was}, but it could not be recorded in the review (${reason}); run the command again to record it`;
+    const advice =
+      error instanceof ReconnectedError
+        ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(pullRequestRef)}" and "pr-comments pr sync --db ${quotedDb}", restore the links with "pr-comments link own --db ${quotedDb} ${finding} ${own.ref}" and "pr-comments link duplicate --db ${quotedDb} ${finding} ${ref}", then run the command again to record it`
+        : 'run the command again to record it';
+    const message = `${was}, but it could not be recorded in the review (${reason}); ${advice}`;
     return { ...replied, result: { ...result, action: 'error', message } };
   }
 }
