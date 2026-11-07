@@ -3277,10 +3277,11 @@ function snapshotGeneration(arg) {
 	}
 }
 const samePullRequest = (a, b) => a.number === b.number && a.host.toLowerCase() === b.host.toLowerCase() && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase();
+var ReconnectedError = class extends Error {};
 function assertConnectedPullRequest(db, dbPath, expected) {
 	const connected = getMeta(db, PULL_REQUEST);
 	if (connected === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(dbPath)} <url>"`);
-	if (!samePullRequest(parsePullRequestUrl(connected), expected)) throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
+	if (!samePullRequest(parsePullRequestUrl(connected), expected)) throw new ReconnectedError(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
 }
 function assertFreshSnapshot(db, dbPath, snapshot, expectedGeneration) {
 	const stored = db.prepare("SELECT host, owner, repo, number, fetched_at FROM pr_pull_requests LIMIT 1").get();
@@ -3842,8 +3843,7 @@ async function postFinding(arg, findingId, options, deps) {
 			})).reportError;
 			return result;
 		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			const message = `${was}, but it could not be recorded in the review (${reason}); ${/^the review is connected to .+, not to /.test(reason) ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : `record it with ${linkOwnCommand}`}`;
+			const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : `record it with ${linkOwnCommand}`}`;
 			return {
 				...result,
 				action: "error",
@@ -3955,7 +3955,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+f0168cc`;
+	return `pr-comments ${VERSION}+4d5217b`;
 }
 //#endregion
 //#region src/cli.ts
