@@ -121,10 +121,10 @@ A read command must not change the committed file. A read-only connection (`new 
 
 ### 2.4 One transaction per change
 
-`changeReviewState(arg, change, { snapshot? })` in `review-files.ts` is the door for every change of the review, the links and the connected pull request. (`syncReviewFile`, for `pr sync`, has a transaction of its own, see 2.5.) It runs one transaction:
+`changeReviewState(arg, change, { snapshot?, pullRequest? })` in `review-files.ts` is the door for every change of the review, the links and the connected pull request. (`syncReviewFile`, for `pr sync`, has a transaction of its own, see 2.5.) It runs one transaction:
 
 1. `BEGIN IMMEDIATE`: the write lock is taken before anything is read. Writers in several processes run one after the other, each on what the one before saved.
-2. When a snapshot is given (a pull request that was just downloaded), it is saved first and always.
+2. When `pullRequest` is given, it checks that the review is still connected to that pull request (host, owner and repository compared without regard to case, the number exactly) and fails with `the review is connected to <url>, not to <expected>` if not. Then when a snapshot is given (a pull request that was just downloaded), it is saved first and always.
 3. The state is loaded: the review, the links, the connected pull request, and the refs a link may name (`known`).
 4. `change` runs. It returns the new state. Pure modules such as `review-links.ts` write `DB_HINT_PLACEHOLDER` (`--db <file.sqlite>`) in their command hints, and `changeReviewState` replaces it with `--db <quoted-db-path>` (`quoteCliPath`) if `change` throws.
 5. The same state object back means "nothing changed": nothing is written. Otherwise only the parts that differ are written (the review, the links, the connected pull request).
@@ -160,9 +160,9 @@ A comment that was just written on GitHub is not in the snapshot yet, and a link
 1. They load the review read-only and check what they can offline (connected pull request, a duplicate that has a finding with an own comment, …).
 2. The engine writes to GitHub (`publish.ts` or `reply.ts`). A dry run stops here.
 3. If the result is not an error and has a comment, the whole pull request is read again (`deps.refresh`, the same download as `pr sync`, outside any transaction).
-4. `changeReviewState(…, { snapshot })` saves that snapshot and the link (or the `replied to duplicate …` entry) in one transaction.
+4. `changeReviewState(…, { snapshot, pullRequest })` verifies the review is still connected to `pullRequest` and saves that snapshot and the link (or the `replied to duplicate …` entry, after verifying the duplicate is still linked to the expected finding and that finding still has the expected own comment) in one transaction.
 
-If step 3 fails, the result becomes an error that names the comment: `the comment was posted as r…, but the pull request could not be refreshed (<reason>); run "pr-comments pr sync --db <db>", then "pr-comments link own --db <db> <finding> r…"`. If step 4 fails, the transaction is rolled back (the snapshot too) and the error says how to record the link by hand. A rerun finds the comment again and records it.
+If step 3 fails, the result becomes an error that names the comment: `the comment was posted as r…, but the pull request could not be refreshed (<reason>); run "pr-comments pr sync --db <db>", then "pr-comments link own --db <db> <finding> r…"`. If step 4 fails, the transaction is rolled back (the snapshot too) and the error says how to record the link by hand (or, when the review was reconnected while `finding post` was in flight, to reconnect to the original pull request, run `pr sync`, and then `link own`). A rerun finds the comment again and records it.
 
 A side effect: the refresh also brings in whatever others wrote since the last sync.
 
