@@ -139,10 +139,11 @@ describe('parseReport — fences', () => {
     expect(parseReport(report(tildes, block(1)), PATH).findings).toHaveLength(1);
   });
 
-  it('reads an indented fence and a fence with an info string, and does not close on a fence with an info string', () => {
+  it('reads an indented fence and a fence with an info string, and does not close on a fence with an info string or non-breaking space', () => {
     const quoted = ['  ```ts title="x"', '```ts', '### ⏳ 🔴 F9 — quoted', '  ```', ''];
     expect(parseReport(report(quoted, block(1)), PATH).findings).toHaveLength(1);
     expect(failure(report(['```markdown', '```ts', '']))).toBe('a code fence is never closed');
+    expect(failure(report(['```', '```\u00a0', '']))).toBe('a code fence is never closed');
   });
 
   it('marks the lines after a fence opens, up to and including the one that closes it', () => {

@@ -27,7 +27,7 @@ interface Fence {
 
 export const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
 const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
-const CLOSING = /^\s*(`{3,}|~{3,})\s*$/;
+const CLOSING = /^\s*(`{3,}|~{3,})[ \t]*$/;
 
 function splitLines(text: string): string[] {
   const lines = text.split(/\r?\n/);
@@ -44,7 +44,7 @@ function parseAnchor(line: string): Pick<Evidence, 'path' | 'start' | 'end'> | u
 }
 
 // A backtick fence takes no backtick in its info string, so a line like "```x```" is prose.
-function openingFence(line: string): Opening | undefined {
+export function openingFence(line: string): Opening | undefined {
   const match = OPENING.exec(line);
   if (!match) return undefined;
   const [, marker = '', rest = ''] = match;
@@ -52,7 +52,7 @@ function openingFence(line: string): Opening | undefined {
 }
 
 // A closing fence carries no info string: "```ts" inside a "```" fence is content.
-function closesFence(line: string, marker: string): boolean {
+export function closesFence(line: string, marker: string): boolean {
   const closing = CLOSING.exec(line)?.[1];
   return closing !== undefined && closing.startsWith(marker[0] ?? '') && closing.length >= marker.length;
 }

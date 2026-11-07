@@ -1,3 +1,5 @@
+import { closesFence, openingFence } from './review-evidence.ts';
+
 export interface ReportState {
   marker: string;
   label: string;
@@ -44,8 +46,6 @@ export interface ParsedReport {
 
 const HEADING = /^(?<hashes>#{1,4})\s+(?<title>.*\S)\s*$/u;
 const FINDING = /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>[A-Za-z0-9-]+)\s+—\s+(?<title>.+)$/u;
-const FENCE = /^\s*(?<marker>`{3,}(?=[^`]*$)|~{3,})/u;
-const CLOSING_FENCE = /^\s*(?<marker>`{3,}|~{3,})\s*$/u;
 const TITLE = /^Review — (?<target>\S.*)$/u;
 const ID = /^F(?<number>\d+)$/u;
 const SECTIONS = ['Intro', 'Dashboard', 'Findings'];
@@ -144,11 +144,10 @@ function insideFences(lines: string[]): boolean[] {
   let open: string | undefined;
   const inside = lines.map((line) => {
     if (open === undefined) {
-      open = FENCE.exec(line)?.groups?.marker;
+      open = openingFence(line)?.marker;
       return false;
     }
-    const closing = CLOSING_FENCE.exec(line)?.groups?.marker;
-    if (closing !== undefined && closing[0] === open[0] && closing.length >= open.length) open = undefined;
+    if (closesFence(line, open)) open = undefined;
     return true;
   });
   if (open !== undefined) throw new Error('a code fence is never closed');

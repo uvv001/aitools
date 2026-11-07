@@ -1,6 +1,6 @@
 import type { PublishComment } from './publish.ts';
 import type { ParsedReport, ReportFinding } from './report-parse.ts';
-import { ANCHOR } from './review-evidence.ts';
+import { ANCHOR, closesFence, openingFence } from './review-evidence.ts';
 
 export interface Anchor {
   path: string;
@@ -28,8 +28,6 @@ export interface Extracted {
   unlinked: number;
 }
 
-const FENCE = /^\s*(`{3,}(?=[^`]*$)|~{3,})/;
-const CLOSING_FENCE = /^\s*(`{3,}|~{3,})\s*$/;
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
 const REFERENCE_LINK = /\[[^\]]+\]\[[^\]]*\]/;
 const REFERENCE_DEFINITION = /^\s{0,3}\[[^\]]+\]:\s*\S/;
@@ -104,11 +102,10 @@ function fenceMask(lines: string[]): boolean[] {
   let open: string | undefined;
   return lines.map((line) => {
     if (open === undefined) {
-      open = FENCE.exec(line)?.[1];
+      open = openingFence(line)?.marker;
       return open !== undefined;
     }
-    const closing = CLOSING_FENCE.exec(line)?.[1];
-    if (closing !== undefined && closing[0] === open[0] && closing.length >= open.length) open = undefined;
+    if (closesFence(line, open)) open = undefined;
     return true;
   });
 }
