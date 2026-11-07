@@ -23,7 +23,8 @@ const BLANK = /^[ \t]*$/u;
 const LINE_SEPARATORS = /[\r\n\u2028\u2029]/u;
 // NUL, the C0 controls other than TAB, LF and CR (CR is a line break matter), and DEL.
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
-const HEADING = /^#{1,4}\s+.*\S\s*$/u;
+const HEADING = /^ {0,3}#{1,4}\s+.*\S\s*$/u;
+const SETEXT_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/u;
 
 const WORD = /^[^\s`]+$/u;
 
@@ -58,15 +59,25 @@ function splitLines(what: string, text: string): string[] {
 // a heading counts outside the fences only.
 function checkLines(what: string, lines: string[], headings: boolean): void {
   let open: { marker: string; line: number } | undefined;
+  let plainTextAbove = false;
   for (const [index, line] of lines.entries()) {
     if (open === undefined) {
       const marker = openingFence(line)?.marker;
-      if (marker !== undefined) open = { marker, line: index + 1 };
-      else if (headings && HEADING.test(line)) {
+      if (marker !== undefined) {
+        open = { marker, line: index + 1 };
+        plainTextAbove = false;
+      } else if (headings && HEADING.test(line)) {
         throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
+      } else if (headings && plainTextAbove && SETEXT_UNDERLINE.test(line)) {
+        throw new Error(
+          `${what} contains a "${lines[index - 1]!.trim()}" heading (line ${index + 1}) — quote it in a code fence`,
+        );
+      } else {
+        plainTextAbove = !BLANK.test(line) && !/^ {0,3}(?:[-*+]|\d+[.)]|>)/u.test(line);
       }
     } else if (closesFence(line, open.marker)) {
       open = undefined;
+      plainTextAbove = false;
     }
   }
   if (open !== undefined) throw new Error(`${what} has an unclosed code fence (opened on line ${open.line})`);

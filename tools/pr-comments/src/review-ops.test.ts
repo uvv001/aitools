@@ -357,6 +357,8 @@ describe('addFinding', () => {
     ['#### Updates', 'a\n\n#### Updates', 3],
     ['#### Whatever', '#### Whatever', 1],
     ['####\tTabbed', 'x\n####\tTabbed', 2],
+    ['## Findings', '   ## Findings', 1],
+    ['Some text', 'Some text\n===', 2],
     ['#### Updates', '```\nx\n```\n#### Updates', 4],
   ])('refuses the heading "%s" in a description', (heading, description, line) => {
     refuses(
@@ -381,7 +383,7 @@ describe('addFinding', () => {
     expect(() =>
       addFinding(
         open(),
-        { ...FINDING, description: '```markdown\n```ts\n# quoted heading\n```\n\n```inline span```' },
+        { ...FINDING, description: '```markdown\n```ts\n    ```\n# quoted heading\n```\n\n```inline span```' },
         at(),
       ),
     ).not.toThrow();

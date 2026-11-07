@@ -26,8 +26,8 @@ interface Fence {
 }
 
 export const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
-const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
-const CLOSING = /^\s*(`{3,}|~{3,})[ \t]*$/;
+const OPENING = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const CLOSING = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 
 function splitLines(text: string): string[] {
   const lines = text.split(/\r?\n/);
