@@ -3239,12 +3239,19 @@ async function dumpReviewFile(arg) {
 		links
 	});
 }
+const samePullRequest = (a, b) => a.number === b.number && a.host.toLowerCase() === b.host.toLowerCase() && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase();
+function assertConnectedPullRequest(db, dbPath, expected) {
+	const connected = getMeta(db, PULL_REQUEST);
+	if (connected === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(dbPath)} <url>"`);
+	if (!samePullRequest(parsePullRequestUrl(connected), expected)) throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
+}
 async function changeReviewState(arg, change, options = {}) {
 	const paths = reviewPaths(arg);
 	const db = openReviewDb(paths.db, "existing");
 	let rendered;
 	try {
 		const changed = await inTransactionAsync(db, async () => {
+			if (options.pullRequest !== void 0) assertConnectedPullRequest(db, paths.db, options.pullRequest);
 			if (options.snapshot !== void 0) savePullRequest(db, options.snapshot);
 			const before = loadState(db);
 			let result;
@@ -3303,15 +3310,12 @@ async function mutateReviewFile(arg, mutate) {
 		result
 	};
 }
-const samePullRequest = (a, b) => a.number === b.number && a.host.toLowerCase() === b.host.toLowerCase() && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase();
 async function syncReviewFile(arg, data) {
 	const paths = reviewPaths(arg);
 	const db = openReviewDb(paths.db, "existing");
 	try {
 		inTransaction(db, () => {
-			const connected = getMeta(db, PULL_REQUEST);
-			if (connected === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(paths.db)} <url>"`);
-			if (!samePullRequest(parsePullRequestUrl(connected), data.pullRequest)) throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(data.pullRequest)}`);
+			assertConnectedPullRequest(db, paths.db, data.pullRequest);
 			savePullRequest(db, data);
 		}, { immediate: true });
 	} finally {
@@ -3775,10 +3779,14 @@ async function postFinding(arg, findingId, options, deps) {
 			reportError = (await changeReviewState(arg, (state) => ({
 				state: recordPosted(state, id, posted, action, result.state, deps.now()),
 				result: void 0
-			}), { snapshot })).reportError;
+			}), {
+				snapshot,
+				pullRequest: ref
+			})).reportError;
 			return result;
 		} catch (error) {
-			const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); record it with ${linkOwnCommand}`;
+			const reason = error instanceof Error ? error.message : String(error);
+			const message = `${was}, but it could not be recorded in the review (${reason}); ${/^the review is connected to .+, not to /.test(reason) ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : `record it with ${linkOwnCommand}`}`;
 			return {
 				...result,
 				action: "error",
@@ -3882,7 +3890,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+d0cc49a`;
+	return `pr-comments ${VERSION}+83f3cf8`;
 }
 //#endregion
 //#region src/cli.ts
