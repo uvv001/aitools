@@ -1477,9 +1477,23 @@ function stripLinks(text) {
 			if (bracketDepth !== 0) continue;
 			let parenDepth = 1;
 			let close = mid + 2;
+			while (close < current.length && (current[close] === " " || current[close] === "	")) close++;
+			if (current[close] === "<") {
+				const endAngle = current.indexOf(">", close + 1);
+				if (endAngle === -1 || current.slice(close + 1, endAngle).includes("<")) continue;
+				close = endAngle + 1;
+			}
 			while (close < current.length && parenDepth > 0) {
-				if (current[close] === "(") parenDepth++;
-				else if (current[close] === ")") parenDepth--;
+				const ch = current[close];
+				if (parenDepth === 1 && (ch === "\"" || ch === "'") && (current[close - 1] === " " || current[close - 1] === "	")) {
+					const endQuote = current.indexOf(ch, close + 1);
+					if (endQuote !== -1) {
+						close = endQuote + 1;
+						continue;
+					}
+				}
+				if (ch === "(") parenDepth++;
+				else if (ch === ")") parenDepth--;
 				close++;
 			}
 			if (parenDepth !== 0) continue;
@@ -3890,7 +3904,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+83f3cf8`;
+	return `pr-comments ${VERSION}+d7eaa23`;
 }
 //#endregion
 //#region src/cli.ts
