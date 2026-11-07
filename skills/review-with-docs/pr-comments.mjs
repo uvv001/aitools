@@ -3940,7 +3940,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 			reportError
 		};
 	} catch (error) {
-		const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); run the command again to record it`;
+		const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(pullRequestRef)}" and "pr-comments pr sync --db ${quotedDb}", restore the links with "pr-comments link own --db ${quotedDb} ${finding} ${own.ref}" and "pr-comments link duplicate --db ${quotedDb} ${finding} ${ref}", then run the command again to record it` : "run the command again to record it"}`;
 		return {
 			...replied,
 			result: {
@@ -3955,7 +3955,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+4d5217b`;
+	return `pr-comments ${VERSION}+6c6ec80`;
 }
 //#endregion
 //#region src/cli.ts
