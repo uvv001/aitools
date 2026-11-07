@@ -25,8 +25,10 @@ const LINE_SEPARATORS = /[\r\n\u2028\u2029]/u;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
 const HEADING = /^ {0,3}#{1,4}\s+.*\S\s*$/u;
 const SETEXT_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/u;
-const NON_PARAGRAPH =
-  /^ {0,3}(?:(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|>|(?:_[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:-[ \t]*){3,}$)|^(?: {4}|\t)/u;
+const THEMATIC_BREAK = /^ {0,3}(?:(?:_[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:-[ \t]*){3,})$/u;
+const CONTAINER_START = /^ {0,3}(?:(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|>)/u;
+const INTERRUPTS_PARAGRAPH = /^ {0,3}(?:(?:[-*+]|1[.)])(?:[ \t]|$)|>)/u;
+const LINK_DEFINITION = /^ {0,3}\[[^\]]+\]:[ \t]*\S/u;
 
 const WORD = /^[^\s`]+$/u;
 
@@ -62,24 +64,37 @@ function splitLines(what: string, text: string): string[] {
 function checkLines(what: string, lines: string[], headings: boolean): void {
   let open: { marker: string; line: number } | undefined;
   let plainTextAbove = false;
+  let inContainer = false;
   for (const [index, line] of lines.entries()) {
     if (open === undefined) {
       const marker = openingFence(line)?.marker;
       if (marker !== undefined) {
         open = { marker, line: index + 1 };
         plainTextAbove = false;
+        inContainer = false;
       } else if (headings && HEADING.test(line)) {
         throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
       } else if (headings && plainTextAbove && SETEXT_UNDERLINE.test(line)) {
         throw new Error(
           `${what} contains a "${lines[index - 1]!.trim()}" heading (line ${index + 1}) — quote it in a code fence`,
         );
-      } else {
-        plainTextAbove = !BLANK.test(line) && !NON_PARAGRAPH.test(line);
+      } else if (BLANK.test(line) || THEMATIC_BREAK.test(line)) {
+        plainTextAbove = false;
+        inContainer = false;
+      } else if (plainTextAbove) {
+        if (INTERRUPTS_PARAGRAPH.test(line)) {
+          plainTextAbove = false;
+          inContainer = true;
+        }
+      } else if (CONTAINER_START.test(line)) {
+        inContainer = true;
+      } else if (!inContainer && !/^(?: {4}|\t)/u.test(line) && !LINK_DEFINITION.test(line)) {
+        plainTextAbove = true;
       }
     } else if (closesFence(line, open.marker)) {
       open = undefined;
       plainTextAbove = false;
+      inContainer = false;
     }
   }
   if (open !== undefined) throw new Error(`${what} has an unclosed code fence (opened on line ${open.line})`);

@@ -363,6 +363,9 @@ describe('addFinding', () => {
     ['+1 for this', '+1 for this\n---', 2],
     ['1.5 seconds', '1.5 seconds\n===', 2],
     ['-flag', '-flag\n===', 2],
+    ['an indented line', 'The value wraps onto\n    an indented line\n---', 3],
+    ['an indented line', 'The value wraps onto\n\tan indented line\n===', 3],
+    ['2. of the loop', 'The call happens in step\n2. of the loop\n---', 3],
     ['#### Updates', '```\nx\n```\n#### Updates', 4],
   ])('refuses the heading "%s" in a description', (heading, description, line) => {
     refuses(
@@ -389,7 +392,8 @@ describe('addFinding', () => {
         open(),
         {
           ...FINDING,
-          description: '```markdown\n```ts\n    ```\n# quoted heading\n```\n\n```inline span```\n\n- item\n---\n    code\n---\n___\n---',
+          description:
+            '```markdown\n```ts\n    ```\n# quoted heading\n```\n\n```inline span```\n\n- item\n  continued\n---\n> quote\nlazy\n---\n[a]: /url\n---\n    code\n---\n___\n---',
         },
         at(),
       ),
