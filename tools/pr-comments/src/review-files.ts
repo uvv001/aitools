@@ -474,6 +474,9 @@ const samePullRequest = (a: PullRequestRef, b: PullRequestRef): boolean =>
   a.owner.toLowerCase() === b.owner.toLowerCase() &&
   a.repo.toLowerCase() === b.repo.toLowerCase();
 
+// The review was connected to another pull request while a download or post was in flight.
+export class ReconnectedError extends Error {}
+
 function assertConnectedPullRequest(db: DatabaseSync, dbPath: string, expected: PullRequestRef): void {
   const connected = getMeta(db, PULL_REQUEST);
   if (connected === undefined) {
@@ -482,7 +485,7 @@ function assertConnectedPullRequest(db: DatabaseSync, dbPath: string, expected: 
     );
   }
   if (!samePullRequest(parsePullRequestUrl(connected), expected)) {
-    throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
+    throw new ReconnectedError(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
   }
 }
 

@@ -6,7 +6,7 @@ import type { PullRequestRef } from './pr-url.ts';
 import { extractComment } from './report-extract.ts';
 import type { Anchor } from './report-extract.ts';
 import { parseReport } from './report-parse.ts';
-import { changeReviewState, loadReviewFile, quoteCliPath, snapshotGeneration } from './review-files.ts';
+import { changeReviewState, loadReviewFile, quoteCliPath, ReconnectedError, snapshotGeneration } from './review-files.ts';
 import { linksOf, recordPosted } from './review-links.ts';
 import type { PostedAction } from './review-links.ts';
 import { renderReport } from './review-render.ts';
@@ -134,10 +134,10 @@ export async function postFinding(
         return result;
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        const reconnected = /^the review is connected to .+, not to /.test(reason);
-        const advice = reconnected
-          ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}`
-          : `record it with ${linkOwnCommand}`;
+        const advice =
+          error instanceof ReconnectedError
+            ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}`
+            : `record it with ${linkOwnCommand}`;
         const message = `${was}, but it could not be recorded in the review (${reason}); ${advice}`;
         return { ...result, action: 'error', message };
       }
