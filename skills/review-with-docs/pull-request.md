@@ -75,9 +75,11 @@ agents**. Each brief carries:
 - the reply: one classification per pending ref, unlinked reply, or edited
   linked ref in its slice — `own <F>`, `duplicate <F>`,
   `counter-evidence <F> '<counter-evidence>'`, `note '<reason>'`, or the new
-  finding's reply line per [fleet.md](fleet.md) (naming the new finding's ref
-  where `<F>` does not exist yet) — plus its edited-comment marker where its
-  header shows `edited`, for the orchestrator to record.
+  finding's reply line per [fleet.md](fleet.md) — plus its edited-comment
+  marker where its header shows `edited`, for the orchestrator to record.
+  Where `<F>` is a new finding of the slice, the agent writes the `<ref>` of
+  its file `pr-comments/<ref>.md`, and the orchestrator records the id that
+  `finding add` gives that file.
 
 ## Publish
 
