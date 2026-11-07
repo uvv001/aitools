@@ -104,15 +104,15 @@ With no match, step 1 starts a new review.
    each finding in the open round, with `--unverified` where its evidence
    stayed unsettled — a fleet's reply line marks it ❓; the description follows
    [Evidence](#evidence). With a fleet, findings on a shared anchor merge per
-   [fleet.md](fleet.md). An empty pass is a result: record it with
-   `round update 'no findings'` (`'no new findings'` in a later round). Where
-   the user asked up front for a sync, run it now and record what others
-   wrote ([pull-request.md](pull-request.md)). Then tell the user and hand
-   over the report's path.
+   [fleet.md](fleet.md). Where the user asked up front for a sync, run it now
+   and record what others wrote ([pull-request.md](pull-request.md)). A round
+   that still has no finding is a result: record it with
+   `round update 'no findings'` (`'no new findings'` in a later round). Then
+   tell the user and hand over the report's path.
    **Ready when:** every finding carries severity, evidence, and a suggested
-   fix in its description and `finding list` shows each of them — or, on an
-   empty pass, the round records `no findings` (`no new findings` in a later
-   round) — where the user asked up front for a sync, step 6's `links`,
+   fix in its description and `finding list` shows each of them — or, where
+   the round has no finding, it records `no findings` (`no new findings` in a
+   later round) — where the user asked up front for a sync, step 6's `links`,
    `edits`, `verdicts`, and `tier bound` conditions hold, and the user has
    the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
