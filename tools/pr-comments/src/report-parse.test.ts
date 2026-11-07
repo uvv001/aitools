@@ -192,6 +192,9 @@ describe('parseReport — heading anchors', () => {
     expect(anchor('⏳ ⚪ F5 — <https://example.com/path>, <file.sqlite>, Use \\_literal_, and __outer _inner_ end__')).toBe(
       '--f5--httpsexamplecompath-filesqlite-use-_literal_-and-outer-inner-end',
     );
+    expect(anchor('⏳ ⚪ F6 — [Angle](<https://example.com/a)tail>) and [Titled](https://example.com/a_(b) "note) end")')).toBe(
+      '--f6--angle-and-titled',
+    );
   });
 
   it('keeps consecutive spaces as consecutive hyphens', () => {

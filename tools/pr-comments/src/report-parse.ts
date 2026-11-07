@@ -84,9 +84,23 @@ function stripLinks(text: string): string {
       if (bracketDepth !== 0) continue;
       let parenDepth = 1;
       let close = mid + 2;
+      while (close < current.length && (current[close] === ' ' || current[close] === '\t')) close++;
+      if (current[close] === '<') {
+        const endAngle = current.indexOf('>', close + 1);
+        if (endAngle === -1 || current.slice(close + 1, endAngle).includes('<')) continue;
+        close = endAngle + 1;
+      }
       while (close < current.length && parenDepth > 0) {
-        if (current[close] === '(') parenDepth++;
-        else if (current[close] === ')') parenDepth--;
+        const ch = current[close];
+        if (parenDepth === 1 && (ch === '"' || ch === "'") && (current[close - 1] === ' ' || current[close - 1] === '\t')) {
+          const endQuote = current.indexOf(ch, close + 1);
+          if (endQuote !== -1) {
+            close = endQuote + 1;
+            continue;
+          }
+        }
+        if (ch === '(') parenDepth++;
+        else if (ch === ')') parenDepth--;
         close++;
       }
       if (parenDepth !== 0) continue;
