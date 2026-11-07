@@ -31,7 +31,7 @@ const LIST_ITEM_WITH_CONTENT = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S/u;
 const EMPTY_LIST_ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]*$/u;
 const INTERRUPTS_PARAGRAPH = /^ {0,3}(?:(?:[-*+]|0{0,8}1[.)])[ \t]+\S|>)/u;
 const HTML_BLOCK_TAG =
-  /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|\/?>|$)/iu;
+  /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t][^>]*)?\/?>/iu;
 const HTML_INLINE_LINE =
   /^ {0,3}<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*)>[ \t]*$/u;
 const LINK_DEFINITION =
@@ -78,7 +78,7 @@ function splitLines(what: string, text: string): string[] {
 
 // Reads the lines as report-parse.ts does: a fence closes on a marker of its own character, at least as long, and
 // a heading counts outside the fences only.
-function checkLines(what: string, lines: string[]): void {
+function checkLines(what: string, lines: string[], headings = true): void {
   let open: { marker: string; line: number } | undefined;
   let openHtml: { close: RegExp; line: number } | undefined;
   let inHtmlBlock = false;
@@ -96,21 +96,24 @@ function checkLines(what: string, lines: string[]): void {
       }
       continue;
     }
-    if (openHtml !== undefined) {
-      if (openHtml.close.test(line)) openHtml = undefined;
-      continue;
-    }
     const marker = openingFence(line)?.marker;
-    const htmlClose = marker === undefined ? openingHtmlBlock(line) : undefined;
     if (marker !== undefined) {
       open = { marker, line: index + 1 };
       plainTextAbove = false;
       inQuote = false;
       inList = false;
       inHtmlBlock = false;
-    } else if (HEADING.test(line)) {
+      continue;
+    }
+    if (headings && HEADING.test(line)) {
       throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
-    } else if (plainTextAbove && SETEXT_UNDERLINE.test(line)) {
+    }
+    if (openHtml !== undefined) {
+      if (openHtml.close.test(line)) openHtml = undefined;
+      continue;
+    }
+    const htmlClose = openingHtmlBlock(line);
+    if (headings && plainTextAbove && SETEXT_UNDERLINE.test(line)) {
       const heading = lines[index - 1]!.replace(/^x: /u, '').trim();
       throw new Error(`${what} contains a "${heading}" heading (line ${index + 1}) — quote it in a code fence`);
     } else if (htmlClose !== undefined) {
@@ -119,7 +122,7 @@ function checkLines(what: string, lines: string[]): void {
       inList = false;
       inHtmlBlock = false;
       if (!htmlClose.test(line)) openHtml = { close: htmlClose, line: index + 1 };
-    } else if (BLANK.test(line) || THEMATIC_BREAK.test(line)) {
+    } else if (BLANK.test(line)) {
       plainTextAbove = false;
       inQuote = false;
       inList = false;
@@ -131,6 +134,10 @@ function checkLines(what: string, lines: string[]): void {
       inHtmlBlock = true;
     } else if (inHtmlBlock) {
       // Inside a Type 6 or Type 7 HTML block until the next blank line.
+    } else if (THEMATIC_BREAK.test(line)) {
+      plainTextAbove = false;
+      inQuote = false;
+      inList = false;
     } else if (plainTextAbove) {
       if (INTERRUPTS_PARAGRAPH.test(line)) {
         plainTextAbove = false;
@@ -163,15 +170,25 @@ function checkLines(what: string, lines: string[]): void {
   if (openHtml !== undefined) throw new Error(`${what} has an unclosed HTML block (opened on line ${openHtml.line})`);
 }
 
+function expandBulletIndent(line: string): string {
+  let col = 2;
+  let index = 0;
+  while (index < line.length && (line[index] === ' ' || line[index] === '\t')) {
+    col = line[index] === '\t' ? col + (4 - (col % 4)) : col + 1;
+    index++;
+  }
+  return ' '.repeat(col - 2) + line.slice(index);
+}
+
 // The text of a bullet, or of a note after a dash; undefined when blank. The lines after the first are indented by
 // two spaces, which keeps them inside the bullet; blank ones stay empty. The first line loses its trailing blanks.
 function bulletText(what: string, text: string): string | undefined {
   const [head = '', ...rest] = splitLines(what, trimmed(what, text));
   const first = head.trimEnd();
   if (first === '') return undefined;
-  checkLines(what, [`x: ${first}`, ...rest.map((line) => line.replace(/^\t/u, '  '))]);
+  checkLines(what, [`x: ${first}`, ...rest.map(expandBulletIndent)], true);
   const lines = [first, ...rest.map((line) => (BLANK.test(line) ? '' : `  ${line}`))];
-  checkLines(what, [`x: ${first}`, ...lines.slice(1)]);
+  checkLines(what, [`x: ${first}`, ...lines.slice(1)], false);
   return lines.join('\n');
 }
 
