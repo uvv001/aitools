@@ -1,7 +1,7 @@
 import type { PullRequestData } from './model.ts';
 import { composeBody } from './publish.ts';
 import type { OwnCommentReason, PublishComment, PublishHooks, PublishOptions, PublishResult } from './publish.ts';
-import { parsePullRequestUrl } from './pr-url.ts';
+import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { extractComment } from './report-extract.ts';
 import type { Anchor } from './report-extract.ts';
@@ -127,13 +127,17 @@ export async function postFinding(
         const changed = await changeReviewState(
           arg,
           (state) => ({ state: recordPosted(state, id, posted, action, result.state, deps.now()), result: undefined }),
-          { snapshot },
+          { snapshot, pullRequest: ref },
         );
         reportError = changed.reportError;
         return result;
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        const message = `${was}, but it could not be recorded in the review (${reason}); record it with ${linkOwnCommand}`;
+        const reconnected = /^the review is connected to .+, not to /.test(reason);
+        const advice = reconnected
+          ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}`
+          : `record it with ${linkOwnCommand}`;
+        const message = `${was}, but it could not be recorded in the review (${reason}); ${advice}`;
         return { ...result, action: 'error', message };
       }
     },

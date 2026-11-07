@@ -12,7 +12,7 @@ import type { OwnCommentReason, PublishComment, PublishOptions, PublishResult } 
 import { parseReport } from './report-parse.ts';
 import type { PullFile } from './rest.ts';
 import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
-import { linkOwn, unlink } from './review-links.ts';
+import { connectPullRequest, linkOwn, unlink } from './review-links.ts';
 import { addFinding, formatStamp, openRound, setState } from './review-ops.ts';
 import { postFinding } from './review-post.ts';
 import type { PostFindingDeps, PostFindingOptions } from './review-post.ts';
@@ -827,6 +827,32 @@ describe('a comment that could not be recorded', () => {
     });
     await sameBytes(db, during!);
     expect((await loadReviewFile(db)).links).toEqual([{ ref: 'r2', role: 'own', finding: 'F4' }]);
+  });
+
+  it('refuses to overwrite a pull request reconnected while the post was in flight', async () => {
+    const db = await startReview();
+    const otherPr = 'https://github.com/acme/widgets/pull/43';
+    const otherSnapshot = snapshot(['r9'], { number: 43, url: otherPr, title: 'Other PR' });
+    let during: Buffer | undefined;
+
+    const { posted } = await post(db, 'F1', async (comment, options) => {
+      await changeReviewState(db, (state) => ({ state: connectPullRequest(state, otherPr), result: undefined }));
+      await syncReviewFile(db, otherSnapshot);
+      during = await readFile(db);
+      return answer(comment, options, 'created', 'r2');
+    });
+
+    expect(posted.result).toMatchObject({
+      action: 'error',
+      comment: 'r2',
+      message:
+        `the comment was posted as r2, but it could not be recorded in the review (the review is connected to ${otherPr}, not to ${PR}); ` +
+        `reconnect with "pr-comments pr connect --db ${db} ${PR}" and "pr-comments pr sync --db ${db}", then ` +
+        LINK_OWN(db, 'r2'),
+    });
+    await sameBytes(db, during!);
+    expect((await loadReviewFile(db)).pullRequest).toBe(otherPr);
+    expect((await loadSnapshot(db))?.pullRequest.number).toBe(43);
   });
 });
 

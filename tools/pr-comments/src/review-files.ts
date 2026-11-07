@@ -447,12 +447,31 @@ export interface StateChange<T> {
   reportError?: Error;
 }
 
+const samePullRequest = (a: PullRequestRef, b: PullRequestRef): boolean =>
+  a.number === b.number &&
+  a.host.toLowerCase() === b.host.toLowerCase() &&
+  a.owner.toLowerCase() === b.owner.toLowerCase() &&
+  a.repo.toLowerCase() === b.repo.toLowerCase();
+
+function assertConnectedPullRequest(db: DatabaseSync, dbPath: string, expected: PullRequestRef): void {
+  const connected = getMeta(db, PULL_REQUEST);
+  if (connected === undefined) {
+    throw new Error(
+      `the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(dbPath)} <url>"`,
+    );
+  }
+  if (!samePullRequest(parsePullRequestUrl(connected), expected)) {
+    throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
+  }
+}
+
 // Loads the whole state of a review (the review, its links, its pull request, the refs a link may name), lets
 // `change` return the changed one, and saves what changed in ONE transaction: all of it or nothing, and nothing when
 // `change` throws or the changed review would not render to a valid report. `change` returning the very same state
 // object writes nothing, not even a byte of the file; otherwise only the parts that differ are written (the review
 // when its object is not the loaded one, the links when their content differs, the pull request when it differs).
-// `options.snapshot`, a pull request that was just downloaded, is saved first and always, so the state that `change`
+// `options.snapshot`, a pull request that was just downloaded, is saved first and always (after verifying the review
+// is still connected to `options.pullRequest` when given), so the state that `change`
 // gets (`known` included) already holds its comments, and a link to one of them is allowed; if the change fails,
 // the snapshot is rolled back with it. The transaction takes the write lock before it loads, so writers in several
 // processes run one after the other, each on what the one before saved; a writer waits for the lock (up to the busy
@@ -461,7 +480,7 @@ export interface StateChange<T> {
 export async function changeReviewState<T>(
   arg: string,
   change: (state: ReviewState) => StateChange<T> | Promise<StateChange<T>>,
-  options: { snapshot?: PullRequestData } = {},
+  options: { snapshot?: PullRequestData; pullRequest?: PullRequestRef } = {},
 ): Promise<StateChange<T>> {
   const paths = reviewPaths(arg);
   const db = openReviewDb(paths.db, 'existing');
@@ -470,6 +489,7 @@ export async function changeReviewState<T>(
     const changed = await inTransactionAsync(
       db,
       async () => {
+        if (options.pullRequest !== undefined) assertConnectedPullRequest(db, paths.db, options.pullRequest);
         if (options.snapshot !== undefined) savePullRequest(db, options.snapshot);
         const before = loadState(db);
         let result: StateChange<T>;
@@ -546,12 +566,6 @@ export interface SyncResult {
   annotations: number;
 }
 
-const samePullRequest = (a: PullRequestRef, b: PullRequestRef): boolean =>
-  a.number === b.number &&
-  a.host.toLowerCase() === b.host.toLowerCase() &&
-  a.owner.toLowerCase() === b.owner.toLowerCase() &&
-  a.repo.toLowerCase() === b.repo.toLowerCase();
-
 // Stores a downloaded pull request in the database, in one transaction under the write lock. The review must be
 // connected to a pull request, and it must be this one (host, owner and repository compared without regard to case).
 // The links stay as they are: what they point at is kept, as gone, when the pull request no longer has it.
@@ -562,13 +576,7 @@ export async function syncReviewFile(arg: string, data: PullRequestData): Promis
     inTransaction(
       db,
       () => {
-        const connected = getMeta(db, PULL_REQUEST);
-        if (connected === undefined) {
-          throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(paths.db)} <url>"`);
-        }
-        if (!samePullRequest(parsePullRequestUrl(connected), data.pullRequest)) {
-          throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(data.pullRequest)}`);
-        }
+        assertConnectedPullRequest(db, paths.db, data.pullRequest);
         savePullRequest(db, data);
       },
       { immediate: true },
