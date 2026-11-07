@@ -28,7 +28,8 @@ export interface Extracted {
   unlinked: number;
 }
 
-const FENCE = /^\s*(`{3,}|~{3,})/;
+const FENCE = /^\s*(`{3,}(?=[^`]*$)|~{3,})/;
+const CLOSING_FENCE = /^\s*(`{3,}|~{3,})\s*$/;
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
 const REFERENCE_LINK = /\[[^\]]+\]\[[^\]]*\]/;
 const REFERENCE_DEFINITION = /^\s{0,3}\[[^\]]+\]:\s*\S/;
@@ -102,12 +103,12 @@ function commentLines(id: string, anchor: Anchor): { start: number; end: number 
 function fenceMask(lines: string[]): boolean[] {
   let open: string | undefined;
   return lines.map((line) => {
-    const marker = FENCE.exec(line)?.[1];
     if (open === undefined) {
-      open = marker;
-      return marker !== undefined;
+      open = FENCE.exec(line)?.[1];
+      return open !== undefined;
     }
-    if (marker !== undefined && marker[0] === open[0] && marker.length >= open.length) open = undefined;
+    const closing = CLOSING_FENCE.exec(line)?.[1];
+    if (closing !== undefined && closing[0] === open[0] && closing.length >= open.length) open = undefined;
     return true;
   });
 }

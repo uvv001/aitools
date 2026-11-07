@@ -334,9 +334,9 @@ describe('extractComment', () => {
       expect(result).toMatchObject({ unlinked: 1, warnings: expect.not.arrayContaining([expect.stringContaining('artifact')]) });
     });
 
-    it('closes a fence only by the same character and at least the same length', () => {
-      const description = ['````', '```', '[a](x.md)', '~~~~', '````', '[b](y.md)'].join('\n');
-      expect(body(description)).toBe(['````', '```', '[a](x.md)', '~~~~', '````', 'b'].join('\n'));
+    it('closes a fence only by the same character and at least the same length, without an info string', () => {
+      const description = ['````', '```', '````ts', '[a](x.md)', '~~~~', '````', '[b](y.md)'].join('\n');
+      expect(body(description)).toBe(['````', '```', '````ts', '[a](x.md)', '~~~~', '````', 'b'].join('\n'));
     });
 
     it('counts unlinked links across the whole text', () => {

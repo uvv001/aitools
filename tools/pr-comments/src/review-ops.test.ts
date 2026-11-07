@@ -369,6 +369,7 @@ describe('addFinding', () => {
   it('refuses a description with an unclosed code fence', () => {
     for (const [description, line] of [
       ['a\n```ts\nb', 2],
+      ['```markdown\n```ts', 1],
       ['~~~\nx', 1],
       ['```\n~~~\nx', 1],
       ['````\n```\nx', 1],
@@ -376,6 +377,9 @@ describe('addFinding', () => {
     ] as const) {
       refuses(open(), (input) => addFinding(input, { ...FINDING, description }, at()), `description has an unclosed code fence (opened on line ${line})`);
     }
+    expect(() =>
+      addFinding(open(), { ...FINDING, description: '```markdown\n```ts\n# quoted heading\n```\n\n```inline span```' }, at()),
+    ).not.toThrow();
   });
 
   it('refuses an empty description and a lone carriage return', () => {

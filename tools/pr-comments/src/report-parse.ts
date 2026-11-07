@@ -44,7 +44,8 @@ export interface ParsedReport {
 
 const HEADING = /^(?<hashes>#{1,4})\s+(?<title>.*\S)\s*$/u;
 const FINDING = /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>[A-Za-z0-9-]+)\s+—\s+(?<title>.+)$/u;
-const FENCE = /^\s*(?<marker>`{3,}|~{3,})/u;
+const FENCE = /^\s*(?<marker>`{3,}(?=[^`]*$)|~{3,})/u;
+const CLOSING_FENCE = /^\s*(?<marker>`{3,}|~{3,})\s*$/u;
 const TITLE = /^Review — (?<target>\S.*)$/u;
 const ID = /^F(?<number>\d+)$/u;
 const SECTIONS = ['Intro', 'Dashboard', 'Findings'];
@@ -142,12 +143,12 @@ const same = (a: string[], b: string[]): boolean => a.length === b.length && a.e
 function insideFences(lines: string[]): boolean[] {
   let open: string | undefined;
   const inside = lines.map((line) => {
-    const marker = FENCE.exec(line)?.groups?.marker;
     if (open === undefined) {
-      open = marker;
+      open = FENCE.exec(line)?.groups?.marker;
       return false;
     }
-    if (marker !== undefined && marker[0] === open[0] && marker.length >= open.length) open = undefined;
+    const closing = CLOSING_FENCE.exec(line)?.groups?.marker;
+    if (closing !== undefined && closing[0] === open[0] && closing.length >= open.length) open = undefined;
     return true;
   });
   if (open !== undefined) throw new Error('a code fence is never closed');
