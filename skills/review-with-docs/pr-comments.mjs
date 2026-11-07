@@ -1448,7 +1448,8 @@ const SEVERITIES = [
 ];
 const HEADING$1 = /^(?<hashes>#{1,4})\s+(?<title>.*\S)\s*$/u;
 const FINDING$1 = /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>[A-Za-z0-9-]+)\s+—\s+(?<title>.+)$/u;
-const FENCE$2 = /^\s*(?<marker>`{3,}|~{3,})/u;
+const FENCE$2 = /^\s*(?<marker>`{3,}(?=[^`]*$)|~{3,})/u;
+const CLOSING_FENCE$2 = /^\s*(?<marker>`{3,}|~{3,})\s*$/u;
 const TITLE$1 = /^Review — (?<target>\S.*)$/u;
 const ID = /^F(?<number>\d+)$/u;
 const SECTIONS = [
@@ -1520,12 +1521,12 @@ const same = (a, b) => a.length === b.length && a.every((item, index) => item ==
 function insideFences(lines) {
 	let open;
 	const inside = lines.map((line) => {
-		const marker = FENCE$2.exec(line)?.groups?.marker;
 		if (open === void 0) {
-			open = marker;
+			open = FENCE$2.exec(line)?.groups?.marker;
 			return false;
 		}
-		if (marker !== void 0 && marker[0] === open[0] && marker.length >= open.length) open = void 0;
+		const closing = CLOSING_FENCE$2.exec(line)?.groups?.marker;
+		if (closing !== void 0 && closing[0] === open[0] && closing.length >= open.length) open = void 0;
 		return true;
 	});
 	if (open !== void 0) throw new Error("a code fence is never closed");
@@ -1912,7 +1913,8 @@ const FIXED = "🔧";
 const BLANK = /^[ \t]*$/u;
 const LINE_SEPARATORS = /[\r\n\u2028\u2029]/u;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
-const FENCE$1 = /^\s*(?<marker>`{3,}|~{3,})/u;
+const FENCE$1 = /^\s*(?<marker>`{3,}(?=[^`]*$)|~{3,})/u;
+const CLOSING_FENCE$1 = /^\s*(?<marker>`{3,}|~{3,})\s*$/u;
 const HEADING = /^#{1,4}\s+.*\S\s*$/u;
 const WORD = /^[^\s`]+$/u;
 function formatStamp(now) {
@@ -1934,15 +1936,16 @@ function splitLines(what, text) {
 }
 function checkLines(what, lines, headings) {
 	let open;
-	for (const [index, line] of lines.entries()) {
+	for (const [index, line] of lines.entries()) if (open === void 0) {
 		const marker = FENCE$1.exec(line)?.groups?.marker;
-		if (marker !== void 0) {
-			if (open === void 0) open = {
-				marker,
-				line: index + 1
-			};
-			else if (marker[0] === open.marker[0] && marker.length >= open.marker.length) open = void 0;
-		} else if (open === void 0 && headings && HEADING.test(line)) throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
+		if (marker !== void 0) open = {
+			marker,
+			line: index + 1
+		};
+		else if (headings && HEADING.test(line)) throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
+	} else {
+		const closing = CLOSING_FENCE$1.exec(line)?.groups?.marker;
+		if (closing !== void 0 && closing[0] === open.marker[0] && closing.length >= open.marker.length) open = void 0;
 	}
 	if (open !== void 0) throw new Error(`${what} has an unclosed code fence (opened on line ${open.line})`);
 }
@@ -3285,12 +3288,10 @@ function assertConnectedPullRequest(db, dbPath, expected) {
 }
 function assertFreshSnapshot(db, dbPath, snapshot, expectedGeneration) {
 	const stored = db.prepare("SELECT host, owner, repo, number, fetched_at FROM pr_pull_requests LIMIT 1").get();
-	const staleByTime = stored !== void 0 && samePullRequest(stored, snapshot.pullRequest) && snapshot.pullRequest.fetchedAt < stored.fetched_at;
-	const staleByGeneration = expectedGeneration !== void 0 && readSnapshotGeneration(db) !== expectedGeneration;
-	if (staleByTime || staleByGeneration) {
-		const stamp = stored?.fetched_at ?? snapshot.pullRequest.fetchedAt;
-		throw new Error(`a newer pull request snapshot (${stamp}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`);
-	}
+	const samePr = stored !== void 0 && samePullRequest(stored, snapshot.pullRequest);
+	const staleByTime = samePr && snapshot.pullRequest.fetchedAt < stored.fetched_at;
+	const staleByGeneration = samePr && snapshot.pullRequest.fetchedAt === stored.fetched_at && expectedGeneration !== void 0 && readSnapshotGeneration(db) !== expectedGeneration;
+	if (staleByTime || staleByGeneration) throw new Error(`a newer pull request snapshot (${stored.fetched_at}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`);
 }
 async function changeReviewState(arg, change, options = {}) {
 	const paths = reviewPaths(arg);
@@ -3507,7 +3508,8 @@ function pendingJson(items) {
 }
 //#endregion
 //#region src/report-extract.ts
-const FENCE = /^\s*(`{3,}|~{3,})/;
+const FENCE = /^\s*(`{3,}(?=[^`]*$)|~{3,})/;
+const CLOSING_FENCE = /^\s*(`{3,}|~{3,})\s*$/;
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
 const REFERENCE_LINK = /\[[^\]]+\]\[[^\]]*\]/;
 const REFERENCE_DEFINITION = /^\s{0,3}\[[^\]]+\]:\s*\S/;
@@ -3546,12 +3548,12 @@ function commentLines(id, anchor) {
 function fenceMask(lines) {
 	let open;
 	return lines.map((line) => {
-		const marker = FENCE.exec(line)?.[1];
 		if (open === void 0) {
-			open = marker;
-			return marker !== void 0;
+			open = FENCE.exec(line)?.[1];
+			return open !== void 0;
 		}
-		if (marker !== void 0 && marker[0] === open[0] && marker.length >= open.length) open = void 0;
+		const closing = CLOSING_FENCE.exec(line)?.[1];
+		if (closing !== void 0 && closing[0] === open[0] && closing.length >= open.length) open = void 0;
 		return true;
 	});
 }
@@ -3955,7 +3957,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+6c6ec80`;
+	return `pr-comments ${VERSION}+fd40377`;
 }
 //#endregion
 //#region src/cli.ts
