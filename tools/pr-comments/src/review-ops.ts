@@ -26,9 +26,13 @@ const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
 const HEADING = /^ {0,3}#{1,4}\s+.*\S\s*$/u;
 const SETEXT_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/u;
 const THEMATIC_BREAK = /^ {0,3}(?:(?:_[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:-[ \t]*){3,})$/u;
-const CONTAINER_START = /^ {0,3}(?:(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|>)/u;
-const INTERRUPTS_PARAGRAPH = /^ {0,3}(?:(?:[-*+]|1[.)])(?:[ \t]|$)|>)/u;
-const LINK_DEFINITION = /^ {0,3}\[[^\]]+\]:[ \t]*\S/u;
+const QUOTE_LINE = /^ {0,3}>/u;
+const LIST_ITEM_WITH_CONTENT = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S/u;
+const EMPTY_LIST_ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]*$/u;
+const INTERRUPTS_PARAGRAPH = /^ {0,3}(?:(?:[-*+]|0*1[.)])[ \t]+\S|>)/u;
+const HTML_BLOCK_LINE = /^ {0,3}<(?:!--[\s\S]*?--|\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^>]*)?)>[ \t]*$/u;
+const LINK_DEFINITION =
+  /^ {0,3}\[[^\]]+\]:[ \t]*(?:<[^<>\s]*>|[^\s<>]+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^()]*\)))?[ \t]*$/u;
 
 const WORD = /^[^\s`]+$/u;
 
@@ -61,54 +65,71 @@ function splitLines(what: string, text: string): string[] {
 
 // Reads the lines as report-parse.ts does: a fence closes on a marker of its own character, at least as long, and
 // a heading counts outside the fences only.
-function checkLines(what: string, lines: string[], headings: boolean): void {
+function checkLines(what: string, lines: string[]): void {
   let open: { marker: string; line: number } | undefined;
   let plainTextAbove = false;
-  let inContainer = false;
+  let inQuote = false;
+  let inList = false;
   for (const [index, line] of lines.entries()) {
     if (open === undefined) {
       const marker = openingFence(line)?.marker;
       if (marker !== undefined) {
         open = { marker, line: index + 1 };
         plainTextAbove = false;
-        inContainer = false;
-      } else if (headings && HEADING.test(line)) {
+        inQuote = false;
+        inList = false;
+      } else if (HEADING.test(line)) {
         throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
-      } else if (headings && plainTextAbove && SETEXT_UNDERLINE.test(line)) {
-        throw new Error(
-          `${what} contains a "${lines[index - 1]!.trim()}" heading (line ${index + 1}) — quote it in a code fence`,
-        );
-      } else if (BLANK.test(line) || THEMATIC_BREAK.test(line)) {
+      } else if (plainTextAbove && SETEXT_UNDERLINE.test(line)) {
+        const heading = lines[index - 1]!.replace(/^x: /u, '').trim();
+        throw new Error(`${what} contains a "${heading}" heading (line ${index + 1}) — quote it in a code fence`);
+      } else if (BLANK.test(line) || THEMATIC_BREAK.test(line) || HTML_BLOCK_LINE.test(line)) {
         plainTextAbove = false;
-        inContainer = false;
+        inQuote = false;
+        inList = false;
       } else if (plainTextAbove) {
         if (INTERRUPTS_PARAGRAPH.test(line)) {
           plainTextAbove = false;
-          inContainer = true;
+          inQuote = QUOTE_LINE.test(line);
+          inList = !inQuote;
         }
-      } else if (CONTAINER_START.test(line)) {
-        inContainer = true;
-      } else if (!inContainer && !/^(?: {4}|\t)/u.test(line) && !LINK_DEFINITION.test(line)) {
-        plainTextAbove = true;
+      } else if (QUOTE_LINE.test(line)) {
+        inQuote = true;
+        inList = false;
+      } else if (LIST_ITEM_WITH_CONTENT.test(line)) {
+        inList = true;
+        inQuote = false;
+      } else if (EMPTY_LIST_ITEM.test(line)) {
+        inList = false;
+        inQuote = false;
+      } else if (inList && /^(?: {2,}|\t)/u.test(line)) {
+        // Indented continuation of the open list item.
+      } else if (inQuote) {
+        // Lazy continuation of the open blockquote.
+      } else {
+        inList = false;
+        if (!/^(?: {4}|\t)/u.test(line) && !LINK_DEFINITION.test(line)) {
+          plainTextAbove = true;
+        }
       }
     } else if (closesFence(line, open.marker)) {
       open = undefined;
       plainTextAbove = false;
-      inContainer = false;
+      inQuote = false;
+      inList = false;
     }
   }
   if (open !== undefined) throw new Error(`${what} has an unclosed code fence (opened on line ${open.line})`);
 }
 
 // The text of a bullet, or of a note after a dash; undefined when blank. The lines after the first are indented by
-// two spaces, which keeps them inside the bullet and out of the headings; blank ones stay empty. The first line loses
-// its trailing blanks.
+// two spaces, which keeps them inside the bullet; blank ones stay empty. The first line loses its trailing blanks.
 function bulletText(what: string, text: string): string | undefined {
   const [head = '', ...rest] = splitLines(what, trimmed(what, text));
   const first = head.trimEnd();
   if (first === '') return undefined;
   const lines = [first, ...rest.map((line) => (BLANK.test(line) ? '' : `  ${line}`))];
-  checkLines(what, [`- ${first}`, ...lines.slice(1)], false);
+  checkLines(what, [`x: ${first}`, ...lines.slice(1)]);
   return lines.join('\n');
 }
 
@@ -127,7 +148,7 @@ function descriptionText(text: string): string {
   const from = lines.findIndex((line) => !BLANK.test(line));
   if (from < 0) throw new Error('description is empty');
   const kept = lines.slice(from, lines.findLastIndex((line) => !BLANK.test(line)) + 1);
-  checkLines('description', kept, true);
+  checkLines('description', kept);
   return kept.join('\n');
 }
 
