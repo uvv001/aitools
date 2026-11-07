@@ -2237,7 +2237,7 @@ function recordPosted(state, findingId, ref, action, where, now) {
 		}] : state.links
 	};
 }
-function recordReplied(state, ref, replyRef, where, now) {
+function recordReplied(state, ref, replyRef, where, now, expected) {
 	refuseAnnotation(ref, NOTHING_TO_REPLY);
 	checkedRef(ref);
 	checkedRef(replyRef);
@@ -2245,6 +2245,12 @@ function recordReplied(state, ref, replyRef, where, now) {
 	const link = linkOf(state.links, ref);
 	if (link === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate ${DB_HINT_PLACEHOLDER} <finding> ${ref}"`);
 	if (link.role !== "duplicate") throw new Error(link.role === "note" ? `${ref} is recorded as a note, not as a duplicate of a finding` : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`);
+	if (expected !== void 0) {
+		if (link.finding !== expected.finding) throw new Error(`${ref} is linked as a duplicate of ${link.finding}, not of ${expected.finding}; restore the link with "pr-comments link remove ${DB_HINT_PLACEHOLDER} ${ref}" and "pr-comments link duplicate ${DB_HINT_PLACEHOLDER} ${expected.finding} ${ref}"`);
+		const currentOwn = linksOf(state.links, expected.finding).find((item) => item.role === "own");
+		if (currentOwn === void 0) throw new Error(`${expected.finding} has no own comment; link ${expected.own} with "pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`);
+		if (currentOwn.ref !== expected.own) throw new Error(`the own comment of ${expected.finding} is ${currentOwn.ref}, not ${expected.own}; restore ${expected.own} with "pr-comments link remove ${DB_HINT_PLACEHOLDER} ${currentOwn.ref}" and "pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`);
+	}
 	const found = findFinding$1(state.data, link.finding);
 	const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;
 	const recorded = (text) => {
@@ -3881,9 +3887,15 @@ async function replyToDuplicate(arg, ref, options, deps) {
 	}
 	try {
 		const { reportError } = await changeReviewState(arg, (state) => ({
-			state: recordReplied(state, ref, replyRef, result.state, deps.now()),
+			state: recordReplied(state, ref, replyRef, result.state, deps.now(), {
+				finding,
+				own: own.ref
+			}),
 			result: void 0
-		}), { snapshot });
+		}), {
+			snapshot,
+			pullRequest: pullRequestRef
+		});
 		return reportError === void 0 ? replied : {
 			...replied,
 			reportError
@@ -3904,7 +3916,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+d7eaa23`;
+	return `pr-comments ${VERSION}+e7d33df`;
 }
 //#endregion
 //#region src/cli.ts
