@@ -7,7 +7,7 @@ import { extractComment } from './report-extract.ts';
 import type { Anchor } from './report-extract.ts';
 import { parseReport } from './report-parse.ts';
 import { changeReviewState, loadReviewFile, quoteCliPath, ReconnectedError, snapshotGeneration } from './review-files.ts';
-import { linksOf, recordPosted } from './review-links.ts';
+import { FindingChangedError, linksOf, recordPosted } from './review-links.ts';
 import type { PostedAction } from './review-links.ts';
 import { renderReport } from './review-render.ts';
 import { findFinding } from './review-view.ts';
@@ -150,7 +150,7 @@ export async function postFinding(
         const advice =
           error instanceof ReconnectedError
             ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}`
-            : reason.endsWith('changed while its comment was being posted')
+            : error instanceof FindingChangedError
               ? own === undefined
                 ? `run "pr-comments pr sync --db ${quotedDb}", record it with ${linkOwnCommand}, then run ${postCommand} again to update the comment`
                 : `run ${postCommand} again to update the comment`

@@ -877,6 +877,27 @@ describe('a comment that could not be recorded', () => {
     });
     await sameBytes(db, during!);
     expect((await loadReviewFile(db)).links).toEqual([]);
+
+    await withOwn(db, 'F1', 'r1');
+    const updated = await post(
+      db,
+      'F1',
+      async (comment, options) => {
+        await mutateReviewFile(db, (data) => ({
+          data: setDescription(data, 'F1', { description: 'Third evidence.\n\n`src/other.ts:7`' }, NOW),
+          result: undefined,
+        }));
+        return answer(comment, options, 'updated', 'r1');
+      },
+      { byAgent: true },
+    );
+    expect(updated.posted.result).toMatchObject({
+      action: 'error',
+      comment: 'r1',
+      message:
+        'the comment is r1 on GitHub, but it could not be recorded in the review (F1 changed while its comment was being posted); ' +
+        `run "pr-comments finding post --db ${db} --by-agent F1" again to update the comment`,
+    });
   });
 });
 

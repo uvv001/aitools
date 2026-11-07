@@ -1870,7 +1870,7 @@ describe('syncReviewFile', () => {
     expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c2']));
   });
 
-  it('refuses a stale snapshot when a newer one was stored first', async () => {
+  it('refuses a snapshot with an earlier fetchedAt than the stored one', async () => {
     const newer = snapshotOf(['r1', 'c9999'], { fetchedAt: '2026-01-06T12:01:00Z' });
     const older = snapshotOf(['r1'], { fetchedAt: '2026-01-06T12:00:00Z' });
     await syncReviewFile(db, newer);
@@ -1883,23 +1883,33 @@ describe('syncReviewFile', () => {
       new Error(`a newer pull request snapshot (2026-01-06T12:01:00Z) is already stored; run "pr-comments pr sync --db ${db}" again`),
     );
     expect((await bytes()).equals(before)).toBe(true);
+    expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c9999']));
+  });
 
+  it('refuses a same-second snapshot when the generation changed meanwhile', async () => {
+    await syncReviewFile(db, snapshotOf(['r1'], { fetchedAt: '2026-01-06T12:01:00Z' }));
     const sameSecondGen = snapshotGeneration(db);
     await syncReviewFile(db, snapshotOf(['r1', 'c9999'], { fetchedAt: '2026-01-06T12:01:00Z' }));
     const afterSameSecond = await bytes();
+
     await expect(
       syncReviewFile(db, snapshotOf(['r1'], { fetchedAt: '2026-01-06T12:01:00Z' }), { expectedGeneration: sameSecondGen }),
     ).rejects.toThrow(
       new Error(`a newer pull request snapshot (2026-01-06T12:01:00Z) is already stored; run "pr-comments pr sync --db ${db}" again`),
     );
-
     expect((await bytes()).equals(afterSameSecond)).toBe(true);
     expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c9999']));
+  });
+
+  it('accepts a snapshot with a later fetchedAt even when the generation changed', async () => {
+    await syncReviewFile(db, snapshotOf(['r1'], { fetchedAt: '2026-01-06T12:00:00Z' }));
+    const staleGen = snapshotGeneration(db);
+    await syncReviewFile(db, snapshotOf(['r1', 'c9999'], { fetchedAt: '2026-01-06T12:01:00Z' }));
 
     await syncReviewFile(
       db,
       snapshotOf(['r1', 'c9999', 'c10000'], { fetchedAt: '2026-01-06T12:02:00Z' }),
-      { expectedGeneration: sameSecondGen },
+      { expectedGeneration: staleGen },
     );
     expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c9999', 'c10000']));
   });

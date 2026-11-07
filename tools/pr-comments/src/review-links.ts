@@ -177,6 +177,9 @@ export function unlink(state: ReviewState, ref: string, now: Date, note?: string
 
 export type PostedAction = 'created' | 'updated' | 'unchanged';
 
+// The finding's title, severity, or description changed while its comment was being posted.
+export class FindingChangedError extends Error {}
+
 // What `finding post` records after publishing the finding's comment `ref`. The finding's own link becomes `ref`
 // (a finding whose own link is another comment is an error: a posted comment cannot move). `unchanged` with an
 // own link that already is `ref` changes nothing and returns the same state. `where` is the publish state.
@@ -201,7 +204,7 @@ export function recordPosted(
     expected !== undefined &&
     (found.title !== expected.title || found.severity !== expected.severity || found.description !== expected.description)
   ) {
-    throw new Error(`${found.id} changed while its comment was being posted`);
+    throw new FindingChangedError(`${found.id} changed while its comment was being posted`);
   }
   if (own !== undefined && action === 'unchanged') return state;
   const pending = where === 'pending' ? ' to the pending review' : '';

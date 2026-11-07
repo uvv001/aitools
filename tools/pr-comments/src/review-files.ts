@@ -451,12 +451,18 @@ export interface StateChange<T> {
   reportError?: Error;
 }
 
+const SNAPSHOT_GENERATION = 'snapshot_generation';
+
 function readSnapshotGeneration(db: DatabaseSync): number {
-  return (db.prepare('PRAGMA application_id').get() as { application_id: number }).application_id;
+  return Number(getMeta(db, SNAPSHOT_GENERATION) ?? '0');
 }
 
 function bumpSnapshotGeneration(db: DatabaseSync): void {
-  db.exec(`PRAGMA application_id = ${readSnapshotGeneration(db) + 1}`);
+  const next = String(readSnapshotGeneration(db) + 1);
+  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(
+    SNAPSHOT_GENERATION,
+    next,
+  );
 }
 
 export function snapshotGeneration(arg: string): number {
