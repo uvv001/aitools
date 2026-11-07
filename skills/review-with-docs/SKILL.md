@@ -134,16 +134,19 @@ With no match, step 1 starts a new review.
    review. The triage batch the user just ruled on may be partial, and its
    approved findings can go out before the rest are ruled. Follow
    [pull-request.md](pull-request.md).
-   **Ready when:** `finding list --state approved --unposted` lists only
-   findings the user chose to hold back or whose refused post is the user's
-   call, `link pending` prints nothing, no thread has an unlinked reply
-   ([pull-request.md](pull-request.md)), every edited linked comment's
-   edited-comment marker and the verdict marker
-   ([pull-request.md](pull-request.md)) of every nonempty submitted review
-   verdict body that raises or addresses a concern appear in `report dump`,
-   with a PR-comment dispatch the index shows the tier bound of
-   [fleet.md](fleet.md), and the user knows the pending review waits for their
-   submit.
+   **Ready when:**
+   - **posts:** `finding list --state approved --unposted` lists only findings
+     the user chose to hold back or whose refused post is the user's call;
+   - **links:** `link pending` prints nothing and no thread has an unlinked
+     reply ([pull-request.md](pull-request.md));
+   - **edits:** no unrecorded edit ([pull-request.md](pull-request.md))
+     remains;
+   - **verdicts:** the verdict marker ([pull-request.md](pull-request.md)) of
+     every nonempty submitted review verdict body that raises or addresses a
+     concern appears in `report dump`;
+   - **tier bound:** where a PR-comment dispatch ran, the index shows the tier
+     bound of [fleet.md](fleet.md);
+   - the user knows the pending review waits for their submit.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR. A pull
    request target is synced first (`pr sync`, then
@@ -172,8 +175,8 @@ With no match, step 1 starts a new review.
    hold for the round's scope at the new revision (with a fleet, `recheck` in
    the index on a family other than the orchestrator's where the orchestrator
    wrote the fixes); every finding the re-check covers carries a `Round <n>:`
-   entry; and on a pull request target, step 6's link, edited-comment,
-   review-verdict, and tier-bound Ready-when conditions hold.
+   entry; and on a pull request target, step 6's `links`, `edits`, `verdicts`,
+   and `tier bound` Ready-when conditions hold.
 
 Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 
