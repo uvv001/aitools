@@ -540,7 +540,13 @@ describe('createGraphQLClient', () => {
 
   it('keeps HTTP 403 rate limits as plain errors with the body message and Retry-After', async () => {
     const failing = (response: () => Response) => createGraphQLClient('ghe.example.com', 's', (async () => response()) as typeof fetch)('q', {});
-    const failure = (promise: Promise<unknown>) => promise.catch((e: unknown) => e as Error);
+    const failure = (promise: Promise<unknown>): Promise<Error> =>
+      promise.then(
+        () => {
+          throw new Error('expected the request to fail');
+        },
+        (e: Error) => e,
+      );
 
     const secondary = await failure(
       failing(() =>
