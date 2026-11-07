@@ -704,4 +704,54 @@ describe('a reply that could not be recorded', () => {
     expect(await contentOf(db)).toStrictEqual(recorded);
     await expectSound(db);
   });
+
+  it('refuses to record the reply under another finding when the duplicate link was reassigned meanwhile', async () => {
+    const db = await startReview();
+    const during: { bytes?: Buffer } = {};
+
+    const { replied } = await reply(db, 'r2', async (_ref, request, options) => {
+      await changeReviewState(db, (state) => ({
+        state: linkDuplicate(unlink(state, 'r2', NOW), 'F2', 'r2', NOW),
+        result: undefined,
+      }));
+      during.bytes = await readFile(db);
+      return outcome('created', 'r10', request, options);
+    });
+
+    expect(replied.result).toMatchObject({
+      action: 'error',
+      comment: 'r10',
+      message:
+        'the reply was posted as r10, but it could not be recorded in the review ' +
+        `(r2 is linked as a duplicate of F2, not of F1; restore the link with "pr-comments link remove --db ${db} r2" and "pr-comments link duplicate --db ${db} F1 r2"); ` +
+        'run the command again to record it',
+    });
+    expect((await updatesOf(db, 'F2')).some((text) => text.includes('replied to duplicate'))).toBe(false);
+    await sameBytes(db, during.bytes!);
+  });
+
+  it('refuses to record the reply when the finding own comment changed meanwhile', async () => {
+    const db = await startReview();
+    const during: { bytes?: Buffer } = {};
+
+    const { replied } = await reply(db, 'r2', async (_ref, request, options) => {
+      await changeReviewState(db, (state) => ({
+        state: linkOwn(unlink(unlink(state, 'r1', NOW), 'r5', NOW), 'F1', 'r5', NOW),
+        result: undefined,
+      }));
+      during.bytes = await readFile(db);
+      return outcome('created', 'r10', request, options);
+    });
+
+    expect(replied.result).toMatchObject({
+      action: 'error',
+      comment: 'r10',
+      message:
+        'the reply was posted as r10, but it could not be recorded in the review ' +
+        `(the own comment of F1 is r5, not r1; restore r1 with "pr-comments link remove --db ${db} r5" and "pr-comments link own --db ${db} F1 r1"); ` +
+        'run the command again to record it',
+    });
+    expect((await updatesOf(db, 'F1')).some((text) => text.includes('replied to duplicate'))).toBe(false);
+    await sameBytes(db, during.bytes!);
+  });
 });

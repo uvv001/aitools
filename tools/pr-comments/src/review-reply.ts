@@ -117,8 +117,11 @@ export async function replyToDuplicate(
   try {
     const { reportError } = await changeReviewState(
       arg,
-      (state) => ({ state: recordReplied(state, ref, replyRef, result.state, deps.now()), result: undefined }),
-      { snapshot },
+      (state) => ({
+        state: recordReplied(state, ref, replyRef, result.state, deps.now(), { finding, own: own.ref }),
+        result: undefined,
+      }),
+      { snapshot, pullRequest: pullRequestRef },
     );
     return reportError === undefined ? replied : { ...replied, reportError };
   } catch (error) {

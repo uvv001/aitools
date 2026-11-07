@@ -221,6 +221,7 @@ export function recordReplied(
   replyRef: string,
   where: 'pending' | 'posted' | undefined,
   now: Date,
+  expected?: { finding: string; own: string },
 ): ReviewState {
   refuseAnnotation(ref, NOTHING_TO_REPLY);
   checkedRef(ref);
@@ -236,6 +237,28 @@ export function recordReplied(
         ? `${ref} is recorded as a note, not as a duplicate of a finding`
         : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`,
     );
+  }
+  if (expected !== undefined) {
+    if (link.finding !== expected.finding) {
+      throw new Error(
+        `${ref} is linked as a duplicate of ${link.finding!}, not of ${expected.finding}; ` +
+          `restore the link with "pr-comments link remove ${DB_HINT_PLACEHOLDER} ${ref}" and ` +
+          `"pr-comments link duplicate ${DB_HINT_PLACEHOLDER} ${expected.finding} ${ref}"`,
+      );
+    }
+    const currentOwn = linksOf(state.links, expected.finding).find((item) => item.role === 'own');
+    if (currentOwn === undefined) {
+      throw new Error(
+        `${expected.finding} has no own comment; link ${expected.own} with "pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`,
+      );
+    }
+    if (currentOwn.ref !== expected.own) {
+      throw new Error(
+        `the own comment of ${expected.finding} is ${currentOwn.ref}, not ${expected.own}; ` +
+          `restore ${expected.own} with "pr-comments link remove ${DB_HINT_PLACEHOLDER} ${currentOwn.ref}" and ` +
+          `"pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`,
+      );
+    }
   }
   const found = findFinding(state.data, link.finding!);
   const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;
