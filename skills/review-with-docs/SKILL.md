@@ -92,9 +92,7 @@ With no match, step 1 starts a new review.
    never reads as an unfinished step.
 3. **Validate.** Apply the rule set to the changeset under the Validation
    rules below. Round 1 — fleet briefs included — reads the changeset
-   without the PR's existing comments, so they cannot frame it; a sync the
-   user asks for up front enriches the report only after this pass
-   ([pull-request.md](pull-request.md)).
+   without the PR's existing comments, so they cannot frame it.
    **Ready when:** every rule applied to every path its scope covers, every
    changed line outside the exclusions read for purpose and the ecosystem's
    best practices, and every finding evidenced or opened as ❓ unverified;
@@ -107,12 +105,16 @@ With no match, step 1 starts a new review.
    stayed unsettled — a fleet's reply line marks it ❓; the description follows
    [Evidence](#evidence). With a fleet, findings on a shared anchor merge per
    [fleet.md](fleet.md). An empty pass is a result: record it with
-   `round update 'no findings'` (`'no new findings'` in a later round). Then
-   tell the user and hand over the report's path.
+   `round update 'no findings'` (`'no new findings'` in a later round). Where
+   the user asked up front for a sync, run it now and record what others
+   wrote ([pull-request.md](pull-request.md)). Then tell the user and hand
+   over the report's path.
    **Ready when:** every finding carries severity, evidence, and a suggested
    fix in its description and `finding list` shows each of them — or, on an
    empty pass, the round records `no findings` (`no new findings` in a later
-   round) — and the user has the report's path.
+   round) — where the user asked up front for a sync, step 6's `links`,
+   `edits`, `verdicts`, and `tier bound` conditions hold, and the user has
+   the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
