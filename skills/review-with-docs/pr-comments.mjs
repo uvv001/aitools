@@ -1412,8 +1412,8 @@ function dumpReview$1(data, extra = {}) {
 //#endregion
 //#region src/review-evidence.ts
 const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
-const OPENING = /^\s*(`{3,}|~{3,})(.*)$/;
-const CLOSING = /^\s*(`{3,}|~{3,})[ \t]*$/;
+const OPENING = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const CLOSING = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 function splitLines$1(text) {
 	const lines = text.split(/\r?\n/);
 	if (lines.at(-1) === "") lines.pop();
@@ -1910,7 +1910,8 @@ const FIXED = "🔧";
 const BLANK = /^[ \t]*$/u;
 const LINE_SEPARATORS = /[\r\n\u2028\u2029]/u;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
-const HEADING = /^#{1,4}\s+.*\S\s*$/u;
+const HEADING = /^ {0,3}#{1,4}\s+.*\S\s*$/u;
+const SETEXT_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/u;
 const WORD = /^[^\s`]+$/u;
 function formatStamp(now) {
 	const pad = (value, width = 2) => String(value).padStart(width, "0");
@@ -1931,14 +1932,22 @@ function splitLines(what, text) {
 }
 function checkLines(what, lines, headings) {
 	let open;
+	let plainTextAbove = false;
 	for (const [index, line] of lines.entries()) if (open === void 0) {
 		const marker = openingFence(line)?.marker;
-		if (marker !== void 0) open = {
-			marker,
-			line: index + 1
-		};
-		else if (headings && HEADING.test(line)) throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
-	} else if (closesFence(line, open.marker)) open = void 0;
+		if (marker !== void 0) {
+			open = {
+				marker,
+				line: index + 1
+			};
+			plainTextAbove = false;
+		} else if (headings && HEADING.test(line)) throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
+		else if (headings && plainTextAbove && SETEXT_UNDERLINE.test(line)) throw new Error(`${what} contains a "${lines[index - 1].trim()}" heading (line ${index + 1}) — quote it in a code fence`);
+		else plainTextAbove = !BLANK.test(line) && !/^ {0,3}(?:[-*+]|\d+[.)]|>)/u.test(line);
+	} else if (closesFence(line, open.marker)) {
+		open = void 0;
+		plainTextAbove = false;
+	}
 	if (open !== void 0) throw new Error(`${what} has an unclosed code fence (opened on line ${open.line})`);
 }
 function bulletText(what, text) {
@@ -3961,7 +3970,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+dd19a35`;
+	return `pr-comments ${VERSION}+8922ca6`;
 }
 //#endregion
 //#region src/cli.ts
