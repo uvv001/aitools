@@ -113,7 +113,7 @@ With no match, step 1 starts a new review.
    fix in its description and `finding list` shows each of them — or, where
    the round has no finding, it records `no findings` (`no new findings` in a
    later round) — where the user asked up front for a sync, the pull request's
-   comments are synced (step 6), and the user has the report's path.
+   comments are reconciled (step 6), and the user has the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
@@ -138,7 +138,7 @@ With no match, step 1 starts a new review.
    **Ready when:**
    - **posts:** `finding list --state approved --unposted` lists only findings
      the user chose to hold back or whose refused post is the user's call;
-   - the pull request's comments are **synced**:
+   - the pull request's comments are **reconciled**:
      - **links:** `link pending` prints nothing and no thread has an unlinked
        reply ([pull-request.md](pull-request.md));
      - **edits:** no unrecorded edit ([pull-request.md](pull-request.md))
@@ -151,9 +151,8 @@ With no match, step 1 starts a new review.
    - the user knows the pending review waits for their submit.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR. A pull
-   request target is synced first (`pr sync`, then
-   [pull-request.md](pull-request.md) for what is new), so the round sees what
-   others wrote.
+   request target runs `pr sync` first, then [pull-request.md](pull-request.md)
+   for what is new, so the round sees what others wrote.
    Every round reads the **full changeset** at the new revision — never a
    diff between revisions, because authors amend and force-push and
    per-commit attribution misleads. `round open --revision --base --note`
@@ -177,8 +176,8 @@ With no match, step 1 starts a new review.
    hold for the round's scope at the new revision (with a fleet, `recheck` in
    the index on a family other than the orchestrator's where the orchestrator
    wrote the fixes); every finding the re-check covers carries a `Round <n>:`
-   entry; and on a pull request target, the pull request's comments are synced
-   (step 6).
+   entry; and on a pull request target, the pull request's comments are
+   reconciled (step 6).
 
 Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 
