@@ -62,8 +62,7 @@ bodies and slices the pending refs, unlinked replies, and edited linked refs
 (keeping each thread's refs in one slice) across parallel **PR-comment
 agents**. Each brief carries:
 
-- the agent's model, the shared brief, and the read-only contract of
-  [fleet.md](fleet.md);
+- the agent's model and the shared brief of [fleet.md](fleet.md);
 - the command
   `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`,
   run in the reviewed repository;

@@ -20,15 +20,16 @@ where the schema offers them. Where the orchestrator wrote the fixes,
 `recheck` runs on a family other than the orchestrator's.
 
 The **shared brief** — every brief carries it — is the pinned revision, its
-base (or none) and the dirty-tree remark, and the Evidence section and the
-Validation rule-collision and severity rules of [SKILL.md](SKILL.md). A rule,
-`purpose-fit`, or `best-practices` brief also carries the rule verbatim (where
-one applies), the paths in its scope, the changeset's purpose as its author
-states it, and its output: one file per finding — the description exactly as
-`finding add` takes it — and a **coverage file** naming the rule, the paths
-checked, the assumptions it set aside with the reason, and the outcome,
-`no findings` included; it replies with one line per finding — file, severity,
-title, anchor, and ❓ for an unverified one — or `no findings`.
+base (or none) and the dirty-tree remark, the Evidence section and the
+Validation rule-collision and severity rules of [SKILL.md](SKILL.md), and the
+read-only contract below. A rule, `purpose-fit`, or `best-practices` brief
+also carries the rule verbatim (where one applies), the paths in its scope,
+the changeset's purpose as its author states it, and its output: one file per
+finding — the description exactly as `finding add` takes it — and a **coverage
+file** naming the rule, the paths checked, the assumptions it set aside with
+the reason, and the outcome, `no findings` included; it replies with one line
+per finding — file, severity, title, anchor, and ❓ for an unverified one — or
+`no findings`.
 
 The **read-only contract**: the orchestrator alone runs commands that change
 the review, so every dispatched agent writes files only (its own, in the
