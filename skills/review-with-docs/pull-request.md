@@ -69,7 +69,7 @@ agents**. Each brief carries:
   run in the reviewed repository;
 - the findings the review carries (listed as in the Later rounds of
   [fleet.md](fleet.md)), the already linked refs, the user's login, the
-  edited-comment marker definition, and the table and the paragraph above;
+  edited-comment marker definition, and the table and the paragraph after it;
 - the output: a description file per [fleet.md](fleet.md) for each concern no
   finding covers yet;
 - the reply: one classification per pending ref, unlinked reply, or edited
