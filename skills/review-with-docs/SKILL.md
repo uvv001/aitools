@@ -67,10 +67,7 @@ With no match, step 1 starts a new review.
    feature name), with
    `--db <review-folder>/<yyyy-mm-dd>_<slug>_review.sqlite` where the host
    provides a session folder and `--pr <url>` where the target is a pull
-   request. That first pass — fleet briefs included — reads the changeset
-   without the PR's existing comments, so they cannot frame it; the user asks
-   for the sync, and even when requested up front, the comments enrich the
-   report only after the pass ([pull-request.md](pull-request.md)).
+   request.
    **Ready when:** the database and report exist in the review folder, the
    reviewed revision and its base (or none) are pinned, on a pull request
    target `pr show` names that pull request, and the user's target and base
@@ -94,7 +91,10 @@ With no match, step 1 starts a new review.
    note naming the rule sources — or `rules: none apply`, so an empty rule set
    never reads as an unfinished step.
 3. **Validate.** Apply the rule set to the changeset under the Validation
-   rules below.
+   rules below. Round 1 — fleet briefs included — reads the changeset
+   without the PR's existing comments, so they cannot frame it; a sync the
+   user asks for up front enriches the report only after this pass
+   ([pull-request.md](pull-request.md)).
    **Ready when:** every rule applied to every path its scope covers, every
    changed line outside the exclusions read for purpose and the ecosystem's
    best practices, and every finding evidenced or opened as ❓ unverified;
