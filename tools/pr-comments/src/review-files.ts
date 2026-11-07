@@ -498,16 +498,16 @@ function assertFreshSnapshot(
   const stored = db.prepare('SELECT host, owner, repo, number, fetched_at FROM pr_pull_requests LIMIT 1').get() as
     | { host: string; owner: string; repo: string; number: number; fetched_at: string }
     | undefined;
-  const staleByTime =
-    stored !== undefined &&
-    samePullRequest(stored, snapshot.pullRequest) &&
-    snapshot.pullRequest.fetchedAt < stored.fetched_at;
+  const samePr = stored !== undefined && samePullRequest(stored, snapshot.pullRequest);
+  const staleByTime = samePr && snapshot.pullRequest.fetchedAt < stored.fetched_at;
   const staleByGeneration =
-    expectedGeneration !== undefined && readSnapshotGeneration(db) !== expectedGeneration;
+    samePr &&
+    snapshot.pullRequest.fetchedAt === stored.fetched_at &&
+    expectedGeneration !== undefined &&
+    readSnapshotGeneration(db) !== expectedGeneration;
   if (staleByTime || staleByGeneration) {
-    const stamp = stored?.fetched_at ?? snapshot.pullRequest.fetchedAt;
     throw new Error(
-      `a newer pull request snapshot (${stamp}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`,
+      `a newer pull request snapshot (${stored.fetched_at}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`,
     );
   }
 }

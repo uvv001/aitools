@@ -1895,6 +1895,13 @@ describe('syncReviewFile', () => {
 
     expect((await bytes()).equals(afterSameSecond)).toBe(true);
     expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c9999']));
+
+    await syncReviewFile(
+      db,
+      snapshotOf(['r1', 'c9999', 'c10000'], { fetchedAt: '2026-01-06T12:02:00Z' }),
+      { expectedGeneration: sameSecondGen },
+    );
+    expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c9999', 'c10000']));
   });
 
   describe('with a comment whose url holds no comment id', () => {
