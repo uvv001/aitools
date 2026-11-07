@@ -2957,9 +2957,12 @@ async function readExisting(path) {
 		throw error;
 	}
 }
+const pathKey = (path) => {
+	const resolved = resolve(path);
+	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+};
 function samePath(a, b) {
-	const [x, y] = [resolve(a), resolve(b)];
-	return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+	return pathKey(a) === pathKey(b);
 }
 async function isDatabaseFile(path) {
 	let file;
@@ -3259,11 +3262,34 @@ async function dumpReviewFile(arg) {
 		links
 	});
 }
+function readSnapshotGeneration(db) {
+	return db.prepare("PRAGMA application_id").get().application_id;
+}
+function bumpSnapshotGeneration(db) {
+	db.exec(`PRAGMA application_id = ${readSnapshotGeneration(db) + 1}`);
+}
+function snapshotGeneration(arg) {
+	const db = openReviewDb(reviewPaths(arg).db, "readonly");
+	try {
+		return readSnapshotGeneration(db);
+	} finally {
+		db.close();
+	}
+}
 const samePullRequest = (a, b) => a.number === b.number && a.host.toLowerCase() === b.host.toLowerCase() && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase();
 function assertConnectedPullRequest(db, dbPath, expected) {
 	const connected = getMeta(db, PULL_REQUEST);
 	if (connected === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(dbPath)} <url>"`);
 	if (!samePullRequest(parsePullRequestUrl(connected), expected)) throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
+}
+function assertFreshSnapshot(db, dbPath, snapshot, expectedGeneration) {
+	const stored = db.prepare("SELECT host, owner, repo, number, fetched_at FROM pr_pull_requests LIMIT 1").get();
+	const staleByTime = stored !== void 0 && samePullRequest(stored, snapshot.pullRequest) && snapshot.pullRequest.fetchedAt < stored.fetched_at;
+	const staleByGeneration = expectedGeneration !== void 0 && readSnapshotGeneration(db) !== expectedGeneration;
+	if (staleByTime || staleByGeneration) {
+		const stamp = stored?.fetched_at ?? snapshot.pullRequest.fetchedAt;
+		throw new Error(`a newer pull request snapshot (${stamp}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`);
+	}
 }
 async function changeReviewState(arg, change, options = {}) {
 	const paths = reviewPaths(arg);
@@ -3272,7 +3298,11 @@ async function changeReviewState(arg, change, options = {}) {
 	try {
 		const changed = await inTransactionAsync(db, async () => {
 			if (options.pullRequest !== void 0) assertConnectedPullRequest(db, paths.db, options.pullRequest);
-			if (options.snapshot !== void 0) savePullRequest(db, options.snapshot);
+			if (options.snapshot !== void 0) {
+				assertFreshSnapshot(db, paths.db, options.snapshot, options.expectedGeneration);
+				savePullRequest(db, options.snapshot);
+				bumpSnapshotGeneration(db);
+			}
 			const before = loadState(db);
 			let result;
 			try {
@@ -3291,7 +3321,10 @@ async function changeReviewState(arg, change, options = {}) {
 				if (state.pullRequest !== before.pullRequest) {
 					if (state.pullRequest === void 0) throw new Error("internal error: a review cannot be disconnected from its pull request");
 					setMeta(db, PULL_REQUEST, state.pullRequest);
-					if (before.pullRequest !== void 0 && options.snapshot === void 0) clearPullRequest(db);
+					if (before.pullRequest !== void 0 && options.snapshot === void 0) {
+						clearPullRequest(db);
+						bumpSnapshotGeneration(db);
+					}
 				}
 			}
 			if (rendered !== void 0) await refuseDatabase(paths.report, paths.db);
@@ -3330,13 +3363,15 @@ async function mutateReviewFile(arg, mutate) {
 		result
 	};
 }
-async function syncReviewFile(arg, data) {
+async function syncReviewFile(arg, data, options = {}) {
 	const paths = reviewPaths(arg);
 	const db = openReviewDb(paths.db, "existing");
 	try {
 		inTransaction(db, () => {
 			assertConnectedPullRequest(db, paths.db, data.pullRequest);
+			assertFreshSnapshot(db, paths.db, data, options.expectedGeneration);
 			savePullRequest(db, data);
+			bumpSnapshotGeneration(db);
 		}, { immediate: true });
 	} finally {
 		db.close();
@@ -3784,6 +3819,7 @@ async function postFinding(arg, findingId, options, deps) {
 		const action = result.action;
 		const was = action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
 		const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
+		const expectedGeneration = snapshotGeneration(paths.db);
 		let snapshot;
 		try {
 			snapshot = await deps.refresh(ref);
@@ -3801,7 +3837,8 @@ async function postFinding(arg, findingId, options, deps) {
 				result: void 0
 			}), {
 				snapshot,
-				pullRequest: ref
+				pullRequest: ref,
+				expectedGeneration
 			})).reportError;
 			return result;
 		} catch (error) {
@@ -3871,6 +3908,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 	const replyRef = result.comment;
 	if (options.dryRun || result.action === "error" || replyRef === void 0) return replied;
 	const was = result.action === "created" ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
+	const expectedGeneration = snapshotGeneration(paths.db);
 	let snapshot;
 	try {
 		snapshot = await deps.refresh(pullRequestRef);
@@ -3894,7 +3932,8 @@ async function replyToDuplicate(arg, ref, options, deps) {
 			result: void 0
 		}), {
 			snapshot,
-			pullRequest: pullRequestRef
+			pullRequest: pullRequestRef,
+			expectedGeneration
 		});
 		return reportError === void 0 ? replied : {
 			...replied,
@@ -3916,7 +3955,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+f735805`;
+	return `pr-comments ${VERSION}+f0168cc`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4128,7 +4167,8 @@ async function syncPullRequest({ env }, db) {
 	const { pullRequest } = await loadReviewFile(db);
 	if (pullRequest === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"`);
 	const ref = parsePullRequestUrl(pullRequest);
-	const { reviews, threads, comments, annotations } = await syncReviewFile(db, await env.getPullRequest(ref));
+	const expectedGeneration = snapshotGeneration(db);
+	const { reviews, threads, comments, annotations } = await syncReviewFile(db, await env.getPullRequest(ref), { expectedGeneration });
 	env.print(`Synced ${ref.owner}/${ref.repo}#${ref.number}: ${reviews} reviews, ${threads} threads, ${comments} comments, ${annotations} annotations\n`);
 	return 0;
 }
