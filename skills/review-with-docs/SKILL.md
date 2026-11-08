@@ -6,9 +6,11 @@ description: Runs a review as a document the user triages over rounds. Invoke on
 # Review with docs
 
 The review lives in one SQLite database: findings, evidence, triage states,
-round history, and links to pull request comments. The report is its
-rendering — the document the user reads; the conversation only steers the
-database.
+round history, and links to pull request comments. The `.md` report is a
+write-only rendering for user convenience and post-session discoverability
+(when future sessions or tools search past reviews); during an active review,
+agents query and change the review through `pr-comments` commands against the
+SQLite database and never read or parse the `.md` report.
 
 The target is any changeset or text inside a git repository — a commit, a
 range, a PR, a working tree, a set of files. The protocol does not assume a

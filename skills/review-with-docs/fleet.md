@@ -33,16 +33,18 @@ per finding — file, severity, title, anchor, and ❓ for an unverified one —
 
 The **read-only contract**: the orchestrator alone runs commands that change
 the review, so every dispatched agent writes files only (its own, in the
-round's folder) and leaves the working tree, the index, and HEAD as they
-stand. It reads the code with `git show <rev>:<path>` and
+round's folder), does not read or parse the `.md` report during an active
+review (the `.md` report is for user convenience and post-session
+discoverability only), and leaves the working tree, the index, and HEAD as
+they stand. It reads the code with `git show <rev>:<path>` and
 `git diff <base> <rev>`; for a dirty tree or a target with no base it reads
 the files themselves, untracked ones included, and takes a dirty tree's
 changes from `git diff <base>`.
 
 ## Later rounds
 
-From round 2 on, each brief also lists the findings the review carries — id,
-state, title, and the report entry holding its description — and
+From round 2 on, each brief also lists the findings the review carries — its
+id, state, title, and description (from `finding list` / `finding show`) — and
 asks for what none of them covers, so an agent hands back only what is new; a
 concern a closed finding (❌ 📌 🔀) covers comes back only with better
 evidence, in a finding that names it.
