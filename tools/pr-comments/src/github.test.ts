@@ -283,7 +283,7 @@ function fakeChecksClient(checks: Checks, responses: Responses = { pullRequest: 
     const failure = checks.fail?.(kind);
     if (failure) throw failure;
     if (kind === 'suites') {
-      const commit = { oid: checks.oid ?? 'commitoid', checkSuites: pick(checks.suites, variables.after) };
+      const commit = { oid: checks.oid ?? 'headsha', checkSuites: pick(checks.suites, variables.after) };
       return { repository: { pullRequest: { commits: { nodes: [{ commit }] } } } } as T;
     }
     const all = (kind === 'runs' ? checks.runs : checks.annotations)![variables.id as string]!;
@@ -312,7 +312,7 @@ describe('fetchPullRequest with the check runs', () => {
       annotation('src/b.ts', 7, 'WARNING', { title: null }),
       annotation('src/c.ts', 9, 'NOTICE', { location: { start: { line: 9 }, end: null } }),
     ]);
-    const { client, calls } = fakeChecksClient({ oid: 'commitoid', suites: pages([checkSuiteNode('CS_1', sonarApp, page([run]))]) });
+    const { client, calls } = fakeChecksClient({ oid: 'headsha', suites: pages([checkSuiteNode('CS_1', sonarApp, page([run]))]) });
 
     const { checkRuns } = await fetchPullRequest(client, ref, undefined, { withChecks: true });
 
@@ -324,7 +324,7 @@ describe('fetchPullRequest with the check runs', () => {
         app,
         status: 'COMPLETED',
         conclusion: 'FAILURE',
-        headSha: 'commitoid',
+        headSha: 'headsha',
         detailsUrl: 'https://ghe.example.com/runs/4001',
         annotations: [
           {
@@ -458,6 +458,22 @@ describe('fetchPullRequest with the check runs', () => {
       const denied = new AccessDeniedError('Resource not accessible by personal access token');
       const error = await withChecks({ fail: () => denied }).catch((e: unknown) => e);
       expect(error).toBe(denied);
+    });
+
+    it('fails when the pull request head commit changes while reading check runs', async () => {
+      const client: GraphQLClient = async <T>(query: string) => {
+        if (query.includes('checkSuites(first')) {
+          const commit = { oid: 'movedsha', checkSuites: page([checkSuiteNode('CS_1', sonarApp, page([]))]) };
+          return { repository: { pullRequest: { commits: { nodes: [{ commit }] } } } } as T;
+        }
+        if (query.includes('reviewThreads(first')) return { repository: { pullRequest: { reviewThreads: page([]) } } } as T;
+        if (query.includes('reviews(first')) return { repository: { pullRequest: { reviews: page([]) } } } as T;
+        if (query.includes('comments(first')) return { repository: { pullRequest: { comments: page([]) } } } as T;
+        return { repository: { pullRequest: prNode } } as T;
+      };
+      await expect(fetchPullRequest(client, ref, undefined, { withChecks: true })).rejects.toThrow(
+        'reading the check runs failed: pull request head changed during download (headsha → movedsha)',
+      );
     });
   });
 });

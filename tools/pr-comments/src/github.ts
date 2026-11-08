@@ -338,7 +338,7 @@ interface HeadCommitResponse {
   repository: { pullRequest: { commits: { nodes: ({ commit: HeadCommitNode } | null)[] } } };
 }
 
-async function readCheckRuns(client: GraphQLClient, ref: PullRequestRef): Promise<CheckRun[]> {
+async function readCheckRuns(client: GraphQLClient, ref: PullRequestRef, expectedHeadSha: string): Promise<CheckRun[]> {
   const fetchHeadCommit = async (after: string | null) => {
     const data = await client<HeadCommitResponse>(CHECK_SUITES_QUERY, {
       owner: ref.owner,
@@ -346,7 +346,11 @@ async function readCheckRuns(client: GraphQLClient, ref: PullRequestRef): Promis
       number: ref.number,
       after,
     });
-    return data.repository.pullRequest.commits.nodes[0]?.commit;
+    const commit = data.repository.pullRequest.commits.nodes[0]?.commit;
+    if (commit && commit.oid !== expectedHeadSha) {
+      throw new Error(`pull request head changed during download (${expectedHeadSha} → ${commit.oid})`);
+    }
+    return commit;
   };
   const head = await fetchHeadCommit(null);
   if (!head) return [];
@@ -388,9 +392,9 @@ async function readCheckRuns(client: GraphQLClient, ref: PullRequestRef): Promis
 }
 
 // An access error keeps its meaning (another token may be allowed to read the checks); anything else says what failed.
-async function fetchCheckRuns(client: GraphQLClient, ref: PullRequestRef): Promise<CheckRun[]> {
+async function fetchCheckRuns(client: GraphQLClient, ref: PullRequestRef, expectedHeadSha: string): Promise<CheckRun[]> {
   try {
-    return await readCheckRuns(client, ref);
+    return await readCheckRuns(client, ref, expectedHeadSha);
   } catch (error) {
     if (error instanceof AccessDeniedError) throw error;
     const message = error instanceof Error ? error.message : String(error);
@@ -520,6 +524,6 @@ export async function fetchPullRequest(
     threads,
     comments,
   };
-  if (withChecks) data.checkRuns = await fetchCheckRuns(client, ref);
+  if (withChecks) data.checkRuns = await fetchCheckRuns(client, ref, pr.headRefOid);
   return data;
 }
