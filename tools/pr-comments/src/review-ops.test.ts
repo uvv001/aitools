@@ -372,7 +372,6 @@ describe('addFinding', () => {
     ['<custom-element>', 'Text\n<custom-element>\n---', 3],
     ['# run the tests', '<pre>\n# run the tests\n</pre>', 2],
     ['#### Updates', '<!--\n#### Updates\n-->', 2],
-    ['Title', '<div\nTitle\n===', 3],
     ['Text', '- item\n<!-- status -->\nText\n===', 4],
     ['Title', '-\nTitle\n---', 3],
     ['#### Updates', '```\nx\n```\n#### Updates', 4],
@@ -402,7 +401,7 @@ describe('addFinding', () => {
         {
           ...FINDING,
           description:
-            '```markdown\n```ts\n    ```\n# quoted heading\n```\n\n```inline span```\n\n- item\n  continued\n---\n> quote\nlazy\n---\nText\n<!-- status -->\n---\n<!--\nstatus\n===\n-->\n<div>\n---\nTitle\n===\n</div>\n[a]: /url\n---\n    code\n---\n___\n---',
+            '```markdown\n```ts\n    ```\n# quoted heading\n```\n\n```inline span```\n\n- item\n  continued\n---\n> quote\nlazy\n---\nText\n<!-- status -->\n---\n<!--\nstatus\n===\n-->\n<div\nclass="example">\n---\nTitle\n===\n</div>\n[a]: /url\n---\n    code\n---\n___\n---',
           note: 'checked:\n\n  ```md\n# literal heading\n  ```',
         },
         at(),
