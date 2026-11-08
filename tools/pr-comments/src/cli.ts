@@ -217,7 +217,7 @@ function postedJson({ finding, result, anchors, chosen, warnings, unlinked, body
       index: index + 1,
       path: anchor.path,
       lines: rangeText(anchor),
-      reportLine: anchor.reportLine,
+      line: anchor.line,
     })),
     chosen: chosen ? anchors.indexOf(chosen) + 1 : null,
     warnings,

@@ -14,7 +14,6 @@ import type { ReviewState } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { defaultReportPath, findRepoRoot, REVIEW_FOLDER } from './review-naming.ts';
 import { newReview } from './review-ops.ts';
-import { readReport } from './review-read.ts';
 import { renderReport } from './review-render.ts';
 import { getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
 import { clearPullRequest, loadKnownRefs, loadPullRequest, savePullRequest } from './store.ts';
@@ -171,37 +170,6 @@ function reportMatchesDatabase(report: string | undefined, db: string | undefine
   throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
 }
 
-// The first place, as a path such as `findings[1].title`, where two values differ.
-function firstDifference(a: unknown, b: unknown, path: string): string {
-  if (typeof a === 'object' && a !== null && typeof b === 'object' && b !== null) {
-    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-      const [x, y] = [(a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]];
-      if (!isDeepStrictEqual(x, y)) return firstDifference(x, y, Array.isArray(a) ? `${path}[${key}]` : `${path}.${key}`);
-    }
-  }
-  return path;
-}
-
-// An operation that produces a review the renderer or the reader cannot take, or one that does not come back
-// unchanged from its own rendering (`readReport(renderReport(x))` equals `x`, which is what lets the database and
-// the report stand for each other), is a bug of the operations, not of the user: it is reported as such, before
-// anything is written.
-function assertRenders(data: ReviewData, report: string): string {
-  const fail = (reason: string): never => {
-    throw new Error(`internal error: the changed review ${reason}; nothing was written`);
-  };
-  let rendered: string;
-  let read: ReviewData;
-  try {
-    rendered = renderReport(data);
-    read = readReport(rendered, report);
-  } catch (error) {
-    return fail(`does not render to a valid report (${error instanceof Error ? error.message : String(error)})`);
-  }
-  if (!isDeepStrictEqual(read, data)) fail(`does not come back from its rendering (it differs at ${firstDifference(read, data, 'review')})`);
-  return rendered;
-}
-
 export interface InitResult {
   db: string;
   // The report the review renders to, written alongside the database.
@@ -346,7 +314,7 @@ export async function initReviewFile(
     await refuseDatabase(options.report, dbPath);
     if (await existsOrSymlink(options.report)) throw existingReport(options.report);
   }
-  const rendered = assertRenders(data, reportTarget);
+  const rendered = renderReport(data);
 
   const repoRoot = findRepoRoot(targetDir);
   if (repoRoot !== undefined && isInsideReviewFolder(targetDir, repoRoot)) {
@@ -520,7 +488,7 @@ function assertFreshSnapshot(
 
 // Loads the whole state of a review (the review, its links, its pull request, the refs a link may name), lets
 // `change` return the changed one, and saves what changed in ONE transaction: all of it or nothing, and nothing when
-// `change` throws or the changed review would not render to a valid report. `change` returning the very same state
+// `change` throws. `change` returning the very same state
 // object writes nothing, not even a byte of the file; otherwise only the parts that differ are written (the review
 // when its object is not the loaded one, the links when their content differs, the pull request when it differs).
 // `options.snapshot`, a pull request that was just downloaded, is saved first and always (after verifying the review
@@ -561,7 +529,7 @@ export async function changeReviewState<T>(
         const { state } = result;
         if (state !== before) {
           if (state.data !== before.data) {
-            rendered = assertRenders(state.data, paths.report);
+            rendered = renderReport(state.data);
             saveReview(db, state.data);
           }
           if (!isDeepStrictEqual(state.links, before.links)) saveLinks(db, state.links);

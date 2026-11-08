@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { STATES } from './report-parse.ts';
 import type { CommentLink } from './review-links.ts';
-import type { Finding, ReviewData } from './review-model.ts';
+import { STATES, type Finding, type ReviewData } from './review-model.ts';
 import {
   filterFindings,
   findFinding,

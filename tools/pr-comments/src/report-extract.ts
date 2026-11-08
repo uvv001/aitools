@@ -1,13 +1,14 @@
 import type { PublishComment } from './publish.ts';
-import type { ParsedReport, ReportFinding } from './report-parse.ts';
 import { ANCHOR, closesFence, openingFence } from './review-evidence.ts';
+import type { Finding, ReviewData } from './review-model.ts';
+import { findFinding } from './review-view.ts';
 
 export interface Anchor {
   path: string;
   start: number;
   end: number;
-  // 1-based line of the anchor line in the report.
-  reportLine: number;
+  // 1-based line of the anchor line in the finding's description.
+  line: number;
 }
 
 export interface ExtractOptions {
@@ -15,6 +16,8 @@ export interface ExtractOptions {
   anchor?: number;
   // Pins the comment to this commit (7-40 hex digits).
   commit?: string;
+  // Report file path or stem, used to warn when the description mentions the report stem.
+  reportPath?: string;
 }
 
 export interface Extracted {
@@ -36,11 +39,9 @@ const TITLE = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\)/y;
 // Stands in for the characters of an inline code span while links are searched.
 const CODE = '\uE000';
 
-// The content under `#### Description`, with the fence state of every line.
+// The content of a finding's description, with the fence state of every line.
 interface Description {
   lines: string[];
-  // 0-based index of lines[0] in the report.
-  first: number;
   fenced: boolean[];
 }
 
@@ -64,14 +65,6 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 const rangeText = ({ start, end }: { start: number; end: number }) => (start === end ? `${start}` : `${start}-${end}`);
 
 const isBlank = (line: string) => line.trim() === '';
-
-function findFinding(report: ParsedReport, id: string): ReportFinding {
-  const wanted = id.trim().toLowerCase();
-  const found = report.findings.find((finding) => finding.id.toLowerCase() === wanted);
-  if (found) return found;
-  const known = report.findings.map((finding) => finding.id).join(', ');
-  throw new Error(`unknown finding "${id}"; ${known ? `the report has ${known}` : 'the report has no findings'}`);
-}
 
 function checkCommit(commit: string): void {
   if (!/^[0-9a-fA-F]{7,40}$/.test(commit)) throw new Error(`commit "${commit}" must be 7-40 hex digits`);
@@ -110,10 +103,9 @@ function fenceMask(lines: string[]): boolean[] {
   });
 }
 
-function readDescription(report: ParsedReport, finding: ReportFinding): Description {
-  const { start, end } = finding.description;
-  const lines = report.lines.slice(start, end);
-  return { lines, first: start, fenced: fenceMask(lines) };
+function readDescription(finding: Finding): Description {
+  const lines = finding.description === '' ? [] : finding.description.split('\n');
+  return { lines, fenced: fenceMask(lines) };
 }
 
 function findAnchors(description: Description): Anchor[] {
@@ -122,7 +114,7 @@ function findAnchors(description: Description): Anchor[] {
     if (!match) return [];
     const [, path = '', from = '', to] = match;
     const start = Number(from);
-    return [{ path, start, end: to === undefined ? start : Number(to), reportLine: description.first + index + 1 }];
+    return [{ path, start, end: to === undefined ? start : Number(to), line: index + 1 }];
   });
 }
 
@@ -267,7 +259,7 @@ function unlink(line: string): { line: string; count: number } {
 }
 
 function lineWarnings(line: string, number: number, stem: string): string[] {
-  const at = `report line ${number}`;
+  const at = `description line ${number}`;
   const masked = maskCodeSpans(line);
   const warnings = findLinks(masked)
     .filter((link) => link.image && isRelative(link.target))
@@ -288,7 +280,7 @@ function mentionedArtifacts(line: string, stem: string): string[] {
 }
 
 function cleanDescription(description: Description, stem: string): Cleaned {
-  const { lines, fenced, first } = description;
+  const { lines, fenced } = description;
   const from = lines.findIndex((line) => !isBlank(line));
   const to = lines.findLastIndex((line) => !isBlank(line)) + 1;
   const cleaned: Cleaned = { lines: [], unlinked: 0, warnings: [] };
@@ -301,26 +293,26 @@ function cleanDescription(description: Description, stem: string): Cleaned {
     const result = unlink(line);
     cleaned.lines.push(result.line);
     cleaned.unlinked += result.count;
-    cleaned.warnings.push(...lineWarnings(result.line, first + index + 1, stem));
+    cleaned.warnings.push(...lineWarnings(result.line, index + 1, stem));
   }
   return cleaned;
 }
 
-function buildComment(finding: ReportFinding, chosen: Anchor | undefined, commit: string | undefined, description: string[]): PublishComment {
+function buildComment(finding: Finding, chosen: Anchor | undefined, commit: string | undefined, description: string[]): PublishComment {
   const place = chosen ? { path: commentPath(finding.id, chosen.path), lines: commentLines(finding.id, chosen) } : {};
   const body = [`${finding.severity} **${finding.id} — ${finding.title}**`, '', ...description].join('\n').trim();
   return { ...place, ...(commit === undefined ? {} : { commit: commit.toLowerCase() }), body };
 }
 
-const reportStem = (path: string) => path.replace(/^.*[\\/]/, '').replace(/\.md$/i, '');
+const reportStem = (path: string) => path.replace(/^.*[\\/]/, '').replace(/\.(?:md|sqlite)$/i, '');
 
-export function extractComment(report: ParsedReport, findingId: string, options: ExtractOptions = {}): Extracted {
-  const finding = findFinding(report, findingId);
+export function extractComment(data: ReviewData, findingId: string, options: ExtractOptions = {}): Extracted {
+  const finding = findFinding(data, findingId);
   if (options.commit !== undefined) checkCommit(options.commit);
-  const description = readDescription(report, finding);
+  const description = readDescription(finding);
   const anchors = findAnchors(description);
   const chosen = chooseAnchor(finding.id, anchors, options.anchor);
-  const cleaned = cleanDescription(description, reportStem(report.path));
+  const cleaned = cleanDescription(description, reportStem(options.reportPath ?? ''));
   if (cleaned.lines.length === 0) throw new Error(`${finding.id} has an empty Description; nothing to extract`);
 
   const comment = buildComment(finding, chosen, options.commit, cleaned.lines);

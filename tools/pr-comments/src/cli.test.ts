@@ -14,7 +14,6 @@ import type { PullRequestRef } from './pr-url.ts';
 import type { PublishComment, PublishOptions, PublishResult } from './publish.ts';
 import { AGENT_DISCLAIMER } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult, ReplyTarget } from './reply.ts';
-import { parseReport } from './report-parse.ts';
 import { dumpReviewFile, loadReviewFile, loadSnapshot, reviewPaths } from './review-files.ts';
 import { pendingItems, pendingLines } from './review-pending.ts';
 import { renderReport } from './review-render.ts';
@@ -1882,7 +1881,6 @@ describe('cli', () => {
         expect(printed).toBe(`created   ${report()}\n`);
         const text = await readFile(report(), 'utf8');
         expect(text).toBe(renderReport((await loaded()).data));
-        expect(parseReport(text, report()).findings.map(({ id }) => id)).toEqual(['F1', 'F2', 'F3']);
 
         await step('report', 'render');
         expect(printed).toBe(`unchanged ${report()}\n`);
@@ -2351,13 +2349,13 @@ describe('cli', () => {
 
       const result = { action: 'created', dryRun: false, comment: 'r2001', url: url('r2001'), state: 'pending', path: 'src/app.ts', lines: '10-12' };
       const { data } = await loaded();
-      const reportLine = (needle: string) => renderReport(data).split('\n').findIndex((text) => text.includes(needle)) + 1;
+      const descriptionLine = (needle: string) => data.findings[0]!.description.split('\n').findIndex((text) => text.includes(needle)) + 1;
       expect(JSON.parse(printed)).toEqual({
         finding: 'F1',
         result,
         anchors: [
-          { index: 1, path: 'src/app.ts', lines: '10-12', reportLine: reportLine('`src/app.ts:10-12`') },
-          { index: 2, path: 'src/other.ts', lines: '7', reportLine: reportLine('`src/other.ts:7`') },
+          { index: 1, path: 'src/app.ts', lines: '10-12', line: descriptionLine('`src/app.ts:10-12`') },
+          { index: 2, path: 'src/other.ts', lines: '7', line: descriptionLine('`src/other.ts:7`') },
         ],
         chosen: 1,
         warnings: [],

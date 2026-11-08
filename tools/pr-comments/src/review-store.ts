@@ -244,7 +244,7 @@ export function saveReview(db: DatabaseSync, data: ReviewData): void {
   });
 }
 
-// A column the model leaves out stays out of the object, so the data equals what `readReport` produced.
+// A column the model leaves out stays out of the object.
 function itemFrom(row: Row): ReviewedItem {
   const item: ReviewedItem & Record<string, unknown> = { text: row.text as string };
   for (const column of DERIVED) {

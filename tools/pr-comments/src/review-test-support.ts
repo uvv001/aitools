@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commentUrl, isAnnotationRef } from './comment-ref.ts';
 import type { CheckRun, Comment, PullRequest, PullRequestData } from './model.ts';
-import { buildDashboard } from './report-dashboard.ts';
-import { parseReport } from './report-parse.ts';
+import type { ReviewData } from './review-model.ts';
+import { reviewedItem, updateItem } from './review-ops.ts';
+import { renderReport } from './review-render.ts';
 
 // Shared by the review database tests. The scratch folders live under the git-ignored `out/`, never in the OS temp dir.
 const OUT = fileURLToPath(new URL('../out/', import.meta.url));
@@ -17,15 +18,6 @@ export function scratchDir(): string {
 // Windows can hold a just-closed database for a moment (EBUSY), hence the retries.
 export function removeScratch(dir: string): void {
   rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
-}
-
-// Regenerates the Dashboard of a report text for tests: replaces everything between `## Dashboard` and
-// `## Findings` with the dashboard built from the finding headers.
-export function withDashboard(text: string, path = 'r.md'): string {
-  const report = parseReport(text, path);
-  const [start, end] = ['Dashboard', 'Findings'].map((title) => report.sections.find((section) => section.title === title)!.line);
-  const lines = [...report.lines.slice(0, start), ...buildDashboard(report.findings), ...report.lines.slice(end)];
-  return lines.join('\n');
 }
 
 // A downloaded pull request, as the snapshot of a review: the pull request https://github.com/owner/repo/pull/42 with
@@ -109,77 +101,63 @@ const FENCED = [
   'finding F7 | ✅ | 🔴 | not a finding of the dump',
 ];
 
-// The Reviewed entry of the sample: the three states of `base`, a dirty-tree note, continuation lines.
-const REVIEWED = [
-  '**Reviewed**',
-  '',
-  '- Round 1 — `abc1234`, base `def5678` (merge-base with `origin/main`); tracked tree clean.',
-  '- Round 2 — `bbb2222`, base none — reviewed as it stands; dirty tree, `src/a.ts` modified.',
-  '  - Round artifacts in `round-2/`.',
-  '- Round 3 — `ccc3333`, the whole changeset re-read.',
-  '',
-];
+// A sample review that uses every part of the model: the three states of `base`, markdown that looks like structure,
+// emoji, empty bodies.
+export function sampleReview(): ReviewData {
+  return {
+    target: 'PR 42 — tenant registry 🚀',
+    intro: {
+      reviewed: {
+        items: [
+          reviewedItem('Round 1 — `abc1234`, base `def5678` (merge-base with `origin/main`); tracked tree clean.'),
+          reviewedItem('Round 2 — `bbb2222`, base none — reviewed as it stands; dirty tree, `src/a.ts` modified.\n  - Round artifacts in `round-2/`.'),
+          reviewedItem('Round 3 — `ccc3333`, the whole changeset re-read.'),
+        ],
+      },
+    },
+    findings: [
+      {
+        id: 'F1',
+        state: '✅',
+        severity: '🔴',
+        title: 'Unguarded `resource.value()` crashes UsersPage',
+        description: FENCED.join('\n'),
+        updates: [
+          updateItem('2026-10-05 11:15 — Round 1: raised ⏳ — reproduced in the running app.'),
+          updateItem('2026-10-05 12:00 — ⏳ → ✅ the user agreed it is a finding.\n  A second line of the same entry,\nand a lazy third one.'),
+          updateItem('2026-10-06 09:00 — Round 2: re-checked at `bbb2222`; ✅ → 🔧 — fixed.\n\n  ```ts\n  const fixed = true;\n  ```'),
+          updateItem('an update without a timestamp'),
+        ],
+      },
+      {
+        id: 'F2',
+        state: '🔧',
+        severity: '🟡',
+        title: 'Café “smart quotes” & <tags> 日本語 🎉',
+        description: 'Para one.\n\n- list a\n- list b',
+        updates: [updateItem('2026-10-07 10:00 — Round 3: unchanged.')],
+      },
+      {
+        id: 'F3',
+        state: '⏳',
+        severity: '⚪',
+        title: 'Empty body',
+        description: '',
+        updates: [],
+      },
+      {
+        id: 'F10',
+        state: '📌',
+        severity: '🔴',
+        title: 'Ids rise, they need not be dense',
+        description: 'One line.',
+        updates: [updateItem('2026-10-07 10:05 — Round 3: deferred.')],
+      },
+    ],
+  };
+}
 
-// A canonical report (the renderer leaves it as it is) that uses every part of the model: the three states of `base`,
-// markdown that looks like structure, emoji, empty bodies.
+// The canonical report text rendered from `sampleReview()`.
 export function sampleReport(): string {
-  const lines = [
-    '# Review — PR 42 — tenant registry 🚀',
-    '',
-    '## Intro',
-    '',
-    ...REVIEWED,
-    '## Dashboard',
-    '',
-    '## Findings',
-    '',
-    '### ✅ 🔴 F1 — Unguarded `resource.value()` crashes UsersPage',
-    '',
-    '#### Description',
-    '',
-    ...FENCED,
-    '',
-    '#### Updates',
-    '',
-    '- 2026-10-05 11:15 — Round 1: raised ⏳ — reproduced in the running app.',
-    '- 2026-10-05 12:00 — ⏳ → ✅ the user agreed it is a finding.',
-    '  A second line of the same entry,',
-    'and a lazy third one.',
-    '- 2026-10-06 09:00 — Round 2: re-checked at `bbb2222`; ✅ → 🔧 — fixed.',
-    '',
-    '  ```ts',
-    '  const fixed = true;',
-    '  ```',
-    '- an update without a timestamp',
-    '',
-    '### 🔧 🟡 F2 — Café “smart quotes” & <tags> 日本語 🎉',
-    '',
-    '#### Description',
-    '',
-    'Para one.',
-    '',
-    '- list a',
-    '- list b',
-    '',
-    '#### Updates',
-    '',
-    '- 2026-10-07 10:00 — Round 3: unchanged.',
-    '',
-    '### ⏳ ⚪ F3 — Empty body',
-    '',
-    '#### Description',
-    '',
-    '#### Updates',
-    '',
-    '### 📌 🔴 F10 — Ids rise, they need not be dense',
-    '',
-    '#### Description',
-    '',
-    'One line.',
-    '',
-    '#### Updates',
-    '',
-    '- 2026-10-07 10:05 — Round 3: deferred.',
-  ];
-  return withDashboard(`${lines.join('\n')}\n`, 'sample.md');
+  return renderReport(sampleReview());
 }

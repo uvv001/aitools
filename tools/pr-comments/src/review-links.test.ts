@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { isAnnotationRef, isLinkRef } from './comment-ref.ts';
-import { parseReport } from './report-parse.ts';
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, linksOf, recordPosted, recordReplied, unlink } from './review-links.ts';
 import type { CommentLink, PostedAction, ReviewState } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
@@ -13,10 +12,8 @@ import {
   setState,
   setTitle,
 } from './review-ops.ts';
-import { readReport } from './review-read.ts';
 import { renderReport } from './review-render.ts';
 
-const PATH = 'r.md';
 const START = '2026-10-08 09:05';
 const PR = 'https://github.com/acme/widgets/pull/42';
 
@@ -40,12 +37,12 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-// The two properties of every review in a result: the report passes parseReport and reads back as the
-// same data.
+// Every review in a result renders to a report with the expected title and LF line breaks.
 function sound(result: ReviewState): ReviewState {
   const text = renderReport(result.data);
-  expect(() => parseReport(text, PATH)).not.toThrow();
-  expect(readReport(text, PATH)).toStrictEqual(result.data);
+  expect(text.startsWith(`# Review — ${result.data.target}\n`)).toBe(true);
+  expect(text.endsWith('\n')).toBe(true);
+  expect(text).not.toContain('\r');
   return result;
 }
 

@@ -5,11 +5,9 @@ import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { extractComment } from './report-extract.ts';
 import type { Anchor } from './report-extract.ts';
-import { parseReport } from './report-parse.ts';
 import { changeReviewState, loadReviewFile, quoteCliPath, ReconnectedError, snapshotGeneration } from './review-files.ts';
 import { FindingChangedError, linksOf, recordPosted } from './review-links.ts';
 import type { PostedAction } from './review-links.ts';
-import { renderReport } from './review-render.ts';
 import { findFinding } from './review-view.ts';
 
 export interface PostFindingOptions {
@@ -63,7 +61,7 @@ function linkAdvice(reason: OwnCommentReason, ref: string, db: string): string {
 // Publishes the comment of ONE finding of the review database `arg` (a report or a database path), using the
 // database only (never the report file):
 // 1. The review must be connected to a pull request. The state of the finding does not matter.
-// 2. The comment is built as `extractComment` builds it from the report the database renders to (title line,
+// 2. The comment is built as `extractComment` builds it from the finding in the database (title line,
 //    anchor, link stripping, warnings), and goes through the publish engine.
 //    When the finding has an own comment, that comment is updated (the engine refuses one the user did not write,
 //    one that is gone, and one that is on another place; the `reason` of such a refusal makes the result tell how to
@@ -89,9 +87,10 @@ export async function postFinding(
     throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
   }
   const ref = parsePullRequestUrl(pullRequest);
-  const extracted = extractComment(parseReport(renderReport(data), paths.report), findingId, {
+  const extracted = extractComment(data, findingId, {
     anchor: options.anchor,
     commit: options.commit,
+    reportPath: paths.report,
   });
 
   const { id } = extracted;

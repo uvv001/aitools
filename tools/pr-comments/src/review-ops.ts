@@ -1,15 +1,13 @@
-import { STATES } from './report-parse.ts';
 import { closesFence, openingFence } from './review-evidence.ts';
-import { reviewedItem, updateItem } from './review-read.ts';
-import type { Finding, Intro, IntroEntry, ReviewData, UpdateItem } from './review-model.ts';
+import { STATES } from './review-model.ts';
+import type { Finding, Intro, IntroEntry, ReviewData, ReviewedItem, UpdateItem } from './review-model.ts';
 import { findFinding, parseSeverity, parseState } from './review-view.ts';
 
 // Pure operations on a review: each returns a NEW ReviewData (the input is never changed) and throws an Error with a
 // helpful message when the operation does not apply. `now` stamps the Updates text as `yyyy-mm-dd hh:mm` in local
 // time. The text written here is the canonical report text of review-render.ts, and the derived fields of the items
-// (at, round, revision ...) are read from that text by the reader's own functions: for every result
-// `readReport(renderReport(result))` deep-equals `result`, and `parseReport(renderReport(result))` passes. Text that
-// would break either (a heading, an unclosed code fence, a line break inside a title, a control character ...) is
+// (at, round, revision ...) are read from that text for queries. Text that would break the rendered report structure
+// (a heading, an unclosed code fence or HTML block, a line break inside a title, a control character ...) is
 // refused. A round that was never opened is no round to write an Updates entry under.
 
 export type SeverityName = 'high' | 'medium' | 'low';
@@ -18,7 +16,32 @@ const AWAITING = '⏳';
 const UNVERIFIED = '❓';
 const FIXED = '🔧';
 
-// What report-parse.ts and review-read.ts read the text with.
+const STAMP = String.raw`\d{4}-\d{2}-\d{2} \d{2}:\d{2}`;
+const ROUND = /^Round (\d+)\b/u;
+const REVISION = /^Round \d+ — `([^`]+)`/u;
+const BASE = /\bbase\s+(?:`([^`]+)`|none\s+—\s+reviewed\s+as\s+it\s+stands)/u;
+const UPDATE = new RegExp(`^(${STAMP}) — (?:Round (\\d+): )?`, 'u');
+
+export function reviewedItem(text: string): ReviewedItem {
+  const item: ReviewedItem = { text };
+  const round = ROUND.exec(text)?.[1];
+  const revision = REVISION.exec(text)?.[1];
+  const base = BASE.exec(text);
+  if (round) item.round = Number(round);
+  if (revision) item.revision = revision;
+  if (base) item.base = base[1] ?? null;
+  return item;
+}
+
+export function updateItem(text: string): UpdateItem {
+  const item: UpdateItem = { text };
+  const match = UPDATE.exec(text);
+  if (match) item.at = match[1];
+  if (match?.[2]) item.round = Number(match[2]);
+  return item;
+}
+
+// Patterns used to validate text so the rendered report keeps its structure.
 const BLANK = /^[ \t]*$/u;
 const LINE_SEPARATORS = /[\r\n\u2028\u2029]/u;
 // NUL, the C0 controls other than TAB, LF and CR (CR is a line break matter), and DEL.
@@ -76,7 +99,7 @@ function splitLines(what: string, text: string): string[] {
   return lines;
 }
 
-// Reads the lines as report-parse.ts does: a fence closes on a marker of its own character, at least as long, and
+// Checks the lines of a block: a fence closes on a marker of its own character, at least as long, and
 // a heading counts outside the fences only.
 function checkLines(what: string, lines: string[], headings = true): void {
   let open: { marker: string; line: number } | undefined;
@@ -201,7 +224,7 @@ function requiredText(what: string, text: string): string {
 const optionalText = (what: string, text: string | undefined): string | undefined =>
   text === undefined ? undefined : bulletText(what, text);
 
-// The description as the reader reads it: without its surrounding blank lines, otherwise verbatim.
+// The description without its surrounding blank lines, otherwise verbatim.
 function descriptionText(text: string): string {
   const lines = splitLines('description', noControls('description', text));
   const from = lines.findIndex((line) => !BLANK.test(line));
@@ -256,9 +279,7 @@ function latestRound(data: ReviewData): number | undefined {
   return rounds.length === 0 ? undefined : Math.max(...rounds);
 }
 
-// A new review: title target, no rounds, no findings. Must render to a report that passes parseReport. **Reviewed**
-// carries no items: a bare `**Reviewed**` label is a valid entry that the reader reads back as zero items, and the
-// first openRound fills it.
+// A new review: title target, no rounds, no findings. **Reviewed** carries no items until the first openRound fills it.
 export function newReview(target: string): ReviewData {
   const name = trimmed('target', target);
   if (name === '') throw new Error('target is empty — name what is under review');
@@ -321,7 +342,7 @@ export interface AddFindingInput {
 function updateEntry(data: ReviewData, now: Date, round: number | undefined, what: string, note?: string): UpdateItem {
   const lead = round === undefined ? '' : `Round ${openedRound(data, round)}: `;
   const entry = updateItem(`${formatStamp(now)} — ${lead}${what}${note === undefined ? '' : ` — ${note}`}`);
-  // `what` can open with a round of its own, which the reader reads as the round of the entry.
+  // `what` can open with a round of its own, which `updateItem` reads as the round of the entry.
   if (round === undefined && entry.round !== undefined) openedRound(data, entry.round);
   return entry;
 }

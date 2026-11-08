@@ -4,9 +4,8 @@ import { join, toNamespacedPath } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommentLink } from './review-links.ts';
 import type { Finding, IntroEntry, ReviewData } from './review-model.ts';
-import { readReport } from './review-read.ts';
 import { REVIEW_SCHEMA_VERSION, getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
-import { removeScratch, sampleReport, scratchDir, snapshotOf } from './review-test-support.ts';
+import { removeScratch, sampleReview, scratchDir, snapshotOf } from './review-test-support.ts';
 import { savePullRequest } from './store.ts';
 
 vi.mock('node:sqlite', async (importOriginal) => {
@@ -42,7 +41,7 @@ function roundTrip(data: ReviewData): ReviewData {
   }
 }
 
-const sample = (): ReviewData => readReport(sampleReport(), 'sample.md');
+const sample = (): ReviewData => sampleReview();
 
 describe('openReviewDb', () => {
   it('creates the folders and a database at the current schema version', () => {

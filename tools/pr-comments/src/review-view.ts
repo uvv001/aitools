@@ -1,6 +1,6 @@
-import { SEVERITIES, STATES } from './report-parse.ts';
 import { extractEvidence } from './review-evidence.ts';
 import type { CommentLink } from './review-links.ts';
+import { SEVERITIES, STATES } from './review-model.ts';
 import type { Finding, ReviewData, UpdateItem } from './review-model.ts';
 
 // What the report commands print about a review, as text or as JSON-ready objects. Nothing here reads a file.

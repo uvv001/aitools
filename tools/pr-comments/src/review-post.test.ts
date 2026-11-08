@@ -9,14 +9,12 @@ import type { Comment, PullRequest, PullRequestData, ReviewThread } from './mode
 import type { PullRequestRef } from './pr-url.ts';
 import { AGENT_DISCLAIMER, composeBody, publishComment } from './publish.ts';
 import type { OwnCommentReason, PublishComment, PublishOptions, PublishResult } from './publish.ts';
-import { parseReport } from './report-parse.ts';
 import type { PullFile } from './rest.ts';
 import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
 import { connectPullRequest, linkOwn, unlink } from './review-links.ts';
 import { addFinding, formatStamp, openRound, setDescription, setState } from './review-ops.ts';
 import { postFinding } from './review-post.ts';
 import type { PostFindingDeps, PostFindingOptions } from './review-post.ts';
-import { readReport } from './review-read.ts';
 import { renderReport } from './review-render.ts';
 import { removeScratch, scratchDir, snapshotOf } from './review-test-support.ts';
 
@@ -140,10 +138,11 @@ async function sameBytes(db: string, before: Buffer): Promise<void> {
 
 // The database is still a review: its report renders, parses and reads back as the same review.
 async function expectSound(db: string): Promise<void> {
-  const { data, paths } = await loadReviewFile(db);
+  const { data } = await loadReviewFile(db);
   const text = renderReport(data);
-  expect(() => parseReport(text, paths.report)).not.toThrow();
-  expect(readReport(text, paths.report)).toStrictEqual(data);
+  expect(text.startsWith(`# Review — ${data.target}\n`)).toBe(true);
+  expect(text.endsWith('\n')).toBe(true);
+  expect(text).not.toContain('\r');
 }
 
 type Reply = (comment: PublishComment, options: PublishOptions) => PublishResult | Promise<PublishResult>;
@@ -408,9 +407,9 @@ describe('the comment handed to the engine', () => {
     const { posted } = await post(db, 'F5', created());
 
     expect(posted.warnings).toHaveLength(2);
-    expect(posted.warnings[0]).toMatch(/^report line \d+ has a relative image \(shot\.png\); it is left as written and will not render$/);
+    expect(posted.warnings[0]).toMatch(/^description line \d+ has a relative image \(shot\.png\); it is left as written and will not render$/);
     expect(posted.warnings[1]).toMatch(
-      new RegExp(`^report line \\d+ mentions an artifact of the review \\(${STEM}\\); the PR author cannot open it$`),
+      new RegExp(`^description line \\d+ mentions an artifact of the review \\(${STEM}\\); the PR author cannot open it$`),
     );
   });
 

@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { samplePullRequest } from './fixtures.ts';
-import { parseReport } from './report-parse.ts';
 import {
   changeReviewState,
   dumpReviewFile,
@@ -28,10 +27,9 @@ import type { CommentLink, ReviewState } from './review-links.ts';
 import { linkDuplicate, linkNote, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { newReview } from './review-ops.ts';
-import { readReport } from './review-read.ts';
 import { renderReport } from './review-render.ts';
 import { REVIEW_SCHEMA_VERSION, getMeta, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
-import { removeScratch, sampleReport, scratchDir, snapshotOf } from './review-test-support.ts';
+import { removeScratch, sampleReport, sampleReview as sampleReviewData, scratchDir, snapshotOf } from './review-test-support.ts';
 
 vi.mock('./review-store.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./review-store.ts')>();
@@ -106,7 +104,7 @@ async function sampleReview(name = 'r.md'): Promise<string> {
   const report = join(dir, name);
   await mkdir(dirname(report), { recursive: true });
   const { db } = await initReviewFile('PR 42', { report, now: NOW });
-  await mutateReviewFile(db, () => ({ data: readReport(sampleReport(), name), result: null }));
+  await mutateReviewFile(db, () => ({ data: sampleReviewData(), result: null }));
   return report;
 }
 
@@ -147,7 +145,7 @@ describe('loadReviewFile', () => {
     const fromReport = await loadReviewFile(report);
     const fromDb = await loadReviewFile(join(dir, 'r.sqlite'));
     expect(fromDb.data).toStrictEqual(fromReport.data);
-    expect(fromDb.data).toStrictEqual(readReport(sampleReport(), 'r.md'));
+    expect(fromDb.data).toStrictEqual(sampleReviewData());
     expect(fromReport.paths).toEqual({ report, db: join(dir, 'r.sqlite') });
   });
 
@@ -480,7 +478,7 @@ describe('dumpReviewFile', () => {
   it('dumps the database', async () => {
     await sampleReview();
     const dump = await dumpReviewFile(join(dir, 'r.sqlite'));
-    expect(dump).toBe(dumpReview(readReport(sampleReport(), 'r.md')));
+    expect(dump).toBe(dumpReview(sampleReviewData()));
     expect(dump.startsWith('review-db v1\n')).toBe(true);
   });
 
@@ -566,7 +564,6 @@ describe('initReviewFile', () => {
     const text = await readFile(report, 'utf8');
     expect(text).toBe(renderReport(NEW_REVIEW));
     expect(text.startsWith('# Review — PR 42\n')).toBe(true);
-    expect(parseReport(text, report).findings).toEqual([]);
   });
 
   it('starts at the current schema without links, without a pull request and without anything to link to', async () => {
@@ -958,19 +955,6 @@ describe('mutateReviewFile', () => {
     (target: string) =>
     (data: ReviewData): { data: ReviewData; result: null } => ({ data: { ...data, target }, result: null });
 
-  // A finding whose header the parser cannot read: an empty title.
-  const unreadable = (data: ReviewData): { data: ReviewData; result: null } => ({
-    result: null,
-    data: { ...data, findings: [{ id: 'F1', state: '⏳', severity: '🔴', title: '', description: '', updates: [] }] },
-  });
-
-  // A finding the parser reads but the reader does not give back as it was: the blank line at the end of the
-  // description is layout, which the reader drops.
-  const drifting = (data: ReviewData): { data: ReviewData; result: null } => ({
-    result: null,
-    data: { ...data, findings: [{ id: 'F1', state: '⏳', severity: '🔴', title: 'Title', description: 'Body.\n', updates: [] }] },
-  });
-
   it('saves the changed review, from the report or from the database', async () => {
     await mutateReviewFile(report, retarget('Changed'));
     expect((await loadReviewFile(db)).data.target).toBe('Changed');
@@ -1019,27 +1003,6 @@ describe('mutateReviewFile', () => {
       }),
     ).rejects.toThrow('no such thing');
     await expect(mutateReviewFile(db, () => Promise.reject(new Error('later')))).rejects.toThrow('later');
-    expect((await bytes()).equals(before)).toBe(true);
-    expect(saveReview).not.toHaveBeenCalled();
-  });
-
-  it('refuses a result that does not render to a valid report as an internal error, and writes nothing', async () => {
-    const before = await bytes();
-    await expect(mutateReviewFile(db, unreadable)).rejects.toThrow(
-      /^internal error: the changed review does not render to a valid report \(.+\); nothing was written$/u,
-    );
-    expect((await bytes()).equals(before)).toBe(true);
-    expect(saveReview).not.toHaveBeenCalled();
-    expect(listing()).toEqual(['r.md', 'r.sqlite']);
-  });
-
-  it('refuses a result that renders but does not read back from its rendering, and says where it differs', async () => {
-    const before = await bytes();
-    await expect(mutateReviewFile(db, drifting)).rejects.toThrow(
-      new Error(
-        'internal error: the changed review does not come back from its rendering (it differs at review.findings[0].description); nothing was written',
-      ),
-    );
     expect((await bytes()).equals(before)).toBe(true);
     expect(saveReview).not.toHaveBeenCalled();
   });
@@ -1362,46 +1325,6 @@ describe('changeReviewState', () => {
     expect([loaded.data.findings.length, loaded.links.length, loaded.pullRequest]).toEqual([1, 1, undefined]);
   });
 
-  describe('refuses a review that does not render, as an internal error, and writes nothing', () => {
-    // A finding whose header the parser cannot read: an empty title.
-    const unreadable = (data: ReviewData): ReviewData => ({ ...data, findings: [{ ...finding('F1'), title: '' }] });
-
-    it('whatever else changes with it', async () => {
-      const before = await bytes();
-      await expect(
-        changeReviewState(db, (state) => ({
-          state: { ...state, data: unreadable(state.data), links: [], pullRequest: PULL_REQUEST },
-          result: null,
-        })),
-      ).rejects.toThrow(/^internal error: the changed review does not render to a valid report \(.+\); nothing was written$/u);
-      nothingSaved();
-      expect((await bytes()).equals(before)).toBe(true);
-    });
-
-    it('and says where a review differs from its rendering', async () => {
-      const before = await bytes();
-      const drifting = (data: ReviewData): ReviewData => ({ ...data, findings: [{ ...finding('F1'), description: 'Body.\n' }] });
-      await expect(changeReviewState(db, (state) => ({ state: { ...state, data: drifting(state.data) }, result: null }))).rejects.toThrow(
-        'does not come back from its rendering (it differs at review.findings[0].description); nothing was written',
-      );
-      expect((await bytes()).equals(before)).toBe(true);
-    });
-
-    it('but does not check a review that the change left alone', async () => {
-      const raw = openReviewDb(db, 'existing');
-      try {
-        saveReview(raw, unreadable(loadReview(raw)));
-      } finally {
-        raw.close();
-      }
-      await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
-      await changeReviewState(db, (state) => ({ state: { ...state, links: [...state.links, { ref: 'c2', role: 'note', note: 'why' }] }, result: null }));
-      expect((await loadReviewFile(db)).pullRequest).toBe(PULL_REQUEST);
-      expect((await loadReviewFile(db)).links).toHaveLength(2);
-      await expect(mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Changed' }, result: null }))).rejects.toThrow('internal error');
-    });
-  });
-
   describe('refuses what the links of the database refuse, and leaves the file byte-identical', () => {
     const refused = async (change: (state: ReviewState) => ReviewState, message: RegExp): Promise<void> => {
       const before = await bytes();
@@ -1648,8 +1571,7 @@ describe('the report of a review connected to a pull request', () => {
       expect(text.split('\n')).toContain(line);
     }
     expect(text).not.toMatch(/(?:PR comment|duplicate|with) [rc]\d/u);
-    expect(() => parseReport(text, report)).not.toThrow();
-    expect(readReport(text, report)).toStrictEqual((await loadReviewFile(db)).data);
+    expect(text).toBe(renderReport((await loadReviewFile(db)).data));
   });
 
   it('keeps the entries written without a URL as they are, whatever is added after them', async () => {
@@ -2106,9 +2028,9 @@ describe('mutateReviewFile with several processes', () => {
     expect(runs.map(({ code, stderr }) => ({ code, stderr }))).toEqual(runs.map(() => ({ code: 0, stderr: '' })));
     const ids = runs.map(({ stdout }) => stdout.trim()).sort();
     expect(new Set(ids).size).toBe(writers);
-    const saved = (await loadReviewFile(db)).data.findings;
-    expect(saved.map((finding) => finding.id).sort()).toEqual(ids);
-    expect(readReport(await readFile(join(dir, 'r.md'), 'utf8'), join(dir, 'r.md')).findings.map((finding) => finding.id).sort()).toEqual(ids);
+    const saved = (await loadReviewFile(db)).data;
+    expect(saved.findings.map((finding) => finding.id).sort()).toEqual(ids);
+    expect(await readFile(join(dir, 'r.md'), 'utf8')).toBe(renderReport(saved));
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }, 60_000);
 
@@ -2200,7 +2122,7 @@ describe('changeReviewState with several processes', () => {
     expect(loaded.data.findings.map((each) => each.id).sort()).toEqual(answers.map((answer) => answer.split(' ')[0]).sort());
     expect(loaded.links.map((link) => `${link.finding} ${link.ref}`).sort()).toEqual(answers.sort());
     expect(new Set(loaded.links.map((link) => link.ref)).size).toBe(writers);
-    expect(readReport(await readFile(join(dir, 'r.md'), 'utf8'), join(dir, 'r.md'))).toStrictEqual(loaded.data);
+    expect(await readFile(join(dir, 'r.md'), 'utf8')).toBe(renderReport(loaded.data));
     expect(userVersion(db)).toBe(REVIEW_SCHEMA_VERSION);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }

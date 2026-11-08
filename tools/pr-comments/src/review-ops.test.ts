@@ -1,23 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { parseReport, STATES } from './report-parse.ts';
-import type { Finding, ReviewData } from './review-model.ts';
+import { SEVERITIES, STATES, type Finding, type ReviewData } from './review-model.ts';
 import {
   addFinding,
   addUpdate,
   formatStamp,
   newReview,
   openRound,
+  reviewedItem,
   setDescription,
   setSeverity,
   setState,
   setTitle,
+  updateItem,
   updateRound,
 } from './review-ops.ts';
 import type { AddFindingInput, SeverityName } from './review-ops.ts';
-import { readReport } from './review-read.ts';
 import { renderReport } from './review-render.ts';
 
-const PATH = 'r.md';
 const START = '2026-10-08 09:05';
 
 // `minutes` after the start of the test review: 2026-10-08 09:05, local time.
@@ -33,11 +32,25 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-// The two properties of every result: the report passes parseReport and reads back as the same data.
+// Every result renders to a report with the expected title, sections, finding headers in order, and LF line breaks.
 function sound(result: ReviewData): ReviewData {
   const text = renderReport(result);
-  expect(() => parseReport(text, PATH)).not.toThrow();
-  expect(readReport(text, PATH)).toStrictEqual(result);
+  expect(text.startsWith(`# Review — ${result.target}\n`)).toBe(true);
+  expect(text.endsWith('\n')).toBe(true);
+  expect(text).not.toContain('\r');
+  const introAt = text.indexOf('\n## Intro\n');
+  const dashboardAt = text.indexOf('\n## Dashboard\n');
+  const findingsAt = text.indexOf('\n## Findings\n');
+  expect(introAt).toBeGreaterThan(0);
+  expect(dashboardAt).toBeGreaterThan(introAt);
+  expect(findingsAt).toBeGreaterThan(dashboardAt);
+  let after = findingsAt;
+  for (const finding of result.findings) {
+    const heading = `\n### ${finding.state} ${finding.severity} ${finding.id} — ${finding.title}\n`;
+    const pos = text.indexOf(heading, after);
+    expect(pos).toBeGreaterThan(after);
+    after = pos + 1;
+  }
   return result;
 }
 
@@ -802,7 +815,47 @@ describe('a whole review', () => {
     data = pure(data, (input) => setState(input, 'F1', { state: 'fixed', revision: 'bbb2222', note: 'n\r\nm' }, at(2)));
     const text = renderReport(data);
     expect(text).not.toContain('\r');
-    expect(readReport(text, PATH).intro.reviewed.items[1]?.text).toBe('Round 2 — `bbb2222`, base none — reviewed as it stands; dirty tree:\n  src/a.ts');
+    expect(data.intro.reviewed.items[1]?.text).toBe('Round 2 — `bbb2222`, base none — reviewed as it stands; dirty tree:\n  src/a.ts');
+  });
+});
+
+describe('scales and item parsers', () => {
+  it('lists the seven states and the three severities', () => {
+    expect(STATES.map((state) => `${state.marker} ${state.label}`)).toEqual([
+      '⏳ awaiting triage',
+      '❓ unverified',
+      '✅ approved',
+      '🔧 fixed',
+      '❌ discarded',
+      '📌 deferred',
+      '🔀 improvement',
+    ]);
+    expect(SEVERITIES).toEqual(['🔴', '🟡', '⚪']);
+  });
+
+  it.each([
+    ['Round 1 — `abc1234`, base `def5678` (merge-base with `origin/main`); tracked tree clean.', { round: 1, revision: 'abc1234', base: 'def5678' }],
+    ['Round 2 — `bbb2222`, base none — reviewed as it stands; dirty tree', { round: 2, revision: 'bbb2222', base: null }],
+    ['Round 3 — `ccc3333`, the whole changeset re-read.', { round: 3, revision: 'ccc3333' }],
+    ['Round 1 — `<revision>`, <base>; <clean or dirty tree>.', { round: 1, revision: '<revision>' }],
+    ['Round 4 without a revision', { round: 4 }],
+    ['Round 1 — `a`, base `b`\n  and a base `c` in the note', { round: 1, revision: 'a', base: 'b' }],
+    ['no round at all', {}],
+    ['', {}],
+  ])('reviewedItem reads the round, revision and base of %j', (text, derived) => {
+    expect(reviewedItem(text)).toStrictEqual({ text, ...derived });
+  });
+
+  it.each([
+    ['2026-10-05 11:15 — Round 1: raised ⏳', { at: '2026-10-05 11:15', round: 1 }],
+    ['2026-10-05 12:00 — ⏳ → ✅ the user agreed', { at: '2026-10-05 12:00' }],
+    ['2026-10-06 09:00 — Round 12: re-checked\n  Round 3: in a note', { at: '2026-10-06 09:00', round: 12 }],
+    ['2026-10-05 11:15 Round 1: no dash after the stamp', {}],
+    ['Round 3: no timestamp', {}],
+    ['an update without a timestamp', {}],
+    ['', {}],
+  ])('updateItem reads the timestamp and round of %j', (text, derived) => {
+    expect(updateItem(text)).toStrictEqual({ text, ...derived });
   });
 });
 

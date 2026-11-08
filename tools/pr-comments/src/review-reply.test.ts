@@ -7,12 +7,10 @@ import type { PullRequest, PullRequestData } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { AGENT_DISCLAIMER } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
-import { parseReport } from './report-parse.ts';
 import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
 import type { ReviewState } from './review-links.ts';
 import { addFinding, formatStamp, openRound } from './review-ops.ts';
-import { readReport } from './review-read.ts';
 import { replyToDuplicate } from './review-reply.ts';
 import type { ReplyDuplicateDeps, ReplyDuplicateOptions } from './review-reply.ts';
 import { renderReport } from './review-render.ts';
@@ -94,10 +92,11 @@ async function sameBytes(db: string, before: Buffer): Promise<void> {
 
 // The database is still a review: its report renders, parses and reads back as the same review.
 async function expectSound(db: string): Promise<void> {
-  const { data, paths } = await loadReviewFile(db);
+  const { data } = await loadReviewFile(db);
   const text = renderReport(data);
-  expect(() => parseReport(text, paths.report)).not.toThrow();
-  expect(readReport(text, paths.report)).toStrictEqual(data);
+  expect(text.startsWith(`# Review — ${data.target}\n`)).toBe(true);
+  expect(text.endsWith('\n')).toBe(true);
+  expect(text).not.toContain('\r');
 }
 
 type Answer = (ref: PullRequestRef, request: ReplyRequest, options: ReplyOptions) => ReplyResult | Promise<ReplyResult>;

@@ -25,7 +25,7 @@ Node 24.15, TypeScript run directly by Node (type stripping), the built-in `node
 | Command line | `src/cli.ts`: one table of commands, strict arguments, the help texts, one function per command |
 | Review database | `review-store.ts` (schema, open modes, transactions), `store.ts` (the pull request snapshot, `linkable`), `review-files.ts` (init, render, sync, `changeReviewState`), `review-naming.ts`, `review-dump.ts` |
 | Review model | `review-model.ts`, `review-ops.ts` (pure changes of a review), `review-links.ts` (rules of the links), `review-view.ts` (list and show), `review-pending.ts` (the list of `link pending`) |
-| Report | `review-render.ts` (writes it), `report-parse.ts` and `review-read.ts` (read it), `report-dashboard.ts` |
+| Report | `review-render.ts` (writes it), `report-dashboard.ts` |
 | GitHub | `github.ts` (GraphQL reads, check runs), `rest.ts`, `publish.ts` (comment engine), `reply.ts` (reply engine), `review-post.ts` and `review-reply.ts` (glue between the engines and the database), `download.ts`, `token.ts`, `token-memo.ts` |
 | Pull request as markdown | `markdown.ts` (`report comments`) |
 | Comment building | `report-extract.ts` (finding to comment), `comment-ref.ts`, `diff.ts` |
@@ -58,7 +58,7 @@ The review half:
 | `updates` | `finding`, `position`, `text` (the whole line, stamp included), `at`, `round` |
 | `meta` | Key and value |
 
-The text is the source. The derived columns are read from it with the functions of the report reader (`review-read.ts`), so the database and the report stay the same thing.
+The text is the source. The derived columns are read from it with `reviewedItem` and `updateItem` (`review-ops.ts`), and `renderReport` needs only the text.
 
 The pull request half (the snapshot of the last `pr sync`):
 
@@ -132,7 +132,7 @@ A read command must not change the committed file. A read-only connection (`new 
 
 A connection waits up to 10 seconds for a lock (`timeout` of `DatabaseSync`). Parallel commands (an agent that calls the tool several times at once) wait for each other: none is lost and finding ids stay unique.
 
-Before a changed review is saved, `assertRenders` renders it and reads the report back. The result must equal the review (`readReport(renderReport(x))` equals `x`). A change that breaks this fails with `internal error: … nothing was written`. The texts are checked when they come in, so this is a guard against bugs, not an error a user meets: no control characters except tab and newline, no `#`…`####` heading outside a code fence in a description or a note, no unclosed code fence, a title on one line, a revision as one word.
+The texts of a review are checked when they come in (`review-ops.ts`): no control characters except tab and newline, no `#`…`####` or setext heading outside a code fence in a description or a note, no unclosed code fence or HTML block, a title on one line, a revision as one word.
 
 `mutateReviewFile` is `changeReviewState` for changes of the review alone. The report is rendered on `init` and on every change of the review (written after the database is published or `COMMIT` succeeds; if the report write fails afterwards, the saved database change still succeeds with exit `0` and the CLI warns `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"` on `stderr`), and `report render` re-renders it on demand (or writes `--out`).
 
@@ -193,7 +193,7 @@ A comment whose link has no readable id cannot be linked. The text of a review v
 
 ## 4. From a finding to a comment
 
-`finding post <finding>` builds the comment from the same text that `report render` writes. It renders the report in memory from the database and takes the finding from it. The report file is never read. The publish engine (`publishComment`) gets the comment as data (`PublishComment`: path, lines, commit, the ref of the own comment, the text), not as a file. `report-extract.ts` checks the place it builds: the path is made repository-relative (backslashes become `/`, a leading `./` goes) and refused when it is empty, absolute or has `..` segments, and lines must start at 1 or later and not run backwards (`cannot extract <finding>: …`). A `--commit` must be 7 to 40 hex digits and is passed on in lower case.
+`finding post <finding>` builds the comment directly from the finding in the database (`extractComment` in `report-extract.ts`). The report file is never read. The publish engine (`publishComment`) gets the comment as data (`PublishComment`: path, lines, commit, the ref of the own comment, the text), not as a file. `report-extract.ts` checks the place it builds: the path is made repository-relative (backslashes become `/`, a leading `./` goes) and refused when it is empty, absolute or has `..` segments, and lines must start at 1 or later and not run backwards (`cannot extract <finding>: …`). A `--commit` must be 7 to 40 hex digits and is passed on in lower case.
 
 1. The review must be connected to a pull request. The state of the finding does not matter: a finding in any state can be posted, also with `--dry-run`. The state is not part of the comment (only the severity, the id and the title are).
 2. Anchors. An anchor is a line of the description, outside code fences, that holds only `` `path:start` `` or `` `path:start-end` ``. The first one is the place of the comment. `--anchor <n>` takes another one (1-based; out of range is an error). The output lists every anchor.
@@ -338,7 +338,7 @@ Kinds of token:
 
 ## 8. The report
 
-`report render` writes `<stem>.md` next to the database (or `--out`). The renderer is `renderReport`, the reader is `readReport` (`review-read.ts`). No command reads a report: `readReport` serves the guard of section 2.4, and `finding post` takes the text of a comment from the rendered report (`parseReport(renderReport(…))`). The format is the one this tool writes: `# Review — <target>`, Intro with **Reviewed**, Dashboard, Findings (a sample follows). There is no hand-edit guard and no hash: the report is derived text and is overwritten each time. It prints `created`, `updated` or `unchanged` and the path. It refuses a target that is a SQLite file, and `--out` that ends in `.sqlite`. The report always has LF line breaks and a generated Dashboard.
+`report render` writes `<stem>.md` next to the database (or `--out`) using `renderReport` (`review-render.ts`). The report is strictly write-only — the tool never reads or parses a report. The format is `# Review — <target>`, Intro with **Reviewed**, Dashboard, Findings (a sample follows). There is no hand-edit guard and no hash: the report is derived text and is overwritten each time. It prints `created`, `updated` or `unchanged` and the path. It refuses a target that is a SQLite file, and `--out` that ends in `.sqlite`. The report always has LF line breaks and a generated Dashboard.
 
 This is a real report of a small review (shortened):
 
@@ -396,7 +396,7 @@ The lookup loop never gives up. …
   | `link reply` | `replied to duplicate [r…](<url>) with [r…](<url>)[ in the pending review]` |
 
   A `--note` is added after ` — `. `--round <n>` adds `Round <n>: ` at the start. It must name a round that was opened. `link note` writes nothing under Updates, because a note belongs to no finding. Nothing else writes under Updates.
-- The report carries the URL of every comment it names, because the web UI cannot search comments by id. In the table `[r…](<url>)` is the id as a markdown link to the comment on the connected pull request, `<pull request URL>#discussion_r…` (`#issuecomment-…` for a `c…`). The URL is written into the text of the entry when the entry is made, so `renderReport` stays a function of the data alone and the report still reads back as the review (section 2.4). A check annotation has no URL on GitHub and stays bare (`check annotation a…`), and so does a comment of a review that is not connected to a pull request. Entries written before this change keep their bare ids.
+- The report carries the URL of every comment it names, because the web UI cannot search comments by id. In the table `[r…](<url>)` is the id as a markdown link to the comment on the connected pull request, `<pull request URL>#discussion_r…` (`#issuecomment-…` for a `c…`). The URL is written into the text of the entry when the entry is made, so `renderReport` stays a function of the data alone. A check annotation has no URL on GitHub and stays bare (`check annotation a…`), and so does a comment of a review that is not connected to a pull request. Entries written before this change keep their bare ids.
 - The links and the pull request are not in the report. They are only in the database (and in `report dump`).
 
 `report dump` is a text form of the review for `git diff`:
@@ -434,12 +434,12 @@ Build:
 Tests (`pnpm test` runs `vitest run`; `pnpm typecheck` runs `tsc --noEmit`):
 
 - A test file sits next to each module: `src/<module>.test.ts`. They run offline. GitHub is replaced by fakes: an injected `fetch`, GraphQL and REST clients, and the `CliEnvironment` of `cli.ts` (`getPullRequest`, `publish`, `reply`, `resolveRevision`, `print`, `warn`, `cwd`, `now`, `readStdin`). No test writes to GitHub.
-- Test data is inline. `src/fixtures.ts` has a sample pull request. `src/review-test-support.ts` has the helpers of the database tests: scratch folders, a snapshot with chosen refs, a sample report that uses every part of the model.
+- Test data is inline. `src/fixtures.ts` has a sample pull request. `src/review-test-support.ts` has the helpers of the database tests: scratch folders, a snapshot with chosen refs, a sample review and report that use every part of the model.
 - Scratch folders for the review-database, git-revision, and bundle tests are under the git-ignored `out/` (`token`, `download`, and `review-naming` tests use the temporary folder of the system).
 - `src/git-revision.test.ts` creates real git repositories (commits, branches, tags, an ambiguous abbreviation). Each has a repository of its own inside the one of the project.
 - `scripts/build.test.ts` builds the bundle and compares what it prints with what the sources print: help, errors, the pull request as markdown, links, a review made from another folder.
 - `src/cli.test.ts` covers the command line: every command, strict arguments, help, exit codes, the stderr line.
-- The renderer and the reader are tested as a round trip: what a change produces must render and read back as the same review.
+- `src/review-ops.test.ts` and `src/review-render.test.ts` cover input validation and one-way report rendering across all states, severities, and markdown constructs.
 
 ## 11. Known limitations
 

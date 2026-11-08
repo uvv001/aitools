@@ -1,7 +1,30 @@
-// The data of a review report: pure and JSON-serialisable. Free text stays verbatim markdown with its line breaks
+// The data of a review: pure and JSON-serialisable. Free text stays verbatim markdown with its line breaks
 // written as "\n". The derived fields of the items are read from that text for queries and are never needed to
 // render; they are left out where the text does not follow the documented shape. The dashboard is derived from the
-// findings and never kept. Every list keeps the order of the report.
+// findings and never kept.
+
+export interface ReportState {
+  marker: string;
+  label: string;
+}
+
+export const STATES: ReportState[] = [
+  { marker: '⏳', label: 'awaiting triage' },
+  { marker: '❓', label: 'unverified' },
+  { marker: '✅', label: 'approved' },
+  { marker: '🔧', label: 'fixed' },
+  { marker: '❌', label: 'discarded' },
+  { marker: '📌', label: 'deferred' },
+  { marker: '🔀', label: 'improvement' },
+];
+
+export const SEVERITIES = ['🔴', '🟡', '⚪'];
+
+export interface DashboardFinding {
+  id: string;
+  state: string;
+  anchor: string;
+}
 
 // One line of **Reviewed**, written per round.
 export interface ReviewedItem {
@@ -36,9 +59,9 @@ export interface UpdateItem {
 export interface Finding {
   // `F<n>`.
   id: string;
-  // A state marker of report-parse.ts `STATES`.
+  // A state marker of `STATES`.
   state: string;
-  // A severity marker of report-parse.ts `SEVERITIES`.
+  // A severity marker of `SEVERITIES`.
   severity: string;
   title: string;
   // Markdown between `#### Description` and `#### Updates`, without its leading and trailing blank lines.

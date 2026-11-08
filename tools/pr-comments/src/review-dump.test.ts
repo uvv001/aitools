@@ -2,10 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { dumpReview } from './review-dump.ts';
 import type { CommentLink } from './review-links.ts';
 import type { Finding, ReviewData } from './review-model.ts';
-import { readReport } from './review-read.ts';
-import { sampleReport } from './review-test-support.ts';
+import { sampleReview } from './review-test-support.ts';
 
-const sample = (): ReviewData => readReport(sampleReport(), 'sample.md');
+const sample = (): ReviewData => sampleReview();
 const lines = (text: string): string[] => text.slice(0, -1).split('\n');
 
 // The indexes of the lines that differ between two dumps of the same length.

@@ -3,9 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { samplePullRequest } from './fixtures.ts';
 import type { CheckRun, PullRequestData } from './model.ts';
-import { readReport } from './review-read.ts';
 import { inTransaction, loadLinks, openReviewDb, saveLinks, saveReview } from './review-store.ts';
-import { removeScratch, sampleReport, scratchDir } from './review-test-support.ts';
+import { removeScratch, sampleReview, scratchDir } from './review-test-support.ts';
 import { clearPullRequest, loadKnownRefs, loadPullRequest, savePullRequest } from './store.ts';
 
 let dir: string;
@@ -224,7 +223,7 @@ describe('store', () => {
 
     it('keeps a link to the comment that had a ref before, as gone, when its url no longer names one', () => {
       const db = openNew();
-      saveReview(db, readReport(sampleReport(), 'sample.md'));
+      saveReview(db, sampleReview());
       savePullRequest(db, samplePullRequest());
       saveLinks(db, [{ ref: 'r1001', role: 'duplicate', finding: 'F1' }]);
 
@@ -361,7 +360,7 @@ describe('store check runs', () => {
 });
 
 describe('linkable', () => {
-  const review = () => readReport(sampleReport(), 'sample.md');
+  const review = () => sampleReview();
 
   // The review has the findings F1, F2, F3 and F10; the links are saved the way a change of the review does.
   function openLinked(...links: { ref: string; finding: string }[]): DatabaseSync {
@@ -496,7 +495,7 @@ describe('linkable', () => {
 describe('clearPullRequest', () => {
   it('removes every pr_* row, keeps the linkable rows that a link points at as gone and deletes the others', () => {
     const db = openNew();
-    saveReview(db, readReport(sampleReport(), 'sample.md'));
+    saveReview(db, sampleReview());
     savePullRequest(db, withChecks([sonarRun()]));
     saveLinks(db, [{ ref: 'r1002', role: 'duplicate', finding: 'F1' }]);
 
