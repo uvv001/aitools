@@ -7,7 +7,9 @@ import { parseArgs } from 'node:util';
 import type { ParseArgsOptionsConfig } from 'node:util';
 import { isLinkRef } from './comment-ref.ts';
 import { downloadPullRequest, withWorkingToken } from './download.ts';
+import type { TokenContext } from './download.ts';
 import { resolveRevision } from './git-revision.ts';
+import { AccessDeniedError, fetchPullRequest } from './github.ts';
 import { findUnknownAuthors, findUnknownRefs, renderMarkdown } from './markdown.ts';
 import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl, type PullRequestRef } from './pr-url.ts';
@@ -71,12 +73,48 @@ async function readProcessStdin(): Promise<Uint8Array> {
   return Buffer.concat(chunks);
 }
 
+let activeWriteContext: TokenContext | undefined;
+
+async function withWriteContext<T>(ref: PullRequestRef, run: (context: TokenContext) => Promise<T>): Promise<T> {
+  return withWorkingToken(
+    ref,
+    async (context) => {
+      activeWriteContext = context;
+      try {
+        return await run(context);
+      } catch (error) {
+        if (error instanceof AccessDeniedError) activeWriteContext = undefined;
+        throw error;
+      }
+    },
+    { purpose: 'write' },
+  );
+}
+
+async function refreshPullRequest(ref: PullRequestRef): Promise<PullRequestData> {
+  if (activeWriteContext && activeWriteContext.host.toLowerCase() === ref.host.toLowerCase()) {
+    try {
+      return await fetchPullRequest(activeWriteContext.client, ref, undefined, { withChecks: true });
+    } catch (error) {
+      if (!(error instanceof AccessDeniedError)) throw error;
+      const writerData = await fetchPullRequest(activeWriteContext.client, ref);
+      const readerData = await downloadPullRequest(ref);
+      if (readerData.pullRequest.headSha !== writerData.pullRequest.headSha) {
+        throw new Error(
+          `pull request head changed during download (${writerData.pullRequest.headSha} → ${readerData.pullRequest.headSha})`,
+        );
+      }
+      return { ...writerData, checkRuns: readerData.checkRuns };
+    }
+  }
+  return downloadPullRequest(ref);
+}
+
 export const defaultEnvironment: CliEnvironment = {
-  getPullRequest: (ref) => downloadPullRequest(ref),
+  getPullRequest: (ref) => refreshPullRequest(ref),
   publish: (ref, comment, options, hooks) =>
-    withWorkingToken(ref, (context) => publishComment(context, ref, comment, options, hooks), { purpose: 'write' }),
-  reply: (ref, request, options) =>
-    withWorkingToken(ref, (context) => replyToComment(context, ref, request, options), { purpose: 'write' }),
+    withWriteContext(ref, (context) => publishComment(context, ref, comment, options, hooks)),
+  reply: (ref, request, options) => withWriteContext(ref, (context) => replyToComment(context, ref, request, options)),
   resolveRevision: (revision) => resolveRevision(revision, process.cwd()),
   print: (text) => process.stdout.write(text),
   warn: (text) => process.stderr.write(text),
