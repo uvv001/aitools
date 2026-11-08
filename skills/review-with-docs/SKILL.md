@@ -41,7 +41,8 @@ the expected outcome.
   `--description-file -` can arrive as `?`.
 - Each command that changes the review updates the report: change the review
   with commands, since an edit made in the report is lost.
-- The orchestrator alone runs commands that change the review.
+- The orchestrator alone runs commands that change the review or render the
+  report, one at a time.
 - Run every command in the reviewed repository: revisions resolve with git in
   the working directory.
 
