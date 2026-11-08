@@ -93,21 +93,6 @@ const [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF] = checkRuns()
   checkRun.annotations.map(({ ref }) => ref),
 ) as [string, string, string, string];
 
-// The sample with check annotations and more comments of the user, as GitHub gives it after the user posted them.
-function withComments(...refs: string[]): PullRequestData {
-  const data = withChecks();
-  const [template] = data.comments;
-  const added = refs.map((ref) => ({
-    ...template!,
-    id: `id-${ref}`,
-    kind: ref.startsWith('r') ? ('review' as const) : ('issue' as const),
-    author: 'me',
-    body: `Comment ${ref}.`,
-    url: ref.startsWith('r') ? `${prUrl}#discussion_${ref}` : `${prUrl}#issuecomment-${ref.slice(1)}`,
-  }));
-  return { ...data, comments: [...data.comments, ...added] };
-}
-
 const WORDS = COMMANDS.map(({ words }) => words);
 const GROUPS = ['pr', 'round', 'finding', 'link', 'report'];
 const CREATING = ['init'];
@@ -471,6 +456,15 @@ describe('cli', () => {
         const texts = [summary, ...description, ...args.map(({ description: text }) => text), ...options.map(({ description: text }) => text)];
         expect(texts.some((text) => text.includes('<name>_review')), words).toBe(false);
       }
+
+      await step('finding', 'post', '--help');
+      expect(printed).toContain('Without --dry-run the returned comment ref');
+      expect(printed).toContain('run "pr-comments pr sync --db <file.sqlite>" to refresh the full pull request snapshot');
+      expect(printed).not.toContain('downloaded pull request is\nrefreshed');
+
+      await step('link', 'reply', '--help');
+      expect(printed).toContain('records the returned reply ref and update in the database');
+      expect(printed).toContain('run "pr-comments pr sync --db <file.sqlite>"');
     });
 
     it.each([[['--help']], [['-h']], [['help']]])('%j prints the overview: the groups and one line per command, without the options', async (argv) => {
@@ -966,17 +960,15 @@ describe('cli', () => {
           'finding post',
           ['finding', 'post', 'F1'],
           async () => {
-            env.publish = async (_ref, _comment, _options, hooks) =>
-              hooks.onResult!({
-                action: 'created',
-                dryRun: false,
-                comment: 'r2001',
-                url: `${prUrl}#discussion_r2001`,
-                state: 'pending',
-                path: 'src/app.ts',
-                lines: '10-12',
-              });
-            env.getPullRequest = async () => withComments('r2001');
+            env.publish = async () => ({
+              action: 'created',
+              dryRun: false,
+              comment: 'r2001',
+              url: `${prUrl}#discussion_r2001`,
+              state: 'pending',
+              path: 'src/app.ts',
+              lines: '10-12',
+            });
           },
         ],
         [
@@ -992,7 +984,6 @@ describe('cli', () => {
               comment: 'r546201',
               url: `${prUrl}#discussion_r546201`,
             });
-            env.getPullRequest = async () => withComments('r546201');
           },
         ],
       ])('warns on stderr when %s commits a change that cannot refresh the report file', async (_name, argv, setup) => {
@@ -2166,7 +2157,6 @@ describe('cli', () => {
     ].join('\n');
     const GENERAL_WARNING = 'Warning: F2 has no path:lines anchor; it becomes a general comment (posting it needs --now)\n';
     let calls: { ref: unknown; comment: PublishComment; options: PublishOptions }[];
-    let refreshes: number;
 
     // What GitHub would answer for the one comment: a dry run has no comment for what it would create.
     const answer = (comment: PublishComment, options: PublishOptions, action: 'created' | 'updated' | 'unchanged', ref: string): PublishResult => {
@@ -2182,12 +2172,10 @@ describe('cli', () => {
       };
     };
 
-    // The publish engine, as far as the command sees it: the hook awaited and its answer taking the result's place.
     const engine = (reply: (comment: PublishComment, options: PublishOptions) => PublishResult) => {
-      env.publish = async (ref, comment, options, hooks) => {
+      env.publish = async (ref, comment, options) => {
         calls.push({ ref, comment, options });
-        const result = reply(comment, options);
-        return hooks.onResult === undefined ? result : hooks.onResult(result);
+        return reply(comment, options);
       };
     };
     const creates = (ref = 'r2001') => engine((comment, options) => answer(comment, options, 'created', ref));
@@ -2197,12 +2185,6 @@ describe('cli', () => {
 
     beforeEach(() => {
       calls = [];
-      refreshes = 0;
-      // The pull request as GitHub gives it once the comment exists.
-      env.getPullRequest = async () => {
-        refreshes += 1;
-        return withComments('r2001', 'c2002');
-      };
     });
 
     it('posts the finding to the pull request of the review, prints the result and the anchors, and records the own comment', async () => {
@@ -2216,11 +2198,10 @@ describe('cli', () => {
       expect(calls[0]!.ref).toEqual(PR_REF);
       expect(calls[0]!.options).toEqual({ byAgent: false, now: false, dryRun: false });
       expect(calls[0]!.comment).toMatchObject({ path: 'src/app.ts', lines: { start: 10, end: 12 }, body: F1_BODY });
-      expect(refreshes).toBe(1);
+      expect(downloads).toEqual([]);
       expect(await ownOf('F1')).toMatchObject([{ ref: 'r2001', role: 'own', finding: 'F1' }]);
+      expect((await loaded()).known.has('r2001')).toBe(true);
       expect((await updatesOf('F1'))?.at(-1)).toBe(`${STAMP} — posted PR comment ${LINKED.r2001} to the pending review`);
-      // The refreshed pull request is in the database, so that the link points at a comment that exists.
-      expect((await loadSnapshot(review))?.comments.map(({ url: commentUrl }) => commentUrl)).toContain(url('r2001'));
     });
 
     it('publishes at once with --now, starts with the agent line with --by-agent, and takes --anchor and --commit', async () => {
@@ -2254,7 +2235,7 @@ describe('cli', () => {
         ].join('\n'),
       );
       expect(calls[0]!.options).toEqual({ byAgent: true, now: false, dryRun: true });
-      expect(refreshes).toBe(0);
+      expect(downloads).toEqual([]);
       expect(warned).toBe('');
       expect((await bytes()).equals(before)).toBe(true);
     });
@@ -2297,7 +2278,7 @@ describe('cli', () => {
         `${'error'.padEnd(9)}  ${''.padEnd('pending'.length)}  -  rejected by GitHub\nanchor 1 of 2: src/app.ts:10-12\n  2. src/other.ts:7\nlinks removed: 1\n`,
       );
       expect(warned).toBe('');
-      expect(refreshes).toBe(0);
+      expect(downloads).toEqual([]);
       expect((await bytes()).equals(before)).toBe(true);
     });
 
@@ -2315,22 +2296,7 @@ describe('cli', () => {
 
       expect(await post('F1')).toBe(1);
       expect(printed.split('\n')[0]).toBe(`${'error'.padEnd(9)}  ${''.padEnd('pending'.length)}  -  ${advice}`);
-      expect(refreshes).toBe(0);
-    });
-
-    it('turns a pull request that cannot be refreshed into an error result that says how to go on, and records nothing', async () => {
-      creates();
-      env.getPullRequest = async () => {
-        throw new Error('GitHub is down');
-      };
-      const before = await bytes();
-
-      expect(await post('F1')).toBe(1);
-
-      expect(printed).toContain('the comment was posted as r2001, but the pull request could not be refreshed (GitHub is down)');
-      expect(printed).toContain('pr-comments pr sync');
-      expect(warned).toBe('');
-      expect((await bytes()).equals(before)).toBe(true);
+      expect(downloads).toEqual([]);
     });
 
     it('prints a finding with no anchor as a general comment, and the warnings on stderr', async () => {
@@ -2415,7 +2381,6 @@ describe('cli', () => {
     const urlOf = (reply: string) => (reply.startsWith('c') ? `${prUrl}#issuecomment-${reply.slice(1)}` : `${prUrl}#discussion_${reply}`);
     type Answer = (request: ReplyRequest, options: ReplyOptions) => ReplyResult;
     let calls: { ref: unknown; request: ReplyRequest; options: ReplyOptions }[];
-    let refreshes: number;
 
     const engine = (answer: Answer) => {
       env.reply = async (ref, request, options) => {
@@ -2451,11 +2416,6 @@ describe('cli', () => {
 
     beforeEach(async () => {
       calls = [];
-      refreshes = 0;
-      env.getPullRequest = async () => {
-        refreshes += 1;
-        return withComments('r546201', 'c624100');
-      };
       await step('link', 'own', 'F1', 'r1001');
       await step('link', 'duplicate', 'F1', 'r1004');
       await step('link', 'duplicate', 'F1', 'c2001');
@@ -2470,13 +2430,13 @@ describe('cli', () => {
       expect(printed).toBe(`created    pending  r546201  docs/readme.md:7  ${urlOf('r546201')}\nanswers r1004 (carol, thread open)\n`);
       expect(warned).toBe(line());
       expect(calls).toMatchObject([{ ref: PR_REF, request: { commentRef: 'r1004', body: TEXT, requires: { ref: 'r1001' } }, options: { now: false, dryRun: false } }]);
-      expect(refreshes).toBe(1);
+      expect(downloads).toEqual([]);
       expect((await updatesOf('F1'))?.at(-1)).toBe(
         `${STAMP} — replied to duplicate [r1004](https://ghe.example.com/acme/widgets/pull/157#discussion_r1004) with ` +
           '[r546201](https://ghe.example.com/acme/widgets/pull/157#discussion_r546201) in the pending review',
       );
       expect((await loaded()).links).toEqual(links);
-      expect((await loadSnapshot(review))?.comments.map(({ url: commentUrl }) => commentUrl)).toContain(urlOf('r546201'));
+      expect((await loaded()).known.has('r546201')).toBe(true);
     });
 
     it('shows the thread as resolved, the path alone for a file-level thread, and conversation for a conversation comment', async () => {
@@ -2531,7 +2491,7 @@ describe('cli', () => {
       expect(printed).toBe(`${'error'.padEnd(9)}  ${''.padEnd('pending'.length)}  -  ${NEEDS_NOW}\nanswers c2001 (alice)\n`);
 
       expect(warned).toBe('');
-      expect(refreshes).toBe(0);
+      expect(downloads).toEqual([]);
       expect((await bytes()).equals(before)).toBe(true);
     });
 
@@ -2547,7 +2507,7 @@ describe('cli', () => {
       );
       expect(calls).toMatchObject([{ request: { commentRef: 'r1004', body: WITH_DISCLAIMER }, options: { now: false, dryRun: true } }]);
       expect(warned).toBe('');
-      expect(refreshes).toBe(0);
+      expect(downloads).toEqual([]);
       expect((await bytes()).equals(before)).toBe(true);
     });
 
@@ -2564,20 +2524,6 @@ describe('cli', () => {
       expect(await reply('r1004', '--json')).toBe(1);
       expect(JSON.parse(printed)).toMatchObject({ finding: 'F1', own: 'r1001', result: { action: 'error', message: 'GitHub rejected the reply' } });
       expect(warned).toBe('');
-    });
-
-    it('turns a pull request that cannot be refreshed into an error result, and records nothing', async () => {
-      engine(made('r546201', THREAD, 'pending'));
-      env.getPullRequest = async () => {
-        throw new Error('GitHub is down');
-      };
-      const before = await bytes();
-
-      expect(await reply('r1004')).toBe(1);
-
-      expect(printed).toContain('the reply was posted as r546201, but the pull request could not be refreshed (GitHub is down)');
-      expect(warned).toBe('');
-      expect((await bytes()).equals(before)).toBe(true);
     });
 
     it('lets the refusals of the review through before it asks GitHub for anything, and changes nothing', async () => {

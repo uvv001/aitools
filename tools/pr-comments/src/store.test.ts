@@ -5,7 +5,7 @@ import { samplePullRequest } from './fixtures.ts';
 import type { CheckRun, PullRequestData } from './model.ts';
 import { inTransaction, loadLinks, openReviewDb, saveLinks, saveReview } from './review-store.ts';
 import { removeScratch, sampleReview, scratchDir } from './review-test-support.ts';
-import { clearPullRequest, loadKnownRefs, loadPullRequest, savePullRequest } from './store.ts';
+import { clearPullRequest, loadKnownRefs, loadPullRequest, recordKnownCommentRef, savePullRequest } from './store.ts';
 
 let dir: string;
 const opened: DatabaseSync[] = [];
@@ -511,5 +511,38 @@ describe('clearPullRequest', () => {
     const db = openNew();
     clearPullRequest(db);
     expect(linkable(db)).toEqual([]);
+  });
+});
+
+describe('recordKnownCommentRef', () => {
+  it('records review and conversation comment refs in linkable as present, and reconciles them on the next savePullRequest', () => {
+    const db = openNew();
+    saveReview(db, sampleReview());
+    savePullRequest(db, samplePullRequest());
+
+    expect(recordKnownCommentRef(db, 'r9001')).toBe(true);
+    expect(recordKnownCommentRef(db, 'c9002')).toBe(true);
+    expect(recordKnownCommentRef(db, 'r9001')).toBe(false);
+    expect(loadKnownRefs(db).has('r9001')).toBe(true);
+    expect(loadKnownRefs(db).has('c9002')).toBe(true);
+    expect(linkable(db).filter((row) => row.ref.startsWith('r9') || row.ref.startsWith('c9'))).toEqual([
+      { ref: 'c9002', kind: 'conversation_comment', gone: 0 },
+      { ref: 'r9001', kind: 'review_comment', gone: 0 },
+    ]);
+
+    saveLinks(db, [{ ref: 'r9001', role: 'own', finding: 'F1' }]);
+    savePullRequest(db, samplePullRequest());
+    expect(linkable(db).find((row) => row.ref === 'r9001')).toEqual({ ref: 'r9001', kind: 'review_comment', gone: 1 });
+    expect(linkable(db).find((row) => row.ref === 'c9002')).toBeUndefined();
+
+    expect(recordKnownCommentRef(db, 'r9001')).toBe(true);
+    expect(linkable(db).find((row) => row.ref === 'r9001')).toEqual({ ref: 'r9001', kind: 'review_comment', gone: 0 });
+    expect(loadKnownRefs(db).has('r9001')).toBe(true);
+  });
+
+  it('refuses a value that is not a comment ref', () => {
+    const db = openNew();
+    expect(() => recordKnownCommentRef(db, 'a3f9c2d1e')).toThrow('"a3f9c2d1e" is not a comment id; expected r544830 or c623843');
+    expect(() => recordKnownCommentRef(db, 'bogus')).toThrow('"bogus" is not a comment id; expected r544830 or c623843');
   });
 });

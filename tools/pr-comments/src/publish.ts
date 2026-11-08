@@ -129,13 +129,7 @@ const MAX_LISTED_RANGES = 8;
 const ADOPTED = 'an identical comment of yours already exists; adopted';
 const ID_NOT_READ = 'created, but its id could not be read from the URL';
 
-export interface PublishHooks {
-  // Awaited right after the result is final; what it returns replaces the result. If it throws, the result
-  // becomes an error.
-  onResult?: (result: PublishResult) => Promise<PublishResult>;
-}
-
-interface PublishDeps extends PublishHooks {
+interface PublishDeps {
   rest?: RestClient;
   loadPullRequest?: typeof fetchPullRequest;
   fetchFiles?: typeof fetchPullFiles;
@@ -521,11 +515,5 @@ export async function publishComment(
   deps: PublishDeps = {},
 ): Promise<PublishResult> {
   const run = await startRun(context, ref, options, deps);
-  const result = await settle(run, comment);
-  if (!deps.onResult) return result;
-  try {
-    return await deps.onResult(result);
-  } catch (error) {
-    return failure(run, comment, messageOf(error));
-  }
+  return settle(run, comment);
 }

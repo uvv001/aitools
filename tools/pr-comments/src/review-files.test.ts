@@ -1521,6 +1521,66 @@ describe('changeReviewState', () => {
     });
   });
 
+  describe('with knownRef', () => {
+    it('records one or more comment refs in linkable before change runs, bumps snapshotGeneration, and rolls back when change fails', async () => {
+      const genBefore = snapshotGeneration(db);
+      const changed = await changeReviewState(
+        db,
+        (state) => ({
+          state: { ...state, data: withFinding(state.data, 'F2'), links: [...state.links, own('r999', 'F2')] },
+          result: state.known.has('r999'),
+        }),
+        { knownRef: 'r999' },
+      );
+      expect(changed.result).toBe(true);
+      expect((await loadReviewFile(db)).known.has('r999')).toBe(true);
+      expect(snapshotGeneration(db)).toBe(genBefore + 1);
+
+      const before = await bytes();
+      const genAfterFirst = snapshotGeneration(db);
+      await expect(
+        changeReviewState(
+          db,
+          () => {
+            throw new Error('failed after knownRef');
+          },
+          { knownRef: 'c888' },
+        ),
+      ).rejects.toThrow('failed after knownRef');
+      expect((await loadReviewFile(db)).known.has('c888')).toBe(false);
+      expect(snapshotGeneration(db)).toBe(genAfterFirst);
+      expect((await bytes()).equals(before)).toBe(true);
+    });
+
+    it('restores a gone = 1 ref and records a new ref when given an array of refs, and rejects an older same-second sync', async () => {
+      await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
+      await syncReviewFile(db, snapshotOf(['r0', 'r2'], { fetchedAt: '2026-10-09T12:01:00Z' }));
+      expect(linkable(db).find((row) => row.ref === 'r1')).toEqual({ ref: 'r1', gone: 1 });
+      const staleGen = snapshotGeneration(db);
+
+      const changed = await changeReviewState(
+        db,
+        (state) => ({
+          state,
+          result: [state.known.has('r1'), state.known.has('r10')],
+        }),
+        { knownRef: ['r1', 'r10'] },
+      );
+      expect(changed.result).toEqual([true, true]);
+      expect(linkable(db).find((row) => row.ref === 'r1')).toEqual({ ref: 'r1', gone: 0 });
+      expect(linkable(db).find((row) => row.ref === 'r10')).toEqual({ ref: 'r10', gone: 0 });
+      expect(snapshotGeneration(db)).toBe(staleGen + 1);
+
+      await expect(
+        syncReviewFile(db, snapshotOf(['r0', 'r2'], { fetchedAt: '2026-10-09T12:01:00Z' }), { expectedGeneration: staleGen }),
+      ).rejects.toThrow(
+        new Error(`a newer pull request snapshot (2026-10-09T12:01:00Z) is already stored; run "pr-comments pr sync --db ${db}" again`),
+      );
+      expect((await loadReviewFile(db)).known.has('r1')).toBe(true);
+      expect((await loadReviewFile(db)).known.has('r10')).toBe(true);
+    });
+  });
+
   it('is what mutateReviewFile is built on: the links and the pull request stay as they are', async () => {
     await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
     const changed = await mutateReviewFile(db, (data) => ({ data: withFinding(data, 'F2'), result: 'F2' }));

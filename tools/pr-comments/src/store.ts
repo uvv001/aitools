@@ -1,5 +1,5 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
-import { commentRefFromUrl } from './comment-ref.ts';
+import { commentRefFromUrl, isCommentRef } from './comment-ref.ts';
 import type {
   AnnotationLevel,
   CheckRun,
@@ -374,4 +374,19 @@ export function loadPullRequest(db: DatabaseSync): PullRequestData | undefined {
 export function loadKnownRefs(db: DatabaseSync): Set<string> {
   const rows = db.prepare('SELECT ref FROM linkable WHERE gone = 0').all() as { ref: string }[];
   return new Set(rows.map((row) => row.ref));
+}
+
+// Records a comment ref (`r…` or `c…`) in `linkable` as not gone, so a link can point at a comment that was just
+// published before the next `pr sync`. Returns whether `linkable` changed.
+export function recordKnownCommentRef(db: DatabaseSync, ref: string): boolean {
+  if (!isCommentRef(ref)) throw new Error(`"${ref}" is not a comment id; expected r544830 or c623843`);
+  const kind = ref.startsWith('r') ? COMMENT_KINDS.review : COMMENT_KINDS.issue;
+  const existing = db.prepare('SELECT kind, gone FROM linkable WHERE ref = ?').get(ref) as
+    | { kind: string; gone: number }
+    | undefined;
+  if (existing?.kind === kind && existing.gone === 0) return false;
+  db.prepare(
+    'INSERT INTO linkable (ref, kind, gone) VALUES (?, ?, 0) ON CONFLICT (ref) DO UPDATE SET kind = excluded.kind, gone = 0',
+  ).run(ref, kind);
+  return true;
 }

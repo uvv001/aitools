@@ -3,7 +3,7 @@ import { AccessDeniedError } from './github.ts';
 import type { GraphQLClient } from './github.ts';
 import type { Comment, PullRequestData, Review, ReviewThread } from './model.ts';
 import { AGENT_DISCLAIMER, composeBody, publishComment } from './publish.ts';
-import type { PublishComment, PublishHooks, PublishOptions, PublishResult } from './publish.ts';
+import type { PublishComment, PublishOptions } from './publish.ts';
 import type { PullFile, RestClient } from './rest.ts';
 import { samplePullRequest } from './fixtures.ts';
 
@@ -154,7 +154,6 @@ interface Setup {
   handlers?: Record<string, Handler>;
   // The html_url that REST answers with when creating a comment.
   restUrl?: string;
-  onResult?: PublishHooks['onResult'];
   // Throws, in place of the answer, when the request is made: the load of the pull request, the files GET, the REST POST.
   refuse?: { load?: () => never; files?: () => never; rest?: () => never };
 }
@@ -211,7 +210,6 @@ async function publish(comment: PublishComment, setup: Setup = {}) {
         setup.refuse?.load?.();
         return setup.data ?? pullRequestData();
       },
-      onResult: setup.onResult,
     },
   );
   const mutations = calls.filter((c) => c.op !== 'viewer' && c.op !== 'repository').map(({ op, input }) => ({ op, input }));
@@ -1182,74 +1180,5 @@ describe('access errors', () => {
     const { result } = await publish(commentOf('F1', at(22)), { handlers });
 
     expect(result).toMatchObject({ action: 'error', message: "GitHub GraphQL errors: Body can't be blank" });
-  });
-});
-
-describe('the result hook', () => {
-  it('runs after the comment is posted', async () => {
-    const events: string[] = [];
-    const handlers = {
-      addPullRequestReviewThread: () => {
-        events.push('post');
-        return threadResponse();
-      },
-    };
-    const onResult = async (result: PublishResult) => {
-      events.push('hook');
-      return result;
-    };
-    await publish(commentOf('F1', at(22)), { handlers, onResult });
-
-    expect(events).toEqual(['post', 'hook']);
-  });
-
-  it('gets the final result', async () => {
-    const seen: PublishResult[] = [];
-    const onResult = async (result: PublishResult) => {
-      seen.push(result);
-      return result;
-    };
-    const { result } = await publish(commentOf('F1', at(22)), { onResult });
-
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ action: 'created', comment: 'r501' });
-    expect(result).toEqual(seen[0]);
-  });
-
-  it('replaces the result with what it returns', async () => {
-    const onResult = async (result: PublishResult) => ({ ...result, message: 'ref written' });
-    const { result } = await publish(commentOf('F1', at(22)), { onResult });
-
-    expect(result).toMatchObject({ action: 'created', comment: 'r501', message: 'ref written' });
-  });
-
-  it('turns a throw into an error result', async () => {
-    const onResult = async () => {
-      throw new Error('cannot write the ref');
-    };
-    const { result, mutations } = await publish(commentOf('F1', at(22)), { onResult });
-
-    expect(result).toMatchObject({ action: 'error', message: 'cannot write the ref', path: 'src/a.ts' });
-    expect(mutations).toHaveLength(1);
-  });
-
-  it('turns a refusal into an error result too, and does not rethrow it', async () => {
-    // The comment is written by now: a rethrow would let the token loop retry with another token and post it twice.
-    const { result, mutations } = await publish(commentOf('F1', at(22)), { onResult: async () => denied() });
-
-    expect(result).toEqual({ action: 'error', dryRun: false, path: 'src/a.ts', lines: '22', message: 'Bad credentials' });
-    expect(mutations).toHaveLength(1);
-  });
-
-  it('runs for errors and in a dry run', async () => {
-    const seen: string[] = [];
-    const onResult = async (result: PublishResult) => {
-      seen.push(`${result.action} ${result.dryRun}`);
-      return result;
-    };
-    await publish(commentOf('F1', { path: 'nope.ts' }), { options: { dryRun: true }, onResult });
-    await publish(commentOf('F2', at(22)), { options: { dryRun: true }, onResult });
-
-    expect(seen).toEqual(['error true', 'created true']);
   });
 });

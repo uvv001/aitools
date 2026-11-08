@@ -318,7 +318,7 @@ pr-comments finding update <finding> <text> [--round <n>] --db <file.sqlite>
 pr-comments finding update F7 "Asked the author" --round 1 --db $DB
 ```
 
-**`finding post`**: publishes the comment of a finding, in any state, to the connected pull request, and links it to the finding as its own comment. Run again, it updates that comment. Needs a token with write permission.
+**`finding post`**: publishes the comment of a finding, in any state, to the connected pull request, and records the returned comment ref and its `own` link in the database (`pr sync` refreshes the full pull request snapshot). Run again, it updates that comment. Needs a token with write permission.
 
 ```
 pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] [--json] --db <file.sqlite>
@@ -371,7 +371,7 @@ pr-comments link remove <ref> [--note <text>] --db <file.sqlite>
 pr-comments link remove r544861 --db $DB
 ```
 
-**`link reply`**: answers a comment that is linked as a duplicate with `Duplicate of <link to the own comment of the finding>.` The finding must have an own comment. Needs a token with write permission.
+**`link reply`**: answers a comment that is linked as a duplicate with `Duplicate of <link to the own comment of the finding>.` and records the returned reply ref and update in the database (`pr sync` refreshes the full pull request snapshot). The finding must have an own comment. Needs a token with write permission.
 
 ```
 pr-comments link reply <ref> [--by-agent] [--now] [--dry-run] [--json] --db <file.sqlite>

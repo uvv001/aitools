@@ -7,7 +7,7 @@ import type { PullRequest, PullRequestData } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { AGENT_DISCLAIMER } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
-import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
+import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, snapshotGeneration, syncReviewFile } from './review-files.ts';
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
 import type { ReviewState } from './review-links.ts';
 import { addFinding, formatStamp, openRound } from './review-ops.ts';
@@ -107,26 +107,13 @@ interface Call {
   options: ReplyOptions;
 }
 
-const refreshesAs = (error: unknown): ReplyDuplicateDeps['refresh'] => () => Promise.reject(error);
-
-// The refresh answers as GitHub would after the reply: the comments the database knows, and the replies reported.
-function engine(answer: Answer, db: string, refresh?: ReplyDuplicateDeps['refresh']) {
+function engine(answer: Answer) {
   const calls: Call[] = [];
-  const refreshes: PullRequestRef[] = [];
-  const reported: string[] = [];
   const reply: ReplyDuplicateDeps['reply'] = async (ref, request, options) => {
     calls.push({ ref, request, options });
-    const result = await answer(ref, request, options);
-    if (result.comment !== undefined) reported.push(result.comment);
-    return result;
+    return answer(ref, request, options);
   };
-  const read: ReplyDuplicateDeps['refresh'] = async (ref) => {
-    refreshes.push(ref);
-    if (refresh !== undefined) return refresh(ref);
-    const { known } = await loadReviewFile(db);
-    return snapshot([...new Set([...known, ...reported])]);
-  };
-  return { reply, calls, refreshes, deps: { reply, refresh: read, now: () => LATER } satisfies ReplyDuplicateDeps };
+  return { reply, calls, deps: { reply, now: () => LATER } satisfies ReplyDuplicateDeps };
 }
 
 // What the engine says: a review thread gets a pending reply, a conversation comment an immediate one.
@@ -164,10 +151,10 @@ const failed =
   (message: string): Answer =>
   (_ref, _request, options) => ({ action: 'error', dryRun: options.dryRun, message });
 
-async function reply(db: string, ref: string, answer: Answer, options: Partial<ReplyDuplicateOptions> = {}, refresh?: ReplyDuplicateDeps['refresh']) {
-  const fake = engine(answer, db, refresh);
+async function reply(db: string, ref: string, answer: Answer, options: Partial<ReplyDuplicateOptions> = {}) {
+  const fake = engine(answer);
   const replied = await replyToDuplicate(db, ref, { ...OPTIONS, ...options }, fake.deps);
-  return { replied, calls: fake.calls, refreshes: fake.refreshes };
+  return { replied, calls: fake.calls };
 }
 
 const OWN_OF_F1 = `${PR}#discussion_r1`;
@@ -183,13 +170,12 @@ describe('refusals before anything is sent', () => {
     const report = reportPath();
     const db = await startReview({ connected: false });
     const before = await readFile(db);
-    const fake = engine(created(), db);
+    const fake = engine(created());
 
     await expect(replyToDuplicate(report, 'r2', OPTIONS, fake.deps)).rejects.toThrow(
       new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"`),
     );
     expect(fake.calls).toEqual([]);
-    expect(fake.refreshes).toEqual([]);
     await sameBytes(db, before);
   });
 
@@ -207,11 +193,10 @@ describe('refusals before anything is sent', () => {
     ])('refuses %s', async (_name, ref, message) => {
       const db = await startReview();
       const before = await readFile(db);
-      const fake = engine(created(), db);
+      const fake = engine(created());
 
       await expect(replyToDuplicate(db, ref, { ...OPTIONS, dryRun }, fake.deps)).rejects.toThrow(new Error(message(db)));
       expect(fake.calls).toEqual([]);
-      expect(fake.refreshes).toEqual([]);
       await sameBytes(db, before);
     });
   });
@@ -232,23 +217,21 @@ describe('refusals before anything is sent', () => {
         expect((await loadReviewFile(db)).links.at(-1)).toStrictEqual({ ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' });
       }
       const before = await readFile(db);
-      const fake = engine(created(), db);
+      const fake = engine(created());
 
       await expect(replyToDuplicate(db, 'a3f9c2d1e', { ...OPTIONS, dryRun }, fake.deps)).rejects.toThrow(new Error(message));
       expect(fake.calls).toEqual([]);
-      expect(fake.refreshes).toEqual([]);
       await sameBytes(db, before);
     });
   });
 
   it('refuses a database that does not exist and creates none', async () => {
     const missing = join(dir, 'missing.sqlite');
-    const fake = engine(created(), missing);
+    const fake = engine(created());
 
     await expect(replyToDuplicate(missing, 'r2', OPTIONS, fake.deps)).rejects.toThrow(`${missing} does not exist`);
     expect(existsSync(missing)).toBe(false);
     expect(fake.calls).toEqual([]);
-    expect(fake.refreshes).toEqual([]);
   });
 });
 
@@ -407,8 +390,6 @@ describe('recording the reply', () => {
     expect(await updatesOf(db, 'F3')).toHaveLength(3);
   });
 
-  // A given snapshot is always saved (a refresh is never skipped, even when the entry is there already), which may
-  // touch the file without changing a row: these tests compare what the database holds, not its bytes.
   it('records the reply on the first run of an identical one found, and not a second time', async () => {
     const db = await startReview();
 
@@ -417,26 +398,28 @@ describe('recording the reply', () => {
     expect(first.replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
     expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — replied to duplicate ${R2} with ${R10} in the pending review`);
     const recorded = await contentOf(db);
+    const recordedBytes = await readFile(db);
     await expectSound(db);
 
     const second = await reply(db, 'r2', unchanged('r10'));
 
     expect(second.replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
-    expect(second.refreshes).toEqual([PR_REF]);
     expect(await contentOf(db)).toStrictEqual(recorded);
+    await sameBytes(db, recordedBytes);
   });
 
   it('adds nothing when the rerun after a created reply finds it unchanged', async () => {
     const db = await startReview();
     await reply(db, 'r2', created('r10'));
     const before = await contentOf(db);
+    const beforeBytes = await readFile(db);
 
-    const { replied, calls, refreshes } = await reply(db, 'r2', unchanged('r10'));
+    const { replied, calls } = await reply(db, 'r2', unchanged('r10'));
 
     expect(calls[0]!.request.commentRef).toBe('r2');
     expect(replied.result.action).toBe('unchanged');
-    expect(refreshes).toEqual([PR_REF]);
     expect(await contentOf(db)).toStrictEqual(before);
+    await sameBytes(db, beforeBytes);
     expect((await updatesOf(db, 'F1')).filter((text) => text.includes('r10'))).toHaveLength(1);
   });
 
@@ -447,11 +430,10 @@ describe('recording the reply', () => {
     const db = await startReview();
     const before = await readFile(db);
 
-    const { replied, refreshes } = await reply(db, 'r2', answer, { dryRun: true });
+    const { replied } = await reply(db, 'r2', answer, { dryRun: true });
 
     expect(replied.result.dryRun).toBe(true);
     expect(replied.result.action).not.toBe('error');
-    expect(refreshes).toEqual([]);
     await sameBytes(db, before);
   });
 
@@ -460,11 +442,10 @@ describe('recording the reply', () => {
     const before = await readFile(db);
     const message = 'comment r2 no longer exists in this pull request';
 
-    const { replied, refreshes } = await reply(db, 'r2', failed(message));
+    const { replied } = await reply(db, 'r2', failed(message));
 
     expect(replied.result).toEqual({ action: 'error', dryRun: false, message });
     expect(replied).toMatchObject({ finding: 'F1', own: 'r1', text: `Duplicate of ${OWN_OF_F1}.` });
-    expect(refreshes).toEqual([]);
     await sameBytes(db, before);
   });
 
@@ -474,7 +455,7 @@ describe('recording the reply', () => {
     const loaded = await loadReviewFile(db);
     const missing = goneOwn(db, 'r1', 'F1');
 
-    const { replied, calls, refreshes } = await reply(
+    const { replied, calls } = await reply(
       db,
       'r2',
       (_ref, request, options) => ({
@@ -487,7 +468,6 @@ describe('recording the reply', () => {
     );
 
     expect(calls).toHaveLength(1);
-    expect(refreshes).toEqual([]);
     expect(replied.result).toEqual({
       action: 'error',
       dryRun,
@@ -505,62 +485,57 @@ describe('recording the reply', () => {
     const before = await readFile(db);
     const message = 'created, but its id could not be read from the URL';
 
-    const { replied, refreshes } = await reply(db, 'r2', (_ref, request, options) =>
+    const { replied } = await reply(db, 'r2', (_ref, request, options) =>
       outcome('created', 'r10', request, options, { comment: undefined, message }),
     );
 
     expect(replied.result).toMatchObject({ action: 'created', message });
     expect(replied.result.comment).toBeUndefined();
-    expect(refreshes).toEqual([]);
     await sameBytes(db, before);
   });
 });
 
-describe('refreshing the pull request', () => {
-  it('reads the connected pull request once and keeps what it returned', async () => {
+describe('recording the reply ref locally', () => {
+  it('records the reply ref in linkable without re-downloading the pull request, bumps snapshotGeneration, and leaves the stored snapshot untouched', async () => {
     const db = await startReview();
+    const genBefore = snapshotGeneration(db);
     expect((await loadReviewFile(db)).known.has('r10')).toBe(false);
 
-    const { replied, refreshes } = await reply(db, 'r2', created('r10'));
+    const { replied } = await reply(db, 'r2', created('r10'));
 
     expect(replied.result).toMatchObject({ action: 'created', comment: 'r10' });
-    expect(refreshes).toEqual([PR_REF]);
+    expect(snapshotGeneration(db)).toBe(genBefore + 1);
     const { known } = await loadReviewFile(db);
     expect([...known].sort()).toEqual([...BASE, 'r10'].sort());
     const stored = await loadSnapshot(db);
-    expect(stored!.comments.map(({ url }) => commentRefFromUrl(url)).sort()).toEqual([...BASE, 'r10'].sort());
+    expect(stored!.comments.map(({ url }) => commentRefFromUrl(url)).sort()).toEqual([...BASE].sort());
   });
 
-  it('saves the snapshot as it was returned', async () => {
+  it('restores a gone = 1 target duplicate ref when recording the reply and bumps snapshotGeneration', async () => {
     const db = await startReview();
+    await syncReviewFile(db, snapshot(BASE.filter((ref) => ref !== 'r2')));
+    expect((await loadReviewFile(db)).known.has('r2')).toBe(false);
+    const genBefore = snapshotGeneration(db);
 
-    await reply(db, 'r2', created('r10'), {}, async () => snapshot([...BASE, 'r10'], { title: 'Renamed on GitHub' }));
+    const { replied } = await reply(db, 'r2', created('r10'));
 
-    expect((await loadSnapshot(db))!.pullRequest.title).toBe('Renamed on GitHub');
+    expect(replied.result).toMatchObject({ action: 'created', comment: 'r10' });
+    expect(snapshotGeneration(db)).toBe(genBefore + 1);
+    const { known } = await loadReviewFile(db);
+    expect(known.has('r2')).toBe(true);
+    expect(known.has('r10')).toBe(true);
+    expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — replied to duplicate ${R2} with ${R10} in the pending review`);
   });
 
-  it.each([
-    ['created in a review thread', 'r2', {}, created('r10')],
-    ['created after a conversation comment', 'c3', { now: true }, created('c20')],
-    ['found as identical', 'r2', {}, unchanged('r10')],
-  ] as const)('reads the pull request again after a reply that is %s', async (_name, ref, options, answer) => {
+  it('sends the reply outside the database transaction: a writer can change the review meanwhile, and the reply keeps that change', async () => {
     const db = await startReview();
 
-    const { replied, refreshes } = await reply(db, ref, answer, options);
-
-    expect(replied.result.action).not.toBe('error');
-    expect(refreshes).toEqual([PR_REF]);
-  });
-
-  it('reads it outside any transaction: a writer can change the review meanwhile, and the reply keeps that change', async () => {
-    const db = await startReview();
-
-    const { replied } = await reply(db, 'r2', created('r10'), {}, async () => {
+    const { replied } = await reply(db, 'r2', async (_ref, request, options) => {
       await mutateReviewFile(db, (data) => ({
         data: addFinding(data, { severity: 'low', title: 'Added meanwhile', description: 'Text.' }, NOW).data,
         result: undefined,
       }));
-      return snapshot([...BASE, 'r10']);
+      return outcome('created', 'r10', request, options);
     });
 
     expect(replied.result).toMatchObject({ action: 'created', comment: 'r10' });
@@ -568,60 +543,10 @@ describe('refreshing the pull request', () => {
     expect(data.findings.map((finding) => finding.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5']);
     expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — replied to duplicate ${R2} with ${R10} in the pending review`);
   });
-
-  it.each([
-    ['created', 'the reply was posted as r10'],
-    ['unchanged', 'the reply already exists as r10'],
-  ] as const)('is an error that names the reply and says how to record it when the refresh fails (%s)', async (action, was) => {
-    const db = await startReview();
-    const before = await readFile(db);
-
-    const { replied, refreshes } = await reply(
-      db,
-      'r2',
-      (_ref, request, options) => outcome(action, 'r10', request, options),
-      {},
-      refreshesAs(new Error('network down')),
-    );
-
-    expect(refreshes).toEqual([PR_REF]);
-    expect(replied.result).toEqual({
-      action: 'error',
-      dryRun: false,
-      state: 'pending',
-      comment: 'r10',
-      url: `${PR}#discussion_r10`,
-      target: { ref: 'r2', author: 'Reviewer', kind: 'review', resolved: false },
-      message: `${was}, but the pull request could not be refreshed (network down); run "pr-comments pr sync --db ${db}" and run the command again to record it`,
-    });
-    expect(replied).toMatchObject({ finding: 'F1', own: 'r1', link: OWN_OF_F1, text: `Duplicate of ${OWN_OF_F1}.` });
-    await sameBytes(db, before);
-  });
-
-  it('names a refusal that is no Error too', async () => {
-    const db = await startReview();
-
-    const { replied } = await reply(db, 'r2', created('r10'), {}, refreshesAs('rate limited'));
-
-    expect(replied.result.message).toContain('could not be refreshed (rate limited)');
-  });
-
-  it('is recorded by running the command again once the pull request can be read: the reply is found as identical', async () => {
-    const db = await startReview();
-    await reply(db, 'r2', created('r10'), {}, refreshesAs(new Error('network down')));
-    expect((await updatesOf(db, 'F1')).some((text) => text.includes('replied to duplicate'))).toBe(false);
-
-    const { replied } = await reply(db, 'r2', unchanged('r10'));
-
-    expect(replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
-    expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — replied to duplicate ${R2} with ${R10} in the pending review`);
-    await expectSound(db);
-  });
 });
 
 describe('a reply that could not be recorded', () => {
-  // The snapshot is saved before the entry is recorded, in the same transaction: when recording fails, the snapshot
-  // goes with it. The link is removed while the reply is being sent, which a second writer can do at any time.
+  // The link is removed while the reply is being sent, which a second writer can do at any time.
   const unlinkAndAnswer =
     (db: string, action: 'created' | 'unchanged', during: { bytes?: Buffer }): Answer =>
     async (_ref, request, options) => {
@@ -630,13 +555,12 @@ describe('a reply that could not be recorded', () => {
       return outcome(action, 'r10', request, options);
     };
 
-  it('is an error that names the reply and says how it stands, and nothing is saved, the snapshot included', async () => {
+  it('is an error that names the reply and says how it stands, and nothing is saved', async () => {
     const db = await startReview();
     const during: { bytes?: Buffer } = {};
 
-    const { replied, refreshes } = await reply(db, 'r2', unlinkAndAnswer(db, 'created', during));
+    const { replied } = await reply(db, 'r2', unlinkAndAnswer(db, 'created', during));
 
-    expect(refreshes).toEqual([PR_REF]);
     expect(replied.result).toEqual({
       action: 'error',
       dryRun: false,
@@ -667,25 +591,6 @@ describe('a reply that could not be recorded', () => {
         `(r2 is not linked in this review; link it first with "pr-comments link duplicate --db ${db} <finding> r2"); ` +
         'run the command again to record it',
     );
-  });
-
-  it('is an error when the refreshed pull request no longer has the answered comment, and nothing is saved', async () => {
-    const db = await startReview();
-    const before = await readFile(db);
-
-    const { replied } = await reply(db, 'r2', created('r10'), {}, async () =>
-      snapshot(BASE.filter((ref) => ref !== 'r2').concat('r10'), { title: 'Renamed on GitHub' }),
-    );
-
-    expect(replied.result).toMatchObject({
-      action: 'error',
-      comment: 'r10',
-      message:
-        'the reply was posted as r10, but it could not be recorded in the review ' +
-        `(r2 is not in the database; run "pr-comments pr sync --db ${db}" first, or check the id); ` +
-        'run the command again to record it',
-    });
-    await sameBytes(db, before);
   });
 
   it('is recorded by running the command again once the link is back: the reply is found as identical', async () => {

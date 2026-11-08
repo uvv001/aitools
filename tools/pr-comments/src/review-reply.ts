@@ -1,10 +1,9 @@
 import { commentUrl, isAnnotationRef } from './comment-ref.ts';
-import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { composeBody } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
-import { changeReviewState, loadReviewFile, quoteCliPath, ReconnectedError, snapshotGeneration } from './review-files.ts';
+import { changeReviewState, loadReviewFile, quoteCliPath, ReconnectedError } from './review-files.ts';
 import { linksOf, recordReplied } from './review-links.ts';
 
 export interface ReplyDuplicateOptions {
@@ -18,9 +17,6 @@ export interface ReplyDuplicateOptions {
 export interface ReplyDuplicateDeps {
   // `CliEnvironment.reply`.
   reply: (ref: PullRequestRef, request: ReplyRequest, options: ReplyOptions) => Promise<ReplyResult>;
-  // `CliEnvironment.getPullRequest`: reads the pull request again, check annotations included, so that the database
-  // holds the reply too.
-  refresh: (ref: PullRequestRef) => Promise<PullRequestData>;
   now: () => Date;
 }
 
@@ -49,18 +45,16 @@ export interface RepliedDuplicate {
 //    the freshly read pull request (a discarded or edited pending review), because the reply would link to nothing;
 //    `missing` says to remove the link ("link remove") and to post the finding again ("finding post"), with
 //    the real database path as the other hints here. That error is not recorded.
-// 4. Right after the engine returned (outside a dry run) a result that is not an error and has a `comment`: the pull
-//    request is read again with `deps.refresh`, outside any transaction, so that the database holds the reply (a
-//    failure is an error result that says to run "pr sync" and the command again). Then `changeReviewState` saves
-//    that snapshot and records the reply with `recordReplied` of review-links.ts: one transaction under the write
-//    lock, which adds no entry when it exists already, as after an `unchanged` rerun (the snapshot is saved
-//    anyway). When recording fails the transaction is rolled back, the snapshot with it, and the result becomes an
-//    error that names the reply and says how it stands (`the reply was posted as r546201, but it could not be
-//    recorded in the review (<reason>)`); rerunning the command records it, because the reply is then found as
+// 4. Right after the engine returned (outside a dry run) a result that is not an error and has a `comment`:
+//    `changeReviewState` records the target and reply refs in `linkable` (`knownRef: [ref, replyRef]`) and records the
+//    reply with `recordReplied` of review-links.ts in one transaction under the write lock, which adds no entry when it
+//    exists already, as after an `unchanged` rerun. When recording fails the transaction is rolled back and the result
+//    becomes an error that names the reply and says how it stands (`the reply was posted as r546201, but it could not
+//    be recorded in the review (<reason>)`); rerunning the command records it, because the reply is then found as
 //    identical.
-// Nothing is read again or written in a dry run, or when the result is an error. Resolving, hiding or any other
-// change of a comment is not done by this tool. A check annotation ("a3f9c2d1e") is refused first of all, without
-// reading the database: it is not a comment, and there is nothing to reply to.
+// Nothing is written in a dry run, or when the result is an error. Resolving, hiding or any other change of a comment
+// is not done by this tool. A check annotation ("a3f9c2d1e") is refused first of all, without reading the database:
+// it is not a comment, and there is nothing to reply to.
 export async function replyToDuplicate(
   arg: string,
   ref: string,
@@ -106,16 +100,6 @@ export async function replyToDuplicate(
   const replyRef = result.comment;
   if (options.dryRun || result.action === 'error' || replyRef === undefined) return replied;
   const was = result.action === 'created' ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
-  let expectedGeneration: number;
-  let snapshot: PullRequestData;
-  try {
-    expectedGeneration = snapshotGeneration(paths.db);
-    snapshot = await deps.refresh(pullRequestRef);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    const message = `${was}, but the pull request could not be refreshed (${reason}); run "pr-comments pr sync --db ${quotedDb}" and run the command again to record it`;
-    return { ...replied, result: { ...result, action: 'error', message } };
-  }
   try {
     const { reportError } = await changeReviewState(
       arg,
@@ -123,7 +107,7 @@ export async function replyToDuplicate(
         state: recordReplied(state, ref, replyRef, result.state, deps.now(), { finding, own: own.ref }),
         result: undefined,
       }),
-      { snapshot, pullRequest: pullRequestRef, expectedGeneration },
+      { pullRequest: pullRequestRef, knownRef: [ref, replyRef] },
     );
     return reportError === undefined ? replied : { ...replied, reportError };
   } catch (error) {

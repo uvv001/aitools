@@ -10,7 +10,7 @@ import type { PullRequestRef } from './pr-url.ts';
 import { AGENT_DISCLAIMER, composeBody, publishComment } from './publish.ts';
 import type { OwnCommentReason, PublishComment, PublishOptions, PublishResult } from './publish.ts';
 import type { PullFile } from './rest.ts';
-import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
+import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, snapshotGeneration, syncReviewFile } from './review-files.ts';
 import { connectPullRequest, linkOwn, unlink } from './review-links.ts';
 import { addFinding, formatStamp, openRound, setDescription, setState } from './review-ops.ts';
 import { postFinding } from './review-post.ts';
@@ -153,27 +153,13 @@ interface Call {
   options: PublishOptions;
 }
 
-const refreshesAs = (error: unknown): PostFindingDeps['refresh'] => () => Promise.reject(error);
-
-// Behaves like the publish engine: the hook awaited and its answer taking the result's place.
-// The refresh answers as GitHub would after that: the comments the database knows, and the ones the engine reported.
-function engine(reply: Reply, db: string, refresh?: PostFindingDeps['refresh']) {
+function engine(reply: Reply) {
   const calls: Call[] = [];
-  const refreshes: PullRequestRef[] = [];
-  const reported: string[] = [];
-  const publish: PostFindingDeps['publish'] = async (ref, comment, options, hooks) => {
+  const publish: PostFindingDeps['publish'] = async (ref, comment, options) => {
     calls.push({ ref, comment, options });
-    const result = await reply(comment, options);
-    if (result.comment !== undefined) reported.push(result.comment);
-    return hooks.onResult === undefined ? result : hooks.onResult(result);
+    return reply(comment, options);
   };
-  const read: PostFindingDeps['refresh'] = async (ref) => {
-    refreshes.push(ref);
-    if (refresh !== undefined) return refresh(ref);
-    const { known } = await loadReviewFile(db);
-    return snapshot([...new Set([...known, ...reported])]);
-  };
-  return { publish, calls, refreshes, deps: { publish, refresh: read, now: () => LATER } satisfies PostFindingDeps };
+  return { publish, calls, deps: { publish, now: () => LATER } satisfies PostFindingDeps };
 }
 
 function answer(
@@ -206,10 +192,10 @@ const failed =
   (message: string, reason?: OwnCommentReason): Reply =>
   (_comment, options) => ({ action: 'error', dryRun: options.dryRun, message, ...(reason === undefined ? {} : { reason }) });
 
-async function post(db: string, id: string, reply: Reply, options: Partial<PostFindingOptions> = {}, refresh?: PostFindingDeps['refresh']) {
-  const fake = engine(reply, db, refresh);
+async function post(db: string, id: string, reply: Reply, options: Partial<PostFindingOptions> = {}) {
+  const fake = engine(reply);
   const posted = await postFinding(db, id, { ...OPTIONS, ...options }, fake.deps);
-  return { posted, calls: fake.calls, refreshes: fake.refreshes };
+  return { posted, calls: fake.calls };
 }
 
 describe('refusals before anything is published', () => {
@@ -217,30 +203,28 @@ describe('refusals before anything is published', () => {
     const report = reportPath();
     const db = await startReview({ connected: false });
     const before = await readFile(db);
-    const fake = engine(created(), db);
+    const fake = engine(created());
 
     await expect(postFinding(report, 'F1', OPTIONS, fake.deps)).rejects.toThrow(
       new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"`),
     );
     expect(fake.calls).toEqual([]);
-    expect(fake.refreshes).toEqual([]);
     await sameBytes(db, before);
   });
 
   it('refuses a finding that does not exist, naming the findings there are', async () => {
     const db = await startReview();
-    const fake = engine(created(), db);
+    const fake = engine(created());
 
     await expect(postFinding(db, 'F9', OPTIONS, fake.deps)).rejects.toThrow(
       new Error('unknown finding "F9"; the report has F1, F2, F3, F4, F5'),
     );
     expect(fake.calls).toEqual([]);
-    expect(fake.refreshes).toEqual([]);
   });
 
   it('refuses an anchor that is out of range and a commit that is not hex', async () => {
     const db = await startReview();
-    const fake = engine(created(), db);
+    const fake = engine(created());
 
     await expect(postFinding(db, 'F1', { ...OPTIONS, anchor: 3 }, fake.deps)).rejects.toThrow(
       new Error('--anchor 3 is out of range: F1 has 2 path:lines anchors'),
@@ -249,17 +233,15 @@ describe('refusals before anything is published', () => {
       new Error('commit "xyz" must be 7-40 hex digits'),
     );
     expect(fake.calls).toEqual([]);
-    expect(fake.refreshes).toEqual([]);
   });
 
   it.each([false, true])('refuses a database that does not exist and creates none (dry run: %s)', async (dryRun) => {
     const missing = join(dir, 'missing.sqlite');
-    const fake = engine(created(), missing);
+    const fake = engine(created());
 
     await expect(postFinding(missing, 'F1', { ...OPTIONS, dryRun }, fake.deps)).rejects.toThrow(`${missing} does not exist`);
     expect(existsSync(missing)).toBe(false);
     expect(fake.calls).toEqual([]);
-    expect(fake.refreshes).toEqual([]);
   });
 });
 
@@ -514,18 +496,17 @@ describe('recording the link', () => {
     await expectSound(db);
   });
 
-  // A given snapshot is always saved (a refresh is never skipped, even when the link is there already), which may
-  // touch the file without changing a row: these tests compare what the database holds, not its bytes.
   it('adds nothing when the comment is unchanged and already the own comment', async () => {
     const db = await startReview();
     await withOwn(db, 'F1', 'r1');
     const before = await contentOf(db);
+    const beforeBytes = await readFile(db);
 
-    const { posted, refreshes } = await post(db, 'F1', (comment, options) => answer(comment, options, 'unchanged', 'r1'));
+    const { posted } = await post(db, 'F1', (comment, options) => answer(comment, options, 'unchanged', 'r1'));
 
     expect(posted.result).toMatchObject({ action: 'unchanged', comment: 'r1' });
-    expect(refreshes).toEqual([PR_REF]);
     expect(await contentOf(db)).toStrictEqual(before);
+    await sameBytes(db, beforeBytes);
   });
 
   it('logs an update of the own comment and keeps the link', async () => {
@@ -557,13 +538,14 @@ describe('recording the link', () => {
     const db = await startReview();
     await post(db, 'F1', created('r2'));
     const before = await contentOf(db);
+    const beforeBytes = await readFile(db);
 
-    const { posted, calls, refreshes } = await post(db, 'F1', (comment, options) => answer(comment, options, 'unchanged', 'r2'));
+    const { posted, calls } = await post(db, 'F1', (comment, options) => answer(comment, options, 'unchanged', 'r2'));
 
     expect(calls[0]!.comment.commentRef).toBe('r2');
     expect(posted.result.action).toBe('unchanged');
-    expect(refreshes).toEqual([PR_REF]);
     expect(await contentOf(db)).toStrictEqual(before);
+    await sameBytes(db, beforeBytes);
     expect((await updatesOf(db, 'F1')).filter((text) => text.includes('r2'))).toEqual([`${STAMP} — posted PR comment ${R2} to the pending review`]);
   });
 
@@ -572,10 +554,9 @@ describe('recording the link', () => {
     const before = await readFile(db);
     const message = 'GitHub rejected the comment (is the anchor still part of the diff?)';
 
-    const { posted, refreshes } = await post(db, 'F1', failed(message));
+    const { posted } = await post(db, 'F1', failed(message));
 
     expect(posted.result).toEqual({ action: 'error', dryRun: false, message });
-    expect(refreshes).toEqual([]);
     await sameBytes(db, before);
   });
 
@@ -584,13 +565,12 @@ describe('recording the link', () => {
     const before = await readFile(db);
     const message = 'created, but its id could not be read from the URL';
 
-    const { posted, refreshes } = await post(db, 'F1', (comment, options) =>
+    const { posted } = await post(db, 'F1', (comment, options) =>
       answer(comment, options, 'created', 'r2', { comment: undefined, message }),
     );
 
     expect(posted.result).toMatchObject({ action: 'created', message });
     expect(posted.result.comment).toBeUndefined();
-    expect(refreshes).toEqual([]);
     await sameBytes(db, before);
   });
 
@@ -602,71 +582,55 @@ describe('recording the link', () => {
     const db = await startReview();
     const before = await readFile(db);
 
-    const { posted, calls, refreshes } = await post(db, 'F1', reply, { dryRun: true });
+    const { posted, calls } = await post(db, 'F1', reply, { dryRun: true });
 
     expect(calls[0]!.options).toEqual({ byAgent: false, now: false, dryRun: true });
     expect(posted.result.dryRun).toBe(true);
     expect(posted.result.action).not.toBe('error');
-    expect(refreshes).toEqual([]);
     await sameBytes(db, before);
   });
 });
 
-describe('refreshing the pull request', () => {
-  it('reads the connected pull request once and keeps what it returned, so that the new comment can be linked', async () => {
+describe('recording the comment ref locally', () => {
+  it('records the new comment ref in linkable without re-downloading the pull request, bumps snapshotGeneration, and leaves the stored snapshot untouched', async () => {
     const db = await startReview();
+    const genBefore = snapshotGeneration(db);
     expect((await loadReviewFile(db)).known.has('r2')).toBe(false);
 
-    const { posted, refreshes } = await post(db, 'F1', created('r2'));
+    const { posted } = await post(db, 'F1', created('r2'));
 
     expect(posted.result).toMatchObject({ action: 'created', comment: 'r2' });
-    expect(refreshes).toEqual([PR_REF]);
+    expect(snapshotGeneration(db)).toBe(genBefore + 1);
     const { known, links } = await loadReviewFile(db);
     expect([...known].sort()).toEqual(['r1', 'r2', 'r4', 'r8']);
     expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1' }]);
     const stored = await loadSnapshot(db);
-    expect(stored!.comments.map(({ url }) => commentRefFromUrl(url)).sort()).toEqual(['r1', 'r2', 'r4', 'r8']);
+    expect(stored!.comments.map(({ url }) => commentRefFromUrl(url)).sort()).toEqual(['r1', 'r4', 'r8']);
   });
 
-  it('saves the snapshot as it was returned', async () => {
+  it('reconciles the locally recorded ref on the next pr sync', async () => {
     const db = await startReview();
+    await post(db, 'F1', created('r2'));
 
-    await post(db, 'F1', created('r2'), {}, async () => snapshot([...BASE, 'r2'], { title: 'Renamed on GitHub' }));
+    await syncRefs(db, ['r2']);
+    expect([...(await loadReviewFile(db)).known].sort()).toEqual(['r1', 'r2', 'r4', 'r8']);
+    expect((await loadSnapshot(db))!.comments.map(({ url }) => commentRefFromUrl(url)).sort()).toEqual(['r1', 'r2', 'r4', 'r8']);
 
-    expect((await loadSnapshot(db))!.pullRequest.title).toBe('Renamed on GitHub');
+    await syncReviewFile(db, snapshot(BASE));
+    const afterGone = await loadReviewFile(db);
+    expect(afterGone.known.has('r2')).toBe(false);
+    expect(afterGone.links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1' }]);
   });
 
-  const REPLIES = {
-    created: created('r2'),
-    updated: (comment: PublishComment, options: PublishOptions) => answer(comment, options, 'updated', 'r1'),
-    unchanged: (comment: PublishComment, options: PublishOptions) => answer(comment, options, 'unchanged', 'r1'),
-    adopted: (comment: PublishComment, options: PublishOptions) => answer(comment, options, 'unchanged', 'r7', { message: ADOPTED }),
-  };
-
-  it.each([
-    ['created', [], REPLIES.created],
-    ['updated', ['r1'], REPLIES.updated],
-    ['unchanged and linked already', ['r1'], REPLIES.unchanged],
-    ['unchanged and adopted', [], REPLIES.adopted],
-  ] as const)('reads the pull request again after a result that is %s', async (_name, links, reply) => {
-    const db = await startReview();
-    for (const ref of links) await withOwn(db, 'F1', ref);
-
-    const { posted, refreshes } = await post(db, 'F1', reply);
-
-    expect(posted.result.action).not.toBe('error');
-    expect(refreshes).toEqual([PR_REF]);
-  });
-
-  it('reads it outside any transaction: a writer can change the review meanwhile, and the post keeps that change', async () => {
+  it('publishes outside the database transaction: a writer can change the review meanwhile, and the post keeps that change', async () => {
     const db = await startReview();
 
-    const { posted } = await post(db, 'F1', created('r2'), {}, async () => {
+    const { posted } = await post(db, 'F1', async (comment, options) => {
       await mutateReviewFile(db, (data) => ({
         data: addFinding(data, { severity: 'low', title: 'Added meanwhile', description: 'Text.' }, NOW).data,
         result: undefined,
       }));
-      return snapshot([...BASE, 'r2']);
+      return answer(comment, options, 'created', 'r2');
     });
 
     expect(posted.result).toMatchObject({ action: 'created', comment: 'r2' });
@@ -674,71 +638,18 @@ describe('refreshing the pull request', () => {
     expect(data.findings.map((finding) => finding.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6']);
     expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1' }]);
   });
-
-  it.each([
-    ['a comment it created', 'created', undefined, 'the comment was posted as r2'],
-    ['a comment it updated', 'updated', 'r1', 'the comment is r1 on GitHub'],
-    ['an identical comment it adopted', 'unchanged', undefined, 'the comment is r2 on GitHub'],
-  ] as const)('is an error that names the comment and how to record it when the refresh fails (%s)', async (_name, action, own, was) => {
-    const db = await startReview();
-    if (own !== undefined) await withOwn(db, 'F1', own);
-    const before = await readFile(db);
-    const ref = own ?? 'r2';
-
-    const { posted, refreshes } = await post(db, 'F1', (comment, options) => answer(comment, options, action, ref), {}, refreshesAs(new Error('network down')));
-
-    expect(refreshes).toEqual([PR_REF]);
-    expect(posted.result).toEqual({
-      action: 'error',
-      dryRun: false,
-      comment: ref,
-      url: `${PR}#discussion_${ref}`,
-      state: 'pending',
-      path: 'src/app.ts',
-      lines: '10-12',
-      message:
-        `${was}, but the pull request could not be refreshed (network down); ` +
-        `run "pr-comments pr sync --db ${db}", then "pr-comments link own --db ${db} F1 ${ref}"`,
-    });
-    await sameBytes(db, before);
-  });
-
-  it('names a refusal that is no Error too', async () => {
-    const db = await startReview();
-
-    const { posted } = await post(db, 'F1', created('r2'), {}, refreshesAs('rate limited'));
-
-    expect(posted.result.message).toContain('could not be refreshed (rate limited)');
-  });
-
-  it('is recorded by running the post again once the pull request can be read: the comment is found as identical', async () => {
-    const db = await startReview();
-    await post(db, 'F1', created('r2'), {}, refreshesAs(new Error('network down')));
-    expect((await loadReviewFile(db)).links).toEqual([]);
-
-    const { posted, calls } = await post(db, 'F1', (comment, options) => answer(comment, options, 'unchanged', 'r2', { message: ADOPTED }));
-
-    expect(calls[0]!.comment.commentRef).toBeUndefined();
-    expect(posted.result).toMatchObject({ action: 'unchanged', comment: 'r2' });
-    expect((await loadReviewFile(db)).links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1' }]);
-    expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — adopted PR comment ${R2} (identical)`);
-    await expectSound(db);
-  });
 });
 
 describe('a comment that could not be recorded', () => {
   const LINK_OWN = (db: string, ref: string) => `record it with "pr-comments link own --db ${db} F1 ${ref}"`;
 
-  // The snapshot is saved before the link is recorded, in the same transaction: when recording fails, the snapshot
-  // goes with it.
-  it('is an error that names the ref and how to record it, and nothing is saved, the snapshot included', async () => {
+  it('is an error that names the ref and how to record it, and nothing is saved', async () => {
     const db = await startReview();
     await withOwn(db, 'F1', 'r1');
     const before = await readFile(db);
 
-    const { posted, refreshes } = await post(db, 'F1', created('r2'));
+    const { posted } = await post(db, 'F1', created('r2'));
 
-    expect(refreshes).toEqual([PR_REF]);
     expect(posted.result).toEqual({
       action: 'error',
       dryRun: false,
@@ -785,24 +696,6 @@ describe('a comment that could not be recorded', () => {
     expect(posted.result).toMatchObject({ action: 'error', comment: 'r8' });
     expect(posted.result.message).toMatch(/^the comment is r8 on GitHub, but it could not be recorded in the review \(r8 is already linked/);
     expect(posted.result.message).toMatch(/; record it with "pr-comments link own --db .* F1 r8"$/);
-  });
-
-  it('is an error when the refreshed pull request does not have the comment yet, and nothing is saved', async () => {
-    const db = await startReview();
-    const before = await readFile(db);
-
-    const { posted, refreshes } = await post(db, 'F1', created('r2'), {}, async () => snapshot(BASE, { title: 'Renamed on GitHub' }));
-
-    expect(refreshes).toEqual([PR_REF]);
-    expect(posted.result).toMatchObject({
-      action: 'error',
-      comment: 'r2',
-      message:
-        'the comment was posted as r2, but it could not be recorded in the review ' +
-        `(r2 is not in the database; run "pr-comments pr sync --db ${db}" first, or check the id); ` +
-        LINK_OWN(db, 'r2'),
-    });
-    await sameBytes(db, before);
   });
 
   it('is an error too when the comment was linked elsewhere while it was being posted, and nothing is saved on top of that', async () => {
@@ -905,20 +798,18 @@ const HEAD = 'c'.repeat(40);
 // The real engine, over a pull request that has the given comments and changes the given files.
 const realEngine =
   (comments: Comment[], threads: ReviewThread[], files: PullFile[] = []): PostFindingDeps['publish'] =>
-  (ref, comment, options, hooks) => {
+  (ref, comment, options) => {
     const sample = samplePullRequest();
     const data: PullRequestData = { ...sample, pullRequest: { ...sample.pullRequest, id: 'PR_1', headSha: HEAD }, reviews: [], threads, comments };
     const client = (async () => ({ viewer: { login: 'Viewer' } })) as unknown as GraphQLClient;
     return publishComment({ client, token: 'token', host: ref.host, fetchImpl: fetch }, ref, comment, options, {
-      ...hooks,
       loadPullRequest: async () => data,
       fetchFiles: async () => files,
     });
   };
 
-// The real engine refuses every post of these tests, so nothing is to be read again.
 const realPost = (db: string, id: string, publish: PostFindingDeps['publish'], options: Partial<PostFindingOptions> = {}) =>
-  postFinding(db, id, { ...OPTIONS, ...options }, { publish, refresh: refreshesAs(new Error('unexpected refresh')), now: () => LATER });
+  postFinding(db, id, { ...OPTIONS, ...options }, { publish, now: () => LATER });
 
 describe('a posted comment cannot move', () => {
   function reviewComment(n: number, overrides: Partial<Comment> = {}): Comment {

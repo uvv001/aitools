@@ -7,14 +7,12 @@ import { parseArgs } from 'node:util';
 import type { ParseArgsOptionsConfig } from 'node:util';
 import { isLinkRef } from './comment-ref.ts';
 import { downloadPullRequest, withWorkingToken } from './download.ts';
-import type { TokenContext } from './download.ts';
 import { resolveRevision } from './git-revision.ts';
-import { AccessDeniedError, fetchPullRequest } from './github.ts';
 import { findUnknownAuthors, findUnknownRefs, renderMarkdown } from './markdown.ts';
 import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl, type PullRequestRef } from './pr-url.ts';
 import { publishComment } from './publish.ts';
-import type { PublishAction, PublishComment, PublishHooks, PublishOptions, PublishResult } from './publish.ts';
+import type { PublishAction, PublishComment, PublishOptions, PublishResult } from './publish.ts';
 import { replyToComment } from './reply.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult, ReplyTarget } from './reply.ts';
 import type { Anchor } from './report-extract.ts';
@@ -48,12 +46,7 @@ const ACTION_WIDTH = 'unchanged'.length;
 export interface CliEnvironment {
   // The pull request with its check annotations, read from GitHub.
   getPullRequest: (ref: PullRequestRef) => Promise<PullRequestData>;
-  publish: (
-    ref: PullRequestRef,
-    comment: PublishComment,
-    options: PublishOptions,
-    hooks: PublishHooks,
-  ) => Promise<PublishResult>;
+  publish: (ref: PullRequestRef, comment: PublishComment, options: PublishOptions) => Promise<PublishResult>;
   reply: (ref: PullRequestRef, request: ReplyRequest, options: ReplyOptions) => Promise<ReplyResult>;
   // The short hash (at least 8 characters) of the commit that a revision names in the repository of the working directory.
   resolveRevision: (revision: string) => Promise<string>;
@@ -73,48 +66,12 @@ async function readProcessStdin(): Promise<Uint8Array> {
   return Buffer.concat(chunks);
 }
 
-let activeWriteContext: TokenContext | undefined;
-
-async function withWriteContext<T>(ref: PullRequestRef, run: (context: TokenContext) => Promise<T>): Promise<T> {
-  return withWorkingToken(
-    ref,
-    async (context) => {
-      activeWriteContext = context;
-      try {
-        return await run(context);
-      } catch (error) {
-        if (error instanceof AccessDeniedError) activeWriteContext = undefined;
-        throw error;
-      }
-    },
-    { purpose: 'write' },
-  );
-}
-
-async function refreshPullRequest(ref: PullRequestRef): Promise<PullRequestData> {
-  if (activeWriteContext && activeWriteContext.host.toLowerCase() === ref.host.toLowerCase()) {
-    try {
-      return await fetchPullRequest(activeWriteContext.client, ref, undefined, { withChecks: true });
-    } catch (error) {
-      if (!(error instanceof AccessDeniedError)) throw error;
-      const writerData = await fetchPullRequest(activeWriteContext.client, ref);
-      const readerData = await downloadPullRequest(ref);
-      if (readerData.pullRequest.headSha !== writerData.pullRequest.headSha) {
-        throw new Error(
-          `pull request head changed during download (${writerData.pullRequest.headSha} → ${readerData.pullRequest.headSha})`,
-        );
-      }
-      return { ...writerData, checkRuns: readerData.checkRuns };
-    }
-  }
-  return downloadPullRequest(ref);
-}
-
 export const defaultEnvironment: CliEnvironment = {
-  getPullRequest: (ref) => refreshPullRequest(ref),
-  publish: (ref, comment, options, hooks) =>
-    withWriteContext(ref, (context) => publishComment(context, ref, comment, options, hooks)),
-  reply: (ref, request, options) => withWriteContext(ref, (context) => replyToComment(context, ref, request, options)),
+  getPullRequest: (ref) => downloadPullRequest(ref),
+  publish: (ref, comment, options) =>
+    withWorkingToken(ref, (context) => publishComment(context, ref, comment, options), { purpose: 'write' }),
+  reply: (ref, request, options) =>
+    withWorkingToken(ref, (context) => replyToComment(context, ref, request, options), { purpose: 'write' }),
   resolveRevision: (revision) => resolveRevision(revision, process.cwd()),
   print: (text) => process.stdout.write(text),
   warn: (text) => process.stderr.write(text),
@@ -501,7 +458,7 @@ async function postReviewFinding({ env, args: [id = ''], values }: Context, db: 
     anchor: parsePositive('anchor', values.anchor),
     commit: values.commit,
   };
-  const posted = await postFinding(db, id, options, { publish: env.publish, now: env.now, refresh: env.getPullRequest });
+  const posted = await postFinding(db, id, options, { publish: env.publish, now: env.now });
   warnReportError(env, db, posted.reportError);
   for (const warning of posted.warnings) env.warn(`Warning: ${warning}\n`);
   if (values.json) {
@@ -592,7 +549,7 @@ function answeredLine({ ref, author, kind, resolved }: ReplyTarget): string {
 async function replyToLinked({ env, args: [rawRef = ''], values }: Context, db: string): Promise<number> {
   const ref = normalizeCliRef(rawRef);
   const options = { now: values.now ?? false, byAgent: values['by-agent'] ?? false, dryRun: values['dry-run'] ?? false };
-  const deps = { reply: env.reply, now: env.now, refresh: env.getPullRequest };
+  const deps = { reply: env.reply, now: env.now };
   const { finding, own, link, text, result, reportError } = await replyToDuplicate(db, ref, options, deps);
   warnReportError(env, db, reportError);
   if (values.json) {
@@ -921,8 +878,8 @@ const DEFINITIONS: Command[] = [
     summary: 'publishes the comment of a finding',
     description: [
       'Publishes the comment of one finding, in any state, to the connected pull request (to your pending review unless --now) and',
-      'links it to the finding as its own comment. Run again, it updates that comment. The downloaded pull request is',
-      'refreshed so that the new comment is in the database. Without --dry-run the result is recorded in the database.',
+      'links it to the finding as its own comment. Run again, it updates that comment. Without --dry-run the returned comment ref',
+      'and link are recorded in the database; run "pr-comments pr sync --db <file.sqlite>" to refresh the full pull request snapshot.',
     ],
     args: [FINDING],
     options: [
@@ -994,8 +951,9 @@ const DEFINITIONS: Command[] = [
     summary: 'answers a duplicate with "Duplicate of <link>."',
     description: [
       'Answers a comment that is linked as a duplicate of a finding with "Duplicate of <link to the own comment of the finding>."',
-      'in your pending review. A conversation comment can only be answered at once, so it needs --now. The thread is never',
-      'resolved by the tool.',
+      'in your pending review, and records the returned reply ref and update in the database (run "pr-comments pr sync --db <file.sqlite>"',
+      'to refresh the full pull request snapshot). A conversation comment can only be answered at once, so it needs --now. The thread',
+      'is never resolved by the tool.',
     ],
     args: [{ name: '<ref>', description: 'the comment that is linked as a duplicate: r544830 or c623843' }],
     options: [...postOptions, jsonOption('the result and the text')],

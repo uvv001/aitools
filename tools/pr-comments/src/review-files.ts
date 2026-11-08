@@ -16,7 +16,7 @@ import { defaultReportPath, findRepoRoot, REVIEW_FOLDER } from './review-naming.
 import { newReview } from './review-ops.ts';
 import { renderReport } from './review-render.ts';
 import { getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
-import { clearPullRequest, loadKnownRefs, loadPullRequest, savePullRequest } from './store.ts';
+import { clearPullRequest, loadKnownRefs, loadPullRequest, recordKnownCommentRef, savePullRequest } from './store.ts';
 
 export interface ReviewPaths {
   // The review database (the source of truth) and the derived report, side by side: `<stem>.sqlite` and `<stem>.md`.
@@ -492,16 +492,23 @@ function assertFreshSnapshot(
 // object writes nothing, not even a byte of the file; otherwise only the parts that differ are written (the review
 // when its object is not the loaded one, the links when their content differs, the pull request when it differs).
 // `options.snapshot`, a pull request that was just downloaded, is saved first and always (after verifying the review
-// is still connected to `options.pullRequest` when given and no newer snapshot was stored meanwhile), so the state
-// that `change` gets (`known` included) already holds its comments, and a link to one of them is allowed; if the
-// change fails, the snapshot is rolled back with it. The transaction takes the write lock before it loads, so writers
+// is still connected to `options.pullRequest` when given and no newer snapshot was stored meanwhile), and
+// `options.knownRef` records one or more newly published or verified comment refs in `linkable` before loading (and
+// bumps `snapshot_generation`), so the state that `change` gets (`known` included) already holds the comments, and a
+// link to them is allowed; if the change fails, everything is rolled back with it. The transaction takes the write
+// lock before it loads, so writers
 // in several processes run one after the other, each on what the one before saved; a writer waits for the lock (up to
 // the busy timeout) instead of working on stale data. When the review changes, the report is rendered and written
 // after the transaction commits.
 export async function changeReviewState<T>(
   arg: string,
   change: (state: ReviewState) => StateChange<T> | Promise<StateChange<T>>,
-  options: { snapshot?: PullRequestData; pullRequest?: PullRequestRef; expectedGeneration?: number } = {},
+  options: {
+    snapshot?: PullRequestData;
+    pullRequest?: PullRequestRef;
+    expectedGeneration?: number;
+    knownRef?: string | readonly string[];
+  } = {},
 ): Promise<StateChange<T>> {
   const paths = reviewPaths(arg);
   const db = openReviewDb(paths.db, 'existing');
@@ -510,11 +517,20 @@ export async function changeReviewState<T>(
     const changed = await inTransactionAsync(
       db,
       async () => {
+        let bumpedGeneration = false;
         if (options.pullRequest !== undefined) assertConnectedPullRequest(db, paths.db, options.pullRequest);
         if (options.snapshot !== undefined) {
           assertFreshSnapshot(db, paths.db, options.snapshot, options.expectedGeneration);
           savePullRequest(db, options.snapshot);
           bumpSnapshotGeneration(db);
+          bumpedGeneration = true;
+        }
+        let recordedKnownRef = false;
+        if (options.knownRef !== undefined) {
+          const refs = typeof options.knownRef === 'string' ? [options.knownRef] : options.knownRef;
+          for (const ref of refs) {
+            if (recordKnownCommentRef(db, ref)) recordedKnownRef = true;
+          }
         }
         const before = loadState(db);
         let result: StateChange<T>;
@@ -541,8 +557,12 @@ export async function changeReviewState<T>(
             if (before.pullRequest !== undefined && options.snapshot === undefined) {
               clearPullRequest(db);
               bumpSnapshotGeneration(db);
+              bumpedGeneration = true;
             }
           }
+        }
+        if (!bumpedGeneration && options.knownRef !== undefined && (recordedKnownRef || state !== before)) {
+          bumpSnapshotGeneration(db);
         }
         if (rendered !== undefined) {
           await refuseDatabase(paths.report, paths.db);
