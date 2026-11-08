@@ -50,8 +50,8 @@ target — in the review folder, in `.ai/review-with-docs/`, or in an earlier
 session's `files/review-with-docs/` folder that the user names — means the
 request continues it: read `finding list` and start at the step the request
 calls for — a verdict is step 5, a publish or sync request step 6, new changes
-(a moved PR head included) step 7, a fix request the paragraph under States.
-With no match, step 1 starts a new review.
+(a moved PR head included) step 7, a fix request **Fixed** under
+[States](#states). With no match, step 1 starts a new review.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
    required — the rounds pin revisions — so where the target is not in a
@@ -113,7 +113,8 @@ With no match, step 1 starts a new review.
    fix in its description and `finding list` shows each of them — or, where
    the round has no finding, it records `no findings` (`no new findings` in a
    later round) — where the user asked up front for a sync, the pull request's
-   comments are reconciled (step 6), and the user has the report's path.
+   comments are reconciled and the `tier bound` condition holds (step 6), and
+   the user has the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
@@ -146,8 +147,8 @@ With no match, step 1 starts a new review.
      - **verdicts:** the verdict marker ([pull-request.md](pull-request.md)) of
        every nonempty submitted review verdict body that raises or addresses a
        concern appears in `report dump`;
-     - **tier bound:** where a PR-comment dispatch ran, the index shows the
-       tier bound of [fleet.md](fleet.md);
+   - **tier bound:** where a PR-comment dispatch ran, the index shows the tier
+     bound of [fleet.md](fleet.md);
    - the user knows the pending review waits for their submit.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR. A pull
@@ -177,7 +178,7 @@ With no match, step 1 starts a new review.
    the index on a family other than the orchestrator's where the orchestrator
    wrote the fixes); every finding the re-check covers carries a `Round <n>:`
    entry; and on a pull request target, the pull request's comments are
-   reconciled (step 6).
+   reconciled and the `tier bound` condition holds (step 6).
 
 Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 
