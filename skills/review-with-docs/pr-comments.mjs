@@ -1505,7 +1505,7 @@ function extractEvidence(description) {
 	return found;
 }
 //#endregion
-//#region src/report-parse.ts
+//#region src/review-model.ts
 const STATES = [
 	{
 		marker: "⏳",
@@ -1541,268 +1541,6 @@ const SEVERITIES = [
 	"🟡",
 	"⚪"
 ];
-const HEADING$1 = /^(?<hashes>#{1,4})\s+(?<title>.*\S)\s*$/u;
-const FINDING$1 = /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>[A-Za-z0-9-]+)\s+—\s+(?<title>.+)$/u;
-const TITLE$1 = /^Review — (?<target>\S.*)$/u;
-const ID = /^F(?<number>\d+)$/u;
-const SECTIONS = [
-	"Intro",
-	"Dashboard",
-	"Findings"
-];
-function groups(match) {
-	return match.groups;
-}
-const HTML_TAG = /<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*|!--[\s\S]*?--)>/g;
-const EMPHASIS = /(?<![\p{L}\p{N}_])(_+)(?!\s)(.+?)(?<!\s)\1(?![\p{L}\p{N}_])/gu;
-function stripLinks(text) {
-	let current = text;
-	let replaced = true;
-	while (replaced) {
-		replaced = false;
-		for (let mid = current.indexOf("]("); mid !== -1; mid = current.indexOf("](", mid + 2)) {
-			let bracketDepth = 1;
-			let open = mid;
-			while (open > 0 && bracketDepth > 0) {
-				open--;
-				if (current[open] === "]") bracketDepth++;
-				else if (current[open] === "[") bracketDepth--;
-			}
-			if (bracketDepth !== 0) continue;
-			let parenDepth = 1;
-			let close = mid + 2;
-			while (close < current.length && (current[close] === " " || current[close] === "	")) close++;
-			if (current[close] === "<") {
-				const endAngle = current.indexOf(">", close + 1);
-				if (endAngle === -1 || current.slice(close + 1, endAngle).includes("<")) continue;
-				close = endAngle + 1;
-			}
-			while (close < current.length && parenDepth > 0) {
-				const ch = current[close];
-				if (parenDepth === 1 && (ch === "\"" || ch === "'") && (current[close - 1] === " " || current[close - 1] === "	")) {
-					const endQuote = current.indexOf(ch, close + 1);
-					if (endQuote !== -1) {
-						close = endQuote + 1;
-						continue;
-					}
-				}
-				if (ch === "(") parenDepth++;
-				else if (ch === ")") parenDepth--;
-				close++;
-			}
-			if (parenDepth !== 0) continue;
-			const isImage = open > 0 && current[open - 1] === "!";
-			const label = isImage ? "" : current.slice(open + 1, mid);
-			current = current.slice(0, isImage ? open - 1 : open) + label + current.slice(close);
-			replaced = true;
-			break;
-		}
-	}
-	return current;
-}
-function stripInlineMarkup(text) {
-	let current = stripLinks(text).replace(HTML_TAG, "");
-	for (let next = current.replace(EMPHASIS, "$2"); next !== current; next = current.replace(EMPHASIS, "$2")) current = next;
-	return current;
-}
-function slug(heading) {
-	const literals = [];
-	const hold = (value) => `\0${literals.push(value) - 1}\0`;
-	return stripInlineMarkup(heading.replace(/(?<!\\)(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g, (_, _ticks, code) => hold(code)).replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, (_, char) => hold(char))).replace(/\0(\d+)\0/g, (_, id) => literals[Number(id)]).toLowerCase().replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, "").replace(/ /gu, "-");
-}
-const same = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
-function insideFences(lines) {
-	let open;
-	const inside = lines.map((line) => {
-		if (open === void 0) {
-			open = openingFence(line)?.marker;
-			return false;
-		}
-		if (closesFence(line, open)) open = void 0;
-		return true;
-	});
-	if (open !== void 0) throw new Error("a code fence is never closed");
-	return inside;
-}
-function checkHeader({ state, severity, id }, previous) {
-	if (!STATES.some((known) => known.marker === state) || !SEVERITIES.includes(severity)) throw new Error(`${id} has a state or severity outside the scales`);
-	const number = Number(ID.exec(id)?.groups?.number);
-	if (!(number > previous)) throw new Error(`finding ID ${id} is not F<n>, or does not rise above the one before`);
-	return number;
-}
-function parseReport(text, path) {
-	const lines = text.split("\n");
-	const inside = insideFences(lines);
-	const titles = [];
-	const sections = [];
-	const blocks = [];
-	let previous = -1;
-	let open;
-	lines.forEach((line, index) => {
-		const heading = inside[index] ? null : HEADING$1.exec(line);
-		if (!heading) return;
-		const { hashes, title } = groups(heading);
-		if (hashes.length > 1 && open) {
-			open.end = index;
-			open = void 0;
-		}
-		const inFindings = sections.at(-1)?.title === "Findings";
-		if (hashes.length === 1) titles.push({
-			title,
-			line: index
-		});
-		else if (hashes.length === 2) sections.push({
-			title,
-			line: index
-		});
-		else if (hashes.length === 3) {
-			const header = FINDING$1.exec(title);
-			if (header && !inFindings) throw new Error(`finding header outside '## Findings': ${title}`);
-			if (!inFindings) return;
-			if (!header) throw new Error(`malformed finding header: ${title}`);
-			const fields = groups(header);
-			previous = checkHeader(fields, previous);
-			blocks.push({ finding: {
-				...fields,
-				headerLine: index,
-				anchor: slug(title)
-			} });
-		} else {
-			const block = blocks.at(-1);
-			if (inFindings && block && title === "Description" && !block.description) {
-				block.description = {
-					start: index + 1,
-					end: lines.length
-				};
-				open = block.description;
-			}
-		}
-	});
-	const [first] = titles;
-	const match = titles.length === 1 && first?.line === 0 ? TITLE$1.exec(first.title) : null;
-	if (!match) throw new Error("the report does not open with exactly one '# Review — <target>' title");
-	if (!same(sections.map(({ title }) => title), SECTIONS)) throw new Error(`the sections are not ${SECTIONS.map((title) => `'## ${title}'`).join(", ")}, once each, in that order`);
-	const findings = blocks.map(({ finding, description }) => {
-		if (!description) throw new Error(`${finding.id} has no '#### Description'`);
-		return {
-			...finding,
-			description
-		};
-	});
-	return {
-		path,
-		lines,
-		inside,
-		target: groups(match).target,
-		findings,
-		sections
-	};
-}
-//#endregion
-//#region src/review-read.ts
-const STAMP = String.raw`\d{4}-\d{2}-\d{2} \d{2}:\d{2}`;
-const OPENER = /^\*\*Reviewed\*\*\s*$/u;
-const BULLET = /^- (?<text>.*)$/u;
-const BLANK$1 = /^[ \t]*$/u;
-const SUBHEADING = /^####\s+(?<title>.*\S)\s*$/u;
-const ROUND = /^Round (\d+)\b/u;
-const REVISION = /^Round \d+ — `([^`]+)`/u;
-const BASE = /\bbase\s+(?:`([^`]+)`|none\s+—\s+reviewed\s+as\s+it\s+stands)/u;
-const UPDATE = new RegExp(`^(${STAMP}) — (?:Round (\\d+): )?`, "u");
-function scanBlocks(report, from, to, opener) {
-	const blocks = [];
-	let blanks = [];
-	const extend = (lines) => {
-		const last = blocks.at(-1);
-		if (last === void 0 || last.label) throw new Error("text outside a bullet list");
-		last.text += lines.map((line) => `\n${line}`).join("");
-	};
-	for (let index = from; index < to; index++) {
-		const line = report.lines[index] ?? "";
-		if (report.inside[index]) extend([line]);
-		else if (BLANK$1.test(line)) blanks.push(line);
-		else {
-			const bullet = BULLET.exec(line);
-			if (opener && OPENER.test(line)) blocks.push({
-				label: true,
-				text: ""
-			});
-			else if (bullet) blocks.push({
-				label: false,
-				text: bullet.groups?.text ?? ""
-			});
-			else if (blanks.length === 0 || /^\s/u.test(line)) extend([...blanks, line]);
-			else throw new Error("text outside a bullet list");
-			blanks = [];
-		}
-	}
-	return blocks;
-}
-function reviewedItem(text) {
-	const item = { text };
-	const round = ROUND.exec(text)?.[1];
-	const revision = REVISION.exec(text)?.[1];
-	const base = BASE.exec(text);
-	if (round) item.round = Number(round);
-	if (revision) item.revision = revision;
-	if (base) item.base = base[1] ?? null;
-	return item;
-}
-function updateItem(text) {
-	const item = { text };
-	const match = UPDATE.exec(text);
-	if (match) item.at = match[1];
-	if (match?.[2]) item.round = Number(match[2]);
-	return item;
-}
-function readIntro(report, from, to) {
-	const [label, ...items] = scanBlocks(report, from, to, true);
-	if (!label?.label || items.some((item) => item.label)) throw new Error("the intro is not **Reviewed** once, then its bullets");
-	return { reviewed: { items: items.map(({ text }) => reviewedItem(text)) } };
-}
-function trimmed$1(lines) {
-	const from = lines.findIndex((line) => !BLANK$1.test(line));
-	const to = lines.findLastIndex((line) => !BLANK$1.test(line)) + 1;
-	return from < 0 ? [] : lines.slice(from, to);
-}
-function subsections(report, id, from, to) {
-	const marks = [];
-	for (let line = from; line < to; line++) {
-		const title = report.inside[line] ? void 0 : SUBHEADING.exec(report.lines[line] ?? "")?.groups?.title;
-		if (title !== void 0) marks.push({
-			title,
-			line
-		});
-	}
-	const [description, updates] = marks;
-	if (marks.length !== 2 || description?.title !== "Description" || updates?.title !== "Updates") throw new Error(`${id} does not hold '#### Description', then '#### Updates', once each`);
-	return [description.line, updates.line];
-}
-function readFindings(report) {
-	const { lines, findings } = report;
-	return findings.map(({ id, state, severity, title, headerLine }, index) => {
-		const end = findings[index + 1]?.headerLine ?? lines.length;
-		const [description, updates] = subsections(report, id, headerLine + 1, end);
-		return {
-			id,
-			state,
-			severity,
-			title,
-			description: trimmed$1(lines.slice(description + 1, updates)).join("\n"),
-			updates: scanBlocks(report, updates + 1, end, false).map((block) => updateItem(block.text))
-		};
-	});
-}
-function readReport(text, path) {
-	if (text.includes("\r")) throw new Error("the report holds a carriage return; only LF ends a line");
-	const report = parseReport(text, path);
-	const [intro, dashboard] = report.sections.map((section) => section.line);
-	return {
-		target: report.target,
-		intro: readIntro(report, intro + 1, dashboard),
-		findings: readFindings(report)
-	};
-}
 //#endregion
 //#region src/review-view.ts
 const SEVERITY_NAMES$1 = [
@@ -1864,7 +1602,7 @@ function listJson(shown) {
 		anchors: extractEvidence(description).length
 	}));
 }
-function findFinding$1(data, id) {
+function findFinding(data, id) {
 	const wanted = id.trim().toLowerCase();
 	const found = data.findings.find((finding) => finding.id.toLowerCase() === wanted);
 	if (found) return found;
@@ -1909,6 +1647,28 @@ function showJson(finding, links = []) {
 const AWAITING = "⏳";
 const UNVERIFIED = "❓";
 const FIXED = "🔧";
+const STAMP = String.raw`\d{4}-\d{2}-\d{2} \d{2}:\d{2}`;
+const ROUND = /^Round (\d+)\b/u;
+const REVISION = /^Round \d+ — `([^`]+)`/u;
+const BASE = /\bbase\s+(?:`([^`]+)`|none\s+—\s+reviewed\s+as\s+it\s+stands)/u;
+const UPDATE = new RegExp(`^(${STAMP}) — (?:Round (\\d+): )?`, "u");
+function reviewedItem(text) {
+	const item = { text };
+	const round = ROUND.exec(text)?.[1];
+	const revision = REVISION.exec(text)?.[1];
+	const base = BASE.exec(text);
+	if (round) item.round = Number(round);
+	if (revision) item.revision = revision;
+	if (base) item.base = base[1] ?? null;
+	return item;
+}
+function updateItem(text) {
+	const item = { text };
+	const match = UPDATE.exec(text);
+	if (match) item.at = match[1];
+	if (match?.[2]) item.round = Number(match[2]);
+	return item;
+}
 const BLANK = /^[ \t]*$/u;
 const LINE_SEPARATORS = /[\r\n\u2028\u2029]/u;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
@@ -2188,7 +1948,7 @@ function amend(data, found, now, input, what, changes = {}) {
 }
 const describeState = (marker) => `${marker} ${STATES.find((state) => state.marker === marker)?.label}`;
 function setState(data, id, input, now) {
-	const found = findFinding$1(data, id);
+	const found = findFinding(data, id);
 	const state = parseState(input.state);
 	if (state === found.state) throw new Error(`${found.id} is already ${describeState(state)}`);
 	if (state === FIXED && input.revision === void 0) throw new Error(`moving ${found.id} to ${describeState(FIXED)} needs the revision that fixes it`);
@@ -2196,25 +1956,25 @@ function setState(data, id, input, now) {
 	return amend(data, found, now, input, `${found.state} → ${state}${at}`, { state });
 }
 function setSeverity(data, id, input, now) {
-	const found = findFinding$1(data, id);
+	const found = findFinding(data, id);
 	const severity = parseSeverity(input.severity);
 	if (severity === found.severity) throw new Error(`${found.id} already has severity ${severity}`);
 	return amend(data, found, now, input, `severity ${found.severity} → ${severity}`, { severity });
 }
 function setTitle(data, id, input, now) {
-	const found = findFinding$1(data, id);
+	const found = findFinding(data, id);
 	const title = titleText(input.title);
 	if (title === found.title) throw new Error(`${found.id} already has the title "${title}"`);
 	return amend(data, found, now, input, `title changed: "${found.title}" → "${title}"`, { title });
 }
 function setDescription(data, id, input, now) {
-	const found = findFinding$1(data, id);
+	const found = findFinding(data, id);
 	const description = descriptionText(input.description);
 	if (description === found.description) throw new Error(`${found.id} already has this description`);
 	return amend(data, found, now, input, "description revised", { description });
 }
 function addUpdate(data, id, input, now) {
-	return amend(data, findFinding$1(data, id), now, { round: input.round }, requiredText("update text", input.text));
+	return amend(data, findFinding(data, id), now, { round: input.round }, requiredText("update text", input.text));
 }
 //#endregion
 //#region src/review-links.ts
@@ -2243,7 +2003,7 @@ const alreadyLinked = (link) => /* @__PURE__ */ new Error(`${link.ref} is alread
 const alreadyHasOwn = (finding, own, lead = "") => /* @__PURE__ */ new Error(`${lead}${finding} already has its own comment ${own.ref}; remove that link first with "${REMOVE} ${own.ref}"`);
 const asRole = (role) => role === "own" ? "its own" : "a duplicate";
 function linkToFinding(state, findingId, ref, role, now, note) {
-	const found = findFinding$1(state.data, findingId);
+	const found = findFinding(state.data, findingId);
 	checkedRef(ref);
 	knownRef(state, ref);
 	const linked = linkOf(state.links, ref);
@@ -2299,7 +2059,7 @@ function unlink$1(state, ref, now, note) {
 			links
 		};
 	}
-	const found = findFinding$1(state.data, link.finding);
+	const found = findFinding(state.data, link.finding);
 	const data = amend(state.data, found, now, { note }, `${subject(state, ref)} unlinked (was ${asRole(link.role)})`);
 	return {
 		...state,
@@ -2310,7 +2070,7 @@ function unlink$1(state, ref, now, note) {
 var FindingChangedError = class extends Error {};
 function recordPosted(state, findingId, ref, action, where, now, expected) {
 	refuseAnnotation(ref, ONLY_DUPLICATE);
-	const found = findFinding$1(state.data, findingId);
+	const found = findFinding(state.data, findingId);
 	checkedRef(ref);
 	knownRef(state, ref);
 	const linked = linkOf(state.links, ref);
@@ -2351,7 +2111,7 @@ function recordReplied(state, ref, replyRef, where, now, expected) {
 		if (currentOwn === void 0) throw new Error(`${expected.finding} has no own comment; link ${expected.own} with "pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`);
 		if (currentOwn.ref !== expected.own) throw new Error(`the own comment of ${expected.finding} is ${currentOwn.ref}, not ${expected.own}; restore ${expected.own} with "pr-comments link remove ${DB_HINT_PLACEHOLDER} ${currentOwn.ref}" and "pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`);
 	}
-	const found = findFinding$1(state.data, link.finding);
+	const found = findFinding(state.data, link.finding);
 	const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;
 	const recorded = (text) => {
 		const rest = text.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} — /u, "");
@@ -2424,21 +2184,71 @@ function buildDashboard(findings) {
 }
 //#endregion
 //#region src/review-render.ts
+const HTML_TAG = /<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*|!--[\s\S]*?--)>/g;
+const EMPHASIS = /(?<![\p{L}\p{N}_])(_+)(?!\s)(.+?)(?<!\s)\1(?![\p{L}\p{N}_])/gu;
+function stripLinks(text) {
+	let current = text;
+	let replaced = true;
+	while (replaced) {
+		replaced = false;
+		for (let mid = current.indexOf("]("); mid !== -1; mid = current.indexOf("](", mid + 2)) {
+			let bracketDepth = 1;
+			let open = mid;
+			while (open > 0 && bracketDepth > 0) {
+				open--;
+				if (current[open] === "]") bracketDepth++;
+				else if (current[open] === "[") bracketDepth--;
+			}
+			if (bracketDepth !== 0) continue;
+			let parenDepth = 1;
+			let close = mid + 2;
+			while (close < current.length && (current[close] === " " || current[close] === "	")) close++;
+			if (current[close] === "<") {
+				const endAngle = current.indexOf(">", close + 1);
+				if (endAngle === -1 || current.slice(close + 1, endAngle).includes("<")) continue;
+				close = endAngle + 1;
+			}
+			while (close < current.length && parenDepth > 0) {
+				const ch = current[close];
+				if (parenDepth === 1 && (ch === "\"" || ch === "'") && (current[close - 1] === " " || current[close - 1] === "	")) {
+					const endQuote = current.indexOf(ch, close + 1);
+					if (endQuote !== -1) {
+						close = endQuote + 1;
+						continue;
+					}
+				}
+				if (ch === "(") parenDepth++;
+				else if (ch === ")") parenDepth--;
+				close++;
+			}
+			if (parenDepth !== 0) continue;
+			const isImage = open > 0 && current[open - 1] === "!";
+			const label = isImage ? "" : current.slice(open + 1, mid);
+			current = current.slice(0, isImage ? open - 1 : open) + label + current.slice(close);
+			replaced = true;
+			break;
+		}
+	}
+	return current;
+}
+function stripInlineMarkup(text) {
+	let current = stripLinks(text).replace(HTML_TAG, "");
+	for (let next = current.replace(EMPHASIS, "$2"); next !== current; next = current.replace(EMPHASIS, "$2")) current = next;
+	return current;
+}
+function slug(heading) {
+	const literals = [];
+	const hold = (value) => `\0${literals.push(value) - 1}\0`;
+	return stripInlineMarkup(heading.replace(/(?<!\\)(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g, (_, _ticks, code) => hold(code)).replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, (_, char) => hold(char))).replace(/\0(\d+)\0/g, (_, id) => literals[Number(id)]).toLowerCase().replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, "").replace(/ /gu, "-");
+}
 const bullet = ({ text }) => `- ${text}`;
 const heading = ({ state, severity, id, title }) => `${state} ${severity} ${id} — ${title}`;
 function dashboardFinding(finding) {
-	const { id, state, severity, title } = finding;
+	const { id, state } = finding;
 	return {
 		id,
 		state,
-		severity,
-		title,
-		headerLine: 0,
-		anchor: slug(heading(finding)),
-		description: {
-			start: 0,
-			end: 0
-		}
+		anchor: slug(heading(finding))
 	};
 }
 function entryLines(entry) {
@@ -3146,28 +2956,6 @@ function reportMatchesDatabase(report, db) {
 	if (samePath(reviewPaths(reviewPaths(report).report).db, reviewPaths(reviewPaths(db).report).db)) return;
 	throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
 }
-function firstDifference(a, b, path) {
-	if (typeof a === "object" && a !== null && typeof b === "object" && b !== null) for (const key of /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)])) {
-		const [x, y] = [a[key], b[key]];
-		if (!isDeepStrictEqual(x, y)) return firstDifference(x, y, Array.isArray(a) ? `${path}[${key}]` : `${path}.${key}`);
-	}
-	return path;
-}
-function assertRenders(data, report) {
-	const fail = (reason) => {
-		throw new Error(`internal error: the changed review ${reason}; nothing was written`);
-	};
-	let rendered;
-	let read;
-	try {
-		rendered = renderReport(data);
-		read = readReport(rendered, report);
-	} catch (error) {
-		return fail(`does not render to a valid report (${error instanceof Error ? error.message : String(error)})`);
-	}
-	if (!isDeepStrictEqual(read, data)) fail(`does not come back from its rendering (it differs at ${firstDifference(read, data, "review")})`);
-	return rendered;
-}
 const PULL_REQUEST = "pull_request";
 const runGit = promisify(execFile);
 const EXCLUDE_RULE = "/.ai/review-with-docs/";
@@ -3280,7 +3068,7 @@ async function initReviewFile(name, options = {}) {
 		await refuseDatabase(options.report, dbPath);
 		if (await existsOrSymlink(options.report)) throw existingReport(options.report);
 	}
-	const rendered = assertRenders(data, reportTarget);
+	const rendered = renderReport(data);
 	const repoRoot = findRepoRoot(targetDir);
 	if (repoRoot !== void 0 && isInsideReviewFolder(targetDir, repoRoot)) await ensureAiGitExcluded(repoRoot, [resolve(cwd, dbPath), resolve(cwd, reportTarget)]);
 	if (!await createDatabase(dbPath, data, pullRequest)) throw existingDatabase(dbPath);
@@ -3415,7 +3203,7 @@ async function changeReviewState(arg, change, options = {}) {
 			const { state } = result;
 			if (state !== before) {
 				if (state.data !== before.data) {
-					rendered = assertRenders(state.data, paths.report);
+					rendered = renderReport(state.data);
 					saveReview(db, state.data);
 				}
 				if (!isDeepStrictEqual(state.links, before.links)) saveLinks(db, state.links);
@@ -3616,13 +3404,6 @@ const CODE = "";
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 const rangeText$1 = ({ start, end }) => start === end ? `${start}` : `${start}-${end}`;
 const isBlank = (line) => line.trim() === "";
-function findFinding(report, id) {
-	const wanted = id.trim().toLowerCase();
-	const found = report.findings.find((finding) => finding.id.toLowerCase() === wanted);
-	if (found) return found;
-	const known = report.findings.map((finding) => finding.id).join(", ");
-	throw new Error(`unknown finding "${id}"; ${known ? `the report has ${known}` : "the report has no findings"}`);
-}
 function checkCommit(commit) {
 	if (!/^[0-9a-fA-F]{7,40}$/.test(commit)) throw new Error(`commit "${commit}" must be 7-40 hex digits`);
 }
@@ -3653,12 +3434,10 @@ function fenceMask(lines) {
 		return true;
 	});
 }
-function readDescription$1(report, finding) {
-	const { start, end } = finding.description;
-	const lines = report.lines.slice(start, end);
+function readDescription$1(finding) {
+	const lines = finding.description === "" ? [] : finding.description.split("\n");
 	return {
 		lines,
-		first: start,
 		fenced: fenceMask(lines)
 	};
 }
@@ -3672,7 +3451,7 @@ function findAnchors(description) {
 			path,
 			start,
 			end: to === void 0 ? start : Number(to),
-			reportLine: description.first + index + 1
+			line: index + 1
 		}];
 	});
 }
@@ -3809,7 +3588,7 @@ function unlink(line) {
 	}
 }
 function lineWarnings(line, number, stem) {
-	const at = `report line ${number}`;
+	const at = `description line ${number}`;
 	const masked = maskCodeSpans(line);
 	const warnings = findLinks(masked).filter((link) => link.image && isRelative(link.target)).map((link) => `${at} has a relative image (${link.target}); it is left as written and will not render`);
 	if (REFERENCE_LINK.test(masked) || REFERENCE_DEFINITION.test(masked)) warnings.push(`${at} has a reference-style link; it is left as written and may not resolve in the PR comment`);
@@ -3822,7 +3601,7 @@ function mentionedArtifacts(line, stem) {
 	return [.../* @__PURE__ */ new Set([...found, ...line.match(ROUND_PATH) ?? []])];
 }
 function cleanDescription(description, stem) {
-	const { lines, fenced, first } = description;
+	const { lines, fenced } = description;
 	const from = lines.findIndex((line) => !isBlank(line));
 	const to = lines.findLastIndex((line) => !isBlank(line)) + 1;
 	const cleaned = {
@@ -3839,7 +3618,7 @@ function cleanDescription(description, stem) {
 		const result = unlink(line);
 		cleaned.lines.push(result.line);
 		cleaned.unlinked += result.count;
-		cleaned.warnings.push(...lineWarnings(result.line, first + index + 1, stem));
+		cleaned.warnings.push(...lineWarnings(result.line, index + 1, stem));
 	}
 	return cleaned;
 }
@@ -3859,14 +3638,14 @@ function buildComment(finding, chosen, commit, description) {
 		body
 	};
 }
-const reportStem = (path) => path.replace(/^.*[\\/]/, "").replace(/\.md$/i, "");
-function extractComment(report, findingId, options = {}) {
-	const finding = findFinding(report, findingId);
+const reportStem = (path) => path.replace(/^.*[\\/]/, "").replace(/\.(?:md|sqlite)$/i, "");
+function extractComment(data, findingId, options = {}) {
+	const finding = findFinding(data, findingId);
 	if (options.commit !== void 0) checkCommit(options.commit);
-	const description = readDescription$1(report, finding);
+	const description = readDescription$1(finding);
 	const anchors = findAnchors(description);
 	const chosen = chooseAnchor(finding.id, anchors, options.anchor);
-	const cleaned = cleanDescription(description, reportStem(report.path));
+	const cleaned = cleanDescription(description, reportStem(options.reportPath ?? ""));
 	if (cleaned.lines.length === 0) throw new Error(`${finding.id} has an empty Description; nothing to extract`);
 	const comment = buildComment(finding, chosen, options.commit, cleaned.lines);
 	const general = `${finding.id} has no path:lines anchor; it becomes a general comment (posting it needs --now)`;
@@ -3891,12 +3670,13 @@ async function postFinding(arg, findingId, options, deps) {
 	const quotedDb = quoteCliPath(paths.db);
 	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
 	const ref = parsePullRequestUrl(pullRequest);
-	const extracted = extractComment(parseReport(renderReport(data), paths.report), findingId, {
+	const extracted = extractComment(data, findingId, {
 		anchor: options.anchor,
-		commit: options.commit
+		commit: options.commit,
+		reportPath: paths.report
 	});
 	const { id } = extracted;
-	const sourceFinding = findFinding$1(data, id);
+	const sourceFinding = findFinding(data, id);
 	const expectedFinding = {
 		title: sourceFinding.title,
 		severity: sourceFinding.severity,
@@ -4064,7 +3844,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+1dc06e2`;
+	return `pr-comments ${VERSION}+d13f9ee`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4161,7 +3941,7 @@ function postedJson({ finding, result, anchors, chosen, warnings, unlinked, body
 			index: index + 1,
 			path: anchor.path,
 			lines: rangeText(anchor),
-			reportLine: anchor.reportLine
+			line: anchor.line
 		})),
 		chosen: chosen ? anchors.indexOf(chosen) + 1 : null,
 		warnings,
@@ -4361,7 +4141,7 @@ async function listFindings({ env, values }, db) {
 }
 async function showFinding({ env, args: [id = ""], values }, db) {
 	const { data, links } = await loadReviewFile(db);
-	const finding = findFinding$1(data, id);
+	const finding = findFinding(data, id);
 	const own = linksOf(links, finding.id);
 	if (values.json) printJson(env, showJson(finding, own));
 	else env.print(showText(finding, own));
@@ -4373,11 +4153,11 @@ const changeOf = (values) => ({
 });
 async function changeFinding(env, db, id, change, describe) {
 	const { result, reportError } = await mutateReviewFile(db, (data) => {
-		const before = findFinding$1(data, id);
+		const before = findFinding(data, id);
 		const changed = change(data, before.id);
 		return {
 			data: changed,
-			result: `${before.id}: ${describe(before, findFinding$1(changed, before.id))}`
+			result: `${before.id}: ${describe(before, findFinding(changed, before.id))}`
 		};
 	});
 	warnReportError(env, db, reportError);
@@ -4484,7 +4264,7 @@ async function linkOwnComment({ env, args: [id = "", rawRef = ""], values }, db)
 	const ref = normalizeCliRef(rawRef);
 	const note = optional("--note", values.note);
 	return changeLinks(env, db, (current) => {
-		const { id: finding } = findFinding$1(current.data, id);
+		const { id: finding } = findFinding(current.data, id);
 		return {
 			state: linkOwn(current, finding, ref, env.now(), note),
 			line: `${finding}: own comment ${ref} linked`
@@ -4495,7 +4275,7 @@ async function linkDuplicateComment({ env, args: [id = "", rawRef = ""], values 
 	const ref = normalizeCliRef(rawRef);
 	const note = optional("--note", values.note);
 	return changeLinks(env, db, (current) => {
-		const { id: finding } = findFinding$1(current.data, id);
+		const { id: finding } = findFinding(current.data, id);
 		return {
 			state: linkDuplicate(current, finding, ref, env.now(), note),
 			line: `${finding}: duplicate ${ref} linked`
