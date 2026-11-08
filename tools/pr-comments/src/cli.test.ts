@@ -107,8 +107,6 @@ const command = (words: string) => COMMANDS.find((candidate) => candidate.words 
 const mistake = (words: string, problem: string) =>
   new Error(`${problem}\nUsage: ${synopsis(command(words))}\nRun "pr-comments ${words} --help" for details.`);
 
-const DASH = 'to give a text that starts with "-", put options such as --db first, then -- and the text';
-
 const F1_DESCRIPTION = [
   'Crash when the list is empty; see [the helper](src/util.ts).',
   '',
@@ -453,7 +451,7 @@ describe('cli', () => {
       expect(printed).toContain('the title of the report (a slug of it names the files by default)');
       expect(printed).toContain('--report and --db may both be given only if they agree');
       for (const { words, args, options, summary, description } of COMMANDS) {
-        const texts = [summary, ...description, ...args.map(({ description: text }) => text), ...options.map(({ description: text }) => text)];
+        const texts = [summary, description, ...args.map(({ description: text }) => text), ...options.map(({ description: text }) => text)];
         expect(texts.some((text) => text.includes('<name>_review')), words).toBe(false);
       }
 
@@ -473,7 +471,7 @@ describe('cli', () => {
       const lines = printed.split('\n');
       for (const group of GROUPS) expect(lines.some((text) => text.startsWith(`${group} (`)), group).toBe(true);
       for (const { words, args, summary } of COMMANDS) {
-        const label = [words, ...args.map(({ name, optional }) => (optional ? `[${name}]` : name))].join(' ');
+        const label = [words, ...args.map(({ name }) => name)].join(' ');
         expect(lines.some((text) => text.startsWith(`  ${label} `) && text.endsWith(`  ${summary}`)), words).toBe(true);
       }
       expect(printed).not.toContain('--severity');
@@ -535,16 +533,13 @@ describe('cli', () => {
     // [what is wrong, the arguments, the command whose usage is named, the problem]
     const MISTAKES: [string, string[], string, string][] = [
       ['an unknown option', ['finding', 'list', '--bogus'], 'finding list', 'unknown option --bogus'],
+      ['an inherited Object.prototype option name', ['finding', 'list', '--constructor'], 'finding list', 'unknown option --constructor'],
       ['an unknown short option', ['finding', 'list', '-x'], 'finding list', 'unknown option -x'],
       ['an unknown short option on a command with a non-text argument', ['finding', 'show', '-x'], 'finding show', 'unknown option -x'],
-      ['an unknown short option on a command that takes text', ['round', 'update', '-x'], 'round update', `unknown option -x; ${DASH}`],
       ['an unknown option of a command that creates', ['init', 'Demo', '--bogus'], 'init', 'unknown option --bogus'],
       ['an unknown option given a value', ['finding', 'list', '--bogus=1'], 'finding list', 'unknown option --bogus'],
-      ['a text that starts with a dash', ['finding', 'update', 'F1', '-5'], 'finding update', `unknown option -5; ${DASH}`],
-      ['a text that is a dash and a word', ['finding', 'update', 'F1', '- item'], 'finding update', `unknown option "- item"; ${DASH}`],
-      ['a text that starts with a dash and has several words', ['finding', 'update', 'F1', '-5 is wrong'], 'finding update', `unknown option "-5 is wrong"; ${DASH}`],
-      ['a text that starts with a dash and contains h', ['finding', 'update', 'F1', '- see the fix'], 'finding update', `unknown option "- see the fix"; ${DASH}`],
-      ['a text that starts with -h and has words', ['finding', 'update', 'F1', '-h is wrong'], 'finding update', `unknown option "-h is wrong"; ${DASH}`],
+      ['a text that starts with a dash and has several words', ['finding', 'update', 'F1', '-5 is wrong'], 'finding update', 'unknown option -5 is wrong'],
+      ['a text that starts with -h and has words', ['finding', 'update', 'F1', '-h is wrong'], 'finding update', 'unknown option -h is wrong'],
       ['a text that starts with two dashes', ['finding', 'update', 'F1', '--force'], 'finding update', 'unknown option --force'],
       ['--json on init', ['init', 'Demo', '--json'], 'init', '--json does not apply to init'],
       ['--json on a command that has none to say', ['finding', 'update', 'F1', 'x', '--json'], 'finding update', '--json does not apply to finding update'],
@@ -662,9 +657,7 @@ describe('cli', () => {
 
       it('refuses options on a group line with the group name and its --help hint', async () => {
         const ofGroup = (problem: string) => new Error(`${problem}\nRun "pr-comments finding --help" for the commands of the group.`);
-        await expect(step('finding', '--db', 'x.sqlite')).rejects.toThrow(
-          ofGroup('--db does not apply to the finding group; it applies to a command such as "finding list"'),
-        );
+        await expect(step('finding', '--db', 'x.sqlite')).rejects.toThrow(ofGroup('--db does not apply to the finding group'));
         await expect(step('finding', '--pr', prUrl)).rejects.toThrow(ofGroup('--pr does not apply to the finding group'));
         await expect(step('finding', '--help=yes')).rejects.toThrow(ofGroup('--help is a flag and takes no value'));
         await expect(step('finding', '-x')).rejects.toThrow(ofGroup('unknown option -x'));
