@@ -1198,14 +1198,7 @@ async function settle(run, comment) {
 	}
 }
 async function publishComment(context, ref, comment, options, deps = {}) {
-	const run = await startRun(context, ref, options, deps);
-	const result = await settle(run, comment);
-	if (!deps.onResult) return result;
-	try {
-		return await deps.onResult(result);
-	} catch (error) {
-		return failure(run, comment, messageOf$1(error));
-	}
+	return settle(await startRun(context, ref, options, deps), comment);
 }
 //#endregion
 //#region src/reply.ts
@@ -2611,6 +2604,14 @@ function loadKnownRefs(db) {
 	const rows = db.prepare("SELECT ref FROM linkable WHERE gone = 0").all();
 	return new Set(rows.map((row) => row.ref));
 }
+function recordKnownCommentRef(db, ref) {
+	if (!isCommentRef(ref)) throw new Error(`"${ref}" is not a comment id; expected r544830 or c623843`);
+	const kind = ref.startsWith("r") ? COMMENT_KINDS.review : COMMENT_KINDS.issue;
+	const existing = db.prepare("SELECT kind, gone FROM linkable WHERE ref = ?").get(ref);
+	if (existing?.kind === kind && existing.gone === 0) return false;
+	db.prepare("INSERT INTO linkable (ref, kind, gone) VALUES (?, ?, 0) ON CONFLICT (ref) DO UPDATE SET kind = excluded.kind, gone = 0").run(ref, kind);
+	return true;
+}
 const SCHEMA = `
 CREATE TABLE review (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -3186,11 +3187,18 @@ async function changeReviewState(arg, change, options = {}) {
 	let rendered;
 	try {
 		const changed = await inTransactionAsync(db, async () => {
+			let bumpedGeneration = false;
 			if (options.pullRequest !== void 0) assertConnectedPullRequest(db, paths.db, options.pullRequest);
 			if (options.snapshot !== void 0) {
 				assertFreshSnapshot(db, paths.db, options.snapshot, options.expectedGeneration);
 				savePullRequest(db, options.snapshot);
 				bumpSnapshotGeneration(db);
+				bumpedGeneration = true;
+			}
+			let recordedKnownRef = false;
+			if (options.knownRef !== void 0) {
+				const refs = typeof options.knownRef === "string" ? [options.knownRef] : options.knownRef;
+				for (const ref of refs) if (recordKnownCommentRef(db, ref)) recordedKnownRef = true;
 			}
 			const before = loadState(db);
 			let result;
@@ -3213,9 +3221,11 @@ async function changeReviewState(arg, change, options = {}) {
 					if (before.pullRequest !== void 0 && options.snapshot === void 0) {
 						clearPullRequest(db);
 						bumpSnapshotGeneration(db);
+						bumpedGeneration = true;
 					}
 				}
 			}
+			if (!bumpedGeneration && options.knownRef !== void 0 && (recordedKnownRef || state !== before)) bumpSnapshotGeneration(db);
 			if (rendered !== void 0) await refuseDatabase(paths.report, paths.db);
 			return result;
 		}, { immediate: true });
@@ -3688,72 +3698,77 @@ async function postFinding(arg, findingId, options, deps) {
 		commentRef: own.ref
 	};
 	const body = composeBody(comment.body, options.byAgent);
-	let reportError;
-	const hooks = { onResult: async (result) => {
-		if (result.action === "error") {
-			const { reason, ...plain } = result;
-			const ref = comment.commentRef;
-			if (reason === void 0 || ref === void 0 || plain.message === void 0) return plain;
-			return {
-				...plain,
-				message: `${plain.message}; ${linkAdvice(reason, ref, paths.db)}`
-			};
-		}
-		const posted = result.comment;
-		if (options.dryRun || posted === void 0) return result;
-		const action = result.action;
-		const was = action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
-		const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
-		let expectedGeneration;
-		let snapshot;
-		try {
-			expectedGeneration = snapshotGeneration(paths.db);
-			snapshot = await deps.refresh(ref);
-		} catch (error) {
-			const message = `${was}, but the pull request could not be refreshed (${error instanceof Error ? error.message : String(error)}); run "pr-comments pr sync --db ${quotedDb}", then ${linkOwnCommand}`;
-			return {
-				...result,
-				action: "error",
-				message
-			};
-		}
-		try {
-			reportError = (await changeReviewState(arg, (state) => ({
-				state: recordPosted(state, id, posted, action, result.state, deps.now(), expectedFinding),
-				result: void 0
-			}), {
-				snapshot,
-				pullRequest: ref,
-				expectedGeneration
-			})).reportError;
-			return result;
-		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			const byAgentFlag = options.byAgent ? " --by-agent" : "";
-			const postCommand = `"pr-comments finding post --db ${quotedDb}${byAgentFlag} ${id}"`;
-			const message = `${was}, but it could not be recorded in the review (${reason}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : error instanceof FindingChangedError ? own === void 0 ? `run "pr-comments pr sync --db ${quotedDb}", record it with ${linkOwnCommand}, then run ${postCommand} again to update the comment` : `run ${postCommand} again to update the comment` : `record it with ${linkOwnCommand}`}`;
-			return {
-				...result,
-				action: "error",
-				message
-			};
-		}
-	} };
 	const { byAgent, now, dryRun } = options;
-	return {
+	const published = await deps.publish(ref, comment, {
+		byAgent,
+		now,
+		dryRun
+	});
+	if (published.action === "error") {
+		const { reason, ...plain } = published;
+		const ownRef = comment.commentRef;
+		return {
+			finding: id,
+			result: reason === void 0 || ownRef === void 0 || plain.message === void 0 ? plain : {
+				...plain,
+				message: `${plain.message}; ${linkAdvice(reason, ownRef, paths.db)}`
+			},
+			anchors: extracted.anchors,
+			chosen: extracted.chosen,
+			warnings: extracted.warnings,
+			unlinked: extracted.unlinked,
+			body
+		};
+	}
+	const posted = published.comment;
+	if (options.dryRun || posted === void 0) return {
 		finding: id,
-		result: await deps.publish(ref, comment, {
-			byAgent,
-			now,
-			dryRun
-		}, hooks),
+		result: published,
 		anchors: extracted.anchors,
 		chosen: extracted.chosen,
 		warnings: extracted.warnings,
 		unlinked: extracted.unlinked,
-		body,
-		...reportError === void 0 ? {} : { reportError }
+		body
 	};
+	const action = published.action;
+	const was = action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
+	const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
+	try {
+		const { reportError } = await changeReviewState(arg, (state) => ({
+			state: recordPosted(state, id, posted, action, published.state, deps.now(), expectedFinding),
+			result: void 0
+		}), {
+			pullRequest: ref,
+			knownRef: posted
+		});
+		return {
+			finding: id,
+			result: published,
+			anchors: extracted.anchors,
+			chosen: extracted.chosen,
+			warnings: extracted.warnings,
+			unlinked: extracted.unlinked,
+			body,
+			...reportError === void 0 ? {} : { reportError }
+		};
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		const postCommand = `"pr-comments finding post --db ${quotedDb}${options.byAgent ? " --by-agent" : ""} ${id}"`;
+		const message = `${was}, but it could not be recorded in the review (${reason}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : error instanceof FindingChangedError ? own === void 0 ? `run "pr-comments pr sync --db ${quotedDb}", record it with ${linkOwnCommand}, then run ${postCommand} again to update the comment` : `run ${postCommand} again to update the comment` : `record it with ${linkOwnCommand}`}`;
+		return {
+			finding: id,
+			result: {
+				...published,
+				action: "error",
+				message
+			},
+			anchors: extracted.anchors,
+			chosen: extracted.chosen,
+			warnings: extracted.warnings,
+			unlinked: extracted.unlinked,
+			body
+		};
+	}
 }
 //#endregion
 //#region src/review-reply.ts
@@ -3796,22 +3811,6 @@ async function replyToDuplicate(arg, ref, options, deps) {
 	const replyRef = result.comment;
 	if (options.dryRun || result.action === "error" || replyRef === void 0) return replied;
 	const was = result.action === "created" ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
-	let expectedGeneration;
-	let snapshot;
-	try {
-		expectedGeneration = snapshotGeneration(paths.db);
-		snapshot = await deps.refresh(pullRequestRef);
-	} catch (error) {
-		const message = `${was}, but the pull request could not be refreshed (${error instanceof Error ? error.message : String(error)}); run "pr-comments pr sync --db ${quotedDb}" and run the command again to record it`;
-		return {
-			...replied,
-			result: {
-				...result,
-				action: "error",
-				message
-			}
-		};
-	}
 	try {
 		const { reportError } = await changeReviewState(arg, (state) => ({
 			state: recordReplied(state, ref, replyRef, result.state, deps.now(), {
@@ -3820,9 +3819,8 @@ async function replyToDuplicate(arg, ref, options, deps) {
 			}),
 			result: void 0
 		}), {
-			snapshot,
 			pullRequest: pullRequestRef,
-			expectedGeneration
+			knownRef: [ref, replyRef]
 		});
 		return reportError === void 0 ? replied : {
 			...replied,
@@ -3844,7 +3842,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+d13f9ee`;
+	return `pr-comments ${VERSION}+4f2c3b6`;
 }
 //#endregion
 //#region src/cli.ts
@@ -3854,37 +3852,10 @@ async function readProcessStdin() {
 	for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
 	return Buffer.concat(chunks);
 }
-let activeWriteContext;
-async function withWriteContext(ref, run) {
-	return withWorkingToken(ref, async (context) => {
-		activeWriteContext = context;
-		try {
-			return await run(context);
-		} catch (error) {
-			if (error instanceof AccessDeniedError) activeWriteContext = void 0;
-			throw error;
-		}
-	}, { purpose: "write" });
-}
-async function refreshPullRequest(ref) {
-	if (activeWriteContext && activeWriteContext.host.toLowerCase() === ref.host.toLowerCase()) try {
-		return await fetchPullRequest(activeWriteContext.client, ref, void 0, { withChecks: true });
-	} catch (error) {
-		if (!(error instanceof AccessDeniedError)) throw error;
-		const writerData = await fetchPullRequest(activeWriteContext.client, ref);
-		const readerData = await downloadPullRequest(ref);
-		if (readerData.pullRequest.headSha !== writerData.pullRequest.headSha) throw new Error(`pull request head changed during download (${writerData.pullRequest.headSha} → ${readerData.pullRequest.headSha})`);
-		return {
-			...writerData,
-			checkRuns: readerData.checkRuns
-		};
-	}
-	return downloadPullRequest(ref);
-}
 const defaultEnvironment = {
-	getPullRequest: (ref) => refreshPullRequest(ref),
-	publish: (ref, comment, options, hooks) => withWriteContext(ref, (context) => publishComment(context, ref, comment, options, hooks)),
-	reply: (ref, request, options) => withWriteContext(ref, (context) => replyToComment(context, ref, request, options)),
+	getPullRequest: (ref) => downloadPullRequest(ref),
+	publish: (ref, comment, options) => withWorkingToken(ref, (context) => publishComment(context, ref, comment, options), { purpose: "write" }),
+	reply: (ref, request, options) => withWorkingToken(ref, (context) => replyToComment(context, ref, request, options), { purpose: "write" }),
 	resolveRevision: (revision) => resolveRevision(revision, process.cwd()),
 	print: (text) => process.stdout.write(text),
 	warn: (text) => process.stderr.write(text),
@@ -4219,8 +4190,7 @@ async function postReviewFinding({ env, args: [id = ""], values }, db) {
 	};
 	const posted = await postFinding(db, id, options, {
 		publish: env.publish,
-		now: env.now,
-		refresh: env.getPullRequest
+		now: env.now
 	});
 	warnReportError(env, db, posted.reportError);
 	for (const warning of posted.warnings) env.warn(`Warning: ${warning}\n`);
@@ -4315,8 +4285,7 @@ async function replyToLinked({ env, args: [rawRef = ""], values }, db) {
 	};
 	const { finding, own, link, text, result, reportError } = await replyToDuplicate(db, ref, options, {
 		reply: env.reply,
-		now: env.now,
-		refresh: env.getPullRequest
+		now: env.now
 	});
 	warnReportError(env, db, reportError);
 	if (values.json) printJson(env, {
@@ -4689,8 +4658,8 @@ const DEFINITIONS = [
 		summary: "publishes the comment of a finding",
 		description: [
 			"Publishes the comment of one finding, in any state, to the connected pull request (to your pending review unless --now) and",
-			"links it to the finding as its own comment. Run again, it updates that comment. The downloaded pull request is",
-			"refreshed so that the new comment is in the database. Without --dry-run the result is recorded in the database."
+			"links it to the finding as its own comment. Run again, it updates that comment. Without --dry-run the returned comment ref",
+			"and link are recorded in the database; run \"pr-comments pr sync --db <file.sqlite>\" to refresh the full pull request snapshot."
 		],
 		args: [FINDING],
 		options: [
@@ -4774,8 +4743,9 @@ const DEFINITIONS = [
 		summary: "answers a duplicate with \"Duplicate of <link>.\"",
 		description: [
 			"Answers a comment that is linked as a duplicate of a finding with \"Duplicate of <link to the own comment of the finding>.\"",
-			"in your pending review. A conversation comment can only be answered at once, so it needs --now. The thread is never",
-			"resolved by the tool."
+			"in your pending review, and records the returned reply ref and update in the database (run \"pr-comments pr sync --db <file.sqlite>\"",
+			"to refresh the full pull request snapshot). A conversation comment can only be answered at once, so it needs --now. The thread",
+			"is never resolved by the tool."
 		],
 		args: [{
 			name: "<ref>",
