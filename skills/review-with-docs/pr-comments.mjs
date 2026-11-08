@@ -226,14 +226,16 @@ async function fetchRunAnnotations(client, run) {
 		})).node.annotations;
 	});
 }
-async function readCheckRuns(client, ref) {
+async function readCheckRuns(client, ref, expectedHeadSha) {
 	const fetchHeadCommit = async (after) => {
-		return (await client(CHECK_SUITES_QUERY, {
+		const commit = (await client(CHECK_SUITES_QUERY, {
 			owner: ref.owner,
 			repo: ref.repo,
 			number: ref.number,
 			after
 		})).repository.pullRequest.commits.nodes[0]?.commit;
+		if (commit && commit.oid !== expectedHeadSha) throw new Error(`pull request head changed during download (${expectedHeadSha} → ${commit.oid})`);
+		return commit;
 	};
 	const head = await fetchHeadCommit(null);
 	if (!head) return [];
@@ -271,9 +273,9 @@ async function readCheckRuns(client, ref) {
 	}
 	return checkRuns;
 }
-async function fetchCheckRuns(client, ref) {
+async function fetchCheckRuns(client, ref, expectedHeadSha) {
 	try {
-		return await readCheckRuns(client, ref);
+		return await readCheckRuns(client, ref, expectedHeadSha);
 	} catch (error) {
 		if (error instanceof AccessDeniedError) throw error;
 		const message = error instanceof Error ? error.message : String(error);
@@ -377,7 +379,7 @@ async function fetchPullRequest(client, ref, now = () => /* @__PURE__ */ new Dat
 		threads,
 		comments
 	};
-	if (withChecks) data.checkRuns = await fetchCheckRuns(client, ref);
+	if (withChecks) data.checkRuns = await fetchCheckRuns(client, ref, pr.headRefOid);
 	return data;
 }
 //#endregion
@@ -1917,7 +1919,7 @@ const QUOTE_LINE = /^ {0,3}>/u;
 const LIST_ITEM_WITH_CONTENT = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S/u;
 const EMPTY_LIST_ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]*$/u;
 const INTERRUPTS_PARAGRAPH = /^ {0,3}(?:(?:[-*+]|0{0,8}1[.)])[ \t]+\S|>)/u;
-const HTML_BLOCK_TAG = /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t][^>]*)?\/?>/iu;
+const HTML_BLOCK_TAG = /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|\/?>|$)/iu;
 const HTML_INLINE_LINE = /^ {0,3}<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*)>[ \t]*$/u;
 const LINK_DEFINITION = /^ {0,3}\[[^\]]+\]:[ \t]*(?:<[^<>\r\n]*>|[^\s<>]+)(?:[ \t]+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\([^()]*\)))?[ \t]*$/u;
 function openingHtmlBlock(line) {
@@ -4062,7 +4064,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+1e60c9e`;
+	return `pr-comments ${VERSION}+1dc06e2`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4072,10 +4074,37 @@ async function readProcessStdin() {
 	for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
 	return Buffer.concat(chunks);
 }
+let activeWriteContext;
+async function withWriteContext(ref, run) {
+	return withWorkingToken(ref, async (context) => {
+		activeWriteContext = context;
+		try {
+			return await run(context);
+		} catch (error) {
+			if (error instanceof AccessDeniedError) activeWriteContext = void 0;
+			throw error;
+		}
+	}, { purpose: "write" });
+}
+async function refreshPullRequest(ref) {
+	if (activeWriteContext && activeWriteContext.host.toLowerCase() === ref.host.toLowerCase()) try {
+		return await fetchPullRequest(activeWriteContext.client, ref, void 0, { withChecks: true });
+	} catch (error) {
+		if (!(error instanceof AccessDeniedError)) throw error;
+		const writerData = await fetchPullRequest(activeWriteContext.client, ref);
+		const readerData = await downloadPullRequest(ref);
+		if (readerData.pullRequest.headSha !== writerData.pullRequest.headSha) throw new Error(`pull request head changed during download (${writerData.pullRequest.headSha} → ${readerData.pullRequest.headSha})`);
+		return {
+			...writerData,
+			checkRuns: readerData.checkRuns
+		};
+	}
+	return downloadPullRequest(ref);
+}
 const defaultEnvironment = {
-	getPullRequest: (ref) => downloadPullRequest(ref),
-	publish: (ref, comment, options, hooks) => withWorkingToken(ref, (context) => publishComment(context, ref, comment, options, hooks), { purpose: "write" }),
-	reply: (ref, request, options) => withWorkingToken(ref, (context) => replyToComment(context, ref, request, options), { purpose: "write" }),
+	getPullRequest: (ref) => refreshPullRequest(ref),
+	publish: (ref, comment, options, hooks) => withWriteContext(ref, (context) => publishComment(context, ref, comment, options, hooks)),
+	reply: (ref, request, options) => withWriteContext(ref, (context) => replyToComment(context, ref, request, options)),
 	resolveRevision: (revision) => resolveRevision(revision, process.cwd()),
 	print: (text) => process.stdout.write(text),
 	warn: (text) => process.stderr.write(text),
