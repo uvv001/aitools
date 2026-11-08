@@ -44,7 +44,7 @@ Every module that changes a review is pure: it takes the review (and links) and 
 - The file uses a rollback journal (`journal_mode = DELETE`). There is no `-wal` or `-shm` file. A `-journal` file exists only while a command writes.
 - `foreign_keys = ON` on every connection. The review tables are `STRICT`.
 - `PRAGMA user_version` holds the schema version, now 5 (`REVIEW_SCHEMA_VERSION`). There is no cross-version migration (within schema 5, `savePullRequest` adds `pr_threads.original_start_line` if absent). An older database (version 4 included) is refused with `<path> was written by an older pr-comments (schema <n>); start again with "pr-comments init"`. A newer one is refused with `… was written by a newer pr-comments (schema <n>); update the tool`. A SQLite file without the review tables is `<path> is not a review database`.
-- Meta keys: `pull_request` (the connected pull request, canonical URL), `snapshot_generation` (the pull-request snapshot generation counter, incremented inside the write transaction whenever a snapshot is saved or cleared, or a comment ref is recorded via `knownRef`).
+- Meta keys: `pull_request` (the connected pull request, canonical URL).
 
 ### 2.2 Tables
 
@@ -121,16 +121,16 @@ A read command must not change the committed file. A read-only connection (`new 
 
 ### 2.4 One transaction per change
 
-`changeReviewState(arg, change, { snapshot?, pullRequest?, expectedGeneration?, knownRef? })` in `review-files.ts` is the door for every change of the review, the links and the connected pull request. (`syncReviewFile`, for `pr sync`, has a transaction of its own, see 2.5.) It runs one transaction:
+`changeReviewState(arg, change, { snapshot?, pullRequest?, knownRef? })` in `review-files.ts` is the door for every change of the review, the links and the connected pull request. (`syncReviewFile`, for `pr sync`, has a transaction of its own, see 2.5.) It runs one transaction:
 
 1. `BEGIN IMMEDIATE`: the write lock is taken before anything is read. Writers in several processes run one after the other, each on what the one before saved.
-2. When `pullRequest` is given, it checks that the review is still connected to that pull request (host, owner and repository compared without regard to case, the number exactly) and fails with `the review is connected to <url>, not to <expected>` (`ReconnectedError`) if not. When a snapshot is given (a pull request that was just downloaded), `assertFreshSnapshot` checks that its `fetchedAt` is not earlier than the stored snapshot's `fetched_at` (and, when equal, that `expectedGeneration` still matches `snapshot_generation` in `meta`), failing with `a newer pull request snapshot (<stamp>) is already stored; run "pr-comments pr sync --db <db>" again` if stale; otherwise it saves the snapshot first and bumps `snapshot_generation`. When `knownRef` (one comment ref or an array of comment refs) is given, `recordKnownCommentRef` records each comment ref (`r…` or `c…`) in `linkable` with `gone = 0` before loading state, and `snapshot_generation` is bumped when the transaction records the ref or state change.
+2. When `pullRequest` is given, it checks that the review is still connected to that pull request (host, owner and repository compared without regard to case, the number exactly) and fails with `the review is connected to <url>, not to <expected>` if not. When a snapshot is given (a pull request that was just downloaded), `assertFreshSnapshot` checks that its `fetchedAt` is not earlier than the stored snapshot's `fetched_at`, failing with `a newer pull request snapshot (<stamp>) is already stored; run "pr-comments pr sync --db <db>" again` if stale; otherwise it saves the snapshot first. When `knownRef` (one comment ref or an array of comment refs) is given, `recordKnownCommentRef` records each comment ref (`r…` or `c…`) in `linkable` with `gone = 0` before loading state.
 3. The state is loaded: the review, the links, the connected pull request, and the refs a link may name (`known`).
 4. `change` runs. It returns the new state. Pure modules such as `review-links.ts` write `DB_HINT_PLACEHOLDER` (`--db <file.sqlite>`) in their command hints, and `changeReviewState` replaces it with `--db <quoted-db-path>` (`quoteCliPath`) if `change` throws.
 5. The same state object back means "nothing changed": nothing is written. Otherwise only the parts that differ are written (the review, the links, the connected pull request).
 6. `COMMIT`. Any error rolls everything back, a given snapshot too.
 
-A connection waits up to 10 seconds for a lock (`timeout` of `DatabaseSync`). Parallel commands (an agent that calls the tool several times at once) wait for each other: none is lost and finding ids stay unique.
+Mutating commands and `report render` run one at a time per review database. A connection waits up to 10 seconds for a lock (`timeout` of `DatabaseSync`), which guards read-only queries against a write transaction.
 
 The texts of a review are checked when they come in (`review-ops.ts`): no control characters except tab and newline, no `#`…`####` or setext heading outside a code fence in a description or a note, no unclosed code fence or HTML block, a title on one line, a revision as one word.
 
@@ -140,8 +140,8 @@ The texts of a review are checked when they come in (`review-ops.ts`): no contro
 
 `pr sync` needs a connected pull request (`pr connect` or `init --pr`). It downloads with `downloadPullRequest` (comments, reviews, threads and check annotations), then `syncReviewFile` runs one `BEGIN IMMEDIATE` transaction:
 
-1. The review must be connected, and to the same pull request as the data (host, owner and repo compared without regard to case, the number exactly). `assertFreshSnapshot` also checks that the downloaded snapshot is not older than the stored one (comparing `fetchedAt` and using `expectedGeneration` against `snapshot_generation` in `meta` as a same-second tie-breaker). If either check fails, it is an error and nothing is written.
-2. `savePullRequest` replaces every `pr_*` row and `syncReviewFile` bumps `snapshot_generation`. A comment deleted on GitHub disappears. So do annotations that a new analysis removed.
+1. The review must be connected, and to the same pull request as the data (host, owner and repo compared without regard to case, the number exactly). `assertFreshSnapshot` also checks that the downloaded snapshot is not older than the stored one (comparing `fetchedAt`). If either check fails, it is an error and nothing is written.
+2. `savePullRequest` replaces every `pr_*` row. A comment deleted on GitHub disappears. So do annotations that a new analysis removed.
 3. It then reconciles `linkable`: one row per comment and per annotation in the data, with `gone = 0` (an annotation that appears twice counts once). A row that is not in the data any more becomes `gone = 1` when a link names it. Otherwise it is deleted.
 
 Consequences:
@@ -159,9 +159,9 @@ A comment that was just written on GitHub is not in the stored snapshot yet, and
 
 1. They load the review read-only and check what they can offline (connected pull request, a duplicate that has a finding with an own comment, …).
 2. The engine writes to GitHub (`publish.ts` or `reply.ts`). A dry run stops here.
-3. If the result is not an error and has a comment, `changeReviewState(…, { pullRequest, knownRef })` verifies the review is still connected to `pullRequest`, records `knownRef` in `linkable` with `gone = 0` (`finding post` passes the posted comment ref; `link reply` passes `[ref, replyRef]` so a target ref previously marked `gone = 1` is restored to `gone = 0`), bumps `snapshot_generation`, and records the link or reply update (after verifying the finding's `title`, `severity`, and `description` did not change while `finding post` was in flight, or for `link reply` that the duplicate is still linked to the expected finding and that finding still has the expected own comment) in one transaction.
+3. If the result is not an error and has a comment, `changeReviewState(…, { pullRequest, knownRef })` verifies the review is still connected to `pullRequest`, records `knownRef` in `linkable` with `gone = 0` (`finding post` passes the posted comment ref; `link reply` passes `[ref, replyRef]` so a target ref previously marked `gone = 1` is restored to `gone = 0`), and records the link or reply update in one transaction.
 
-If step 3 fails, the transaction is rolled back (`linkable` included) and the error says how to record the link by hand (or, when the review was reconnected while `finding post` or `link reply` was in flight, to reconnect to the original pull request, run `pr sync`, and then `link own` — or restore the own and duplicate links and rerun `link reply`). A rerun finds the comment again and records it.
+If step 3 fails, the transaction is rolled back (`linkable` included) and the error says how to record the link by hand (or to run `link reply` again). A rerun finds the comment again and records it.
 
 On the next `pr sync`, `reconcileLinkable` keeps the row with `gone = 0` when the comment is in the downloaded snapshot, or marks it `gone = 1` if it was deleted while a link still points at it (and drops an unlinked reply ref if deleted).
 

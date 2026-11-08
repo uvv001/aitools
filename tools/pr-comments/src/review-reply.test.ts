@@ -7,7 +7,7 @@ import type { PullRequest, PullRequestData } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { AGENT_DISCLAIMER } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
-import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, snapshotGeneration, syncReviewFile } from './review-files.ts';
+import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
 import type { ReviewState } from './review-links.ts';
 import { addFinding, formatStamp, openRound } from './review-ops.ts';
@@ -496,31 +496,27 @@ describe('recording the reply', () => {
 });
 
 describe('recording the reply ref locally', () => {
-  it('records the reply ref in linkable without re-downloading the pull request, bumps snapshotGeneration, and leaves the stored snapshot untouched', async () => {
+  it('records the reply ref in linkable without re-downloading the pull request, and leaves the stored snapshot untouched', async () => {
     const db = await startReview();
-    const genBefore = snapshotGeneration(db);
     expect((await loadReviewFile(db)).known.has('r10')).toBe(false);
 
     const { replied } = await reply(db, 'r2', created('r10'));
 
     expect(replied.result).toMatchObject({ action: 'created', comment: 'r10' });
-    expect(snapshotGeneration(db)).toBe(genBefore + 1);
     const { known } = await loadReviewFile(db);
     expect([...known].sort()).toEqual([...BASE, 'r10'].sort());
     const stored = await loadSnapshot(db);
     expect(stored!.comments.map(({ url }) => commentRefFromUrl(url)).sort()).toEqual([...BASE].sort());
   });
 
-  it('restores a gone = 1 target duplicate ref when recording the reply and bumps snapshotGeneration', async () => {
+  it('restores a gone = 1 target duplicate ref when recording the reply', async () => {
     const db = await startReview();
     await syncReviewFile(db, snapshot(BASE.filter((ref) => ref !== 'r2')));
     expect((await loadReviewFile(db)).known.has('r2')).toBe(false);
-    const genBefore = snapshotGeneration(db);
 
     const { replied } = await reply(db, 'r2', created('r10'));
 
     expect(replied.result).toMatchObject({ action: 'created', comment: 'r10' });
-    expect(snapshotGeneration(db)).toBe(genBefore + 1);
     const { known } = await loadReviewFile(db);
     expect(known.has('r2')).toBe(true);
     expect(known.has('r10')).toBe(true);
@@ -609,56 +605,6 @@ describe('a reply that could not be recorded', () => {
     await expectSound(db);
   });
 
-  it('refuses to record the reply under another finding when the duplicate link was reassigned meanwhile', async () => {
-    const db = await startReview();
-    const during: { bytes?: Buffer } = {};
-
-    const { replied } = await reply(db, 'r2', async (_ref, request, options) => {
-      await changeReviewState(db, (state) => ({
-        state: linkDuplicate(unlink(state, 'r2', NOW), 'F2', 'r2', NOW),
-        result: undefined,
-      }));
-      during.bytes = await readFile(db);
-      return outcome('created', 'r10', request, options);
-    });
-
-    expect(replied.result).toMatchObject({
-      action: 'error',
-      comment: 'r10',
-      message:
-        'the reply was posted as r10, but it could not be recorded in the review ' +
-        `(r2 is linked as a duplicate of F2, not of F1; restore the link with "pr-comments link remove --db ${db} r2" and "pr-comments link duplicate --db ${db} F1 r2"); ` +
-        'run the command again to record it',
-    });
-    expect((await updatesOf(db, 'F2')).some((text) => text.includes('replied to duplicate'))).toBe(false);
-    await sameBytes(db, during.bytes!);
-  });
-
-  it('refuses to record the reply when the finding own comment changed meanwhile', async () => {
-    const db = await startReview();
-    const during: { bytes?: Buffer } = {};
-
-    const { replied } = await reply(db, 'r2', async (_ref, request, options) => {
-      await changeReviewState(db, (state) => ({
-        state: linkOwn(unlink(unlink(state, 'r1', NOW), 'r5', NOW), 'F1', 'r5', NOW),
-        result: undefined,
-      }));
-      during.bytes = await readFile(db);
-      return outcome('created', 'r10', request, options);
-    });
-
-    expect(replied.result).toMatchObject({
-      action: 'error',
-      comment: 'r10',
-      message:
-        'the reply was posted as r10, but it could not be recorded in the review ' +
-        `(the own comment of F1 is r5, not r1; restore r1 with "pr-comments link remove --db ${db} r5" and "pr-comments link own --db ${db} F1 r1"); ` +
-        'run the command again to record it',
-    });
-    expect((await updatesOf(db, 'F1')).some((text) => text.includes('replied to duplicate'))).toBe(false);
-    await sameBytes(db, during.bytes!);
-  });
-
   it('refuses to overwrite a pull request reconnected while the reply was in flight', async () => {
     const db = await startReview();
     const otherPr = 'https://github.com/acme/widgets/pull/43';
@@ -680,9 +626,7 @@ describe('a reply that could not be recorded', () => {
       comment: 'r10',
       message:
         `the reply was posted as r10, but it could not be recorded in the review (the review is connected to ${otherPr}, not to ${PR}); ` +
-        `reconnect with "pr-comments pr connect --db ${db} ${PR}" and "pr-comments pr sync --db ${db}", ` +
-        `restore the links with "pr-comments link own --db ${db} F1 r1" and "pr-comments link duplicate --db ${db} F1 r2", ` +
-        'then run the command again to record it',
+        'run the command again to record it',
     });
     expect((await loadReviewFile(db)).pullRequest).toBe(otherPr);
     await sameBytes(db, during.bytes!);

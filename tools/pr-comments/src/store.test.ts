@@ -520,9 +520,9 @@ describe('recordKnownCommentRef', () => {
     saveReview(db, sampleReview());
     savePullRequest(db, samplePullRequest());
 
-    expect(recordKnownCommentRef(db, 'r9001')).toBe(true);
-    expect(recordKnownCommentRef(db, 'c9002')).toBe(true);
-    expect(recordKnownCommentRef(db, 'r9001')).toBe(false);
+    recordKnownCommentRef(db, 'r9001');
+    recordKnownCommentRef(db, 'c9002');
+    recordKnownCommentRef(db, 'r9001');
     expect(loadKnownRefs(db).has('r9001')).toBe(true);
     expect(loadKnownRefs(db).has('c9002')).toBe(true);
     expect(linkable(db).filter((row) => row.ref.startsWith('r9') || row.ref.startsWith('c9'))).toEqual([
@@ -535,7 +535,7 @@ describe('recordKnownCommentRef', () => {
     expect(linkable(db).find((row) => row.ref === 'r9001')).toEqual({ ref: 'r9001', kind: 'review_comment', gone: 1 });
     expect(linkable(db).find((row) => row.ref === 'c9002')).toBeUndefined();
 
-    expect(recordKnownCommentRef(db, 'r9001')).toBe(true);
+    recordKnownCommentRef(db, 'r9001');
     expect(linkable(db).find((row) => row.ref === 'r9001')).toEqual({ ref: 'r9001', kind: 'review_comment', gone: 0 });
     expect(loadKnownRefs(db).has('r9001')).toBe(true);
   });

@@ -10,9 +10,9 @@ import type { PullRequestRef } from './pr-url.ts';
 import { AGENT_DISCLAIMER, composeBody, publishComment } from './publish.ts';
 import type { OwnCommentReason, PublishComment, PublishOptions, PublishResult } from './publish.ts';
 import type { PullFile } from './rest.ts';
-import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, snapshotGeneration, syncReviewFile } from './review-files.ts';
+import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
 import { connectPullRequest, linkOwn, unlink } from './review-links.ts';
-import { addFinding, formatStamp, openRound, setDescription, setState } from './review-ops.ts';
+import { addFinding, formatStamp, openRound, setState } from './review-ops.ts';
 import { postFinding } from './review-post.ts';
 import type { PostFindingDeps, PostFindingOptions } from './review-post.ts';
 import { renderReport } from './review-render.ts';
@@ -592,15 +592,13 @@ describe('recording the link', () => {
 });
 
 describe('recording the comment ref locally', () => {
-  it('records the new comment ref in linkable without re-downloading the pull request, bumps snapshotGeneration, and leaves the stored snapshot untouched', async () => {
+  it('records the new comment ref in linkable without re-downloading the pull request, and leaves the stored snapshot untouched', async () => {
     const db = await startReview();
-    const genBefore = snapshotGeneration(db);
     expect((await loadReviewFile(db)).known.has('r2')).toBe(false);
 
     const { posted } = await post(db, 'F1', created('r2'));
 
     expect(posted.result).toMatchObject({ action: 'created', comment: 'r2' });
-    expect(snapshotGeneration(db)).toBe(genBefore + 1);
     const { known, links } = await loadReviewFile(db);
     expect([...known].sort()).toEqual(['r1', 'r2', 'r4', 'r8']);
     expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1' }]);
@@ -739,57 +737,11 @@ describe('a comment that could not be recorded', () => {
       comment: 'r2',
       message:
         `the comment was posted as r2, but it could not be recorded in the review (the review is connected to ${otherPr}, not to ${PR}); ` +
-        `reconnect with "pr-comments pr connect --db ${db} ${PR}" and "pr-comments pr sync --db ${db}", then ` +
         LINK_OWN(db, 'r2'),
     });
     await sameBytes(db, during!);
     expect((await loadReviewFile(db)).pullRequest).toBe(otherPr);
     expect((await loadSnapshot(db))?.pullRequest.number).toBe(43);
-  });
-
-  it('refuses to record the link silently when the finding content changed while the post was in flight', async () => {
-    const db = await startReview();
-    let during: Buffer | undefined;
-
-    const { posted } = await post(db, 'F1', async (comment, options) => {
-      await mutateReviewFile(db, (data) => ({
-        data: setDescription(data, 'F1', { description: 'Updated evidence.\n\n`src/other.ts:7`' }, NOW),
-        result: undefined,
-      }));
-      during = await readFile(db);
-      return answer(comment, options, 'created', 'r2');
-    });
-
-    expect(posted.result).toMatchObject({
-      action: 'error',
-      comment: 'r2',
-      message:
-        'the comment was posted as r2, but it could not be recorded in the review (F1 changed while its comment was being posted); ' +
-        `run "pr-comments pr sync --db ${db}", ${LINK_OWN(db, 'r2')}, then run "pr-comments finding post --db ${db} F1" again to update the comment`,
-    });
-    await sameBytes(db, during!);
-    expect((await loadReviewFile(db)).links).toEqual([]);
-
-    await withOwn(db, 'F1', 'r1');
-    const updated = await post(
-      db,
-      'F1',
-      async (comment, options) => {
-        await mutateReviewFile(db, (data) => ({
-          data: setDescription(data, 'F1', { description: 'Third evidence.\n\n`src/other.ts:7`' }, NOW),
-          result: undefined,
-        }));
-        return answer(comment, options, 'updated', 'r1');
-      },
-      { byAgent: true },
-    );
-    expect(updated.posted.result).toMatchObject({
-      action: 'error',
-      comment: 'r1',
-      message:
-        'the comment is r1 on GitHub, but it could not be recorded in the review (F1 changed while its comment was being posted); ' +
-        `run "pr-comments finding post --db ${db} --by-agent F1" again to update the comment`,
-    });
   });
 });
 

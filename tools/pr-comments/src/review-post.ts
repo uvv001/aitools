@@ -1,13 +1,12 @@
 import { composeBody } from './publish.ts';
 import type { OwnCommentReason, PublishComment, PublishOptions, PublishResult } from './publish.ts';
-import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
+import { parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { extractComment } from './report-extract.ts';
 import type { Anchor } from './report-extract.ts';
-import { changeReviewState, loadReviewFile, quoteCliPath, ReconnectedError } from './review-files.ts';
-import { FindingChangedError, linksOf, recordPosted } from './review-links.ts';
+import { changeReviewState, loadReviewFile, quoteCliPath } from './review-files.ts';
+import { linksOf, recordPosted } from './review-links.ts';
 import type { PostedAction } from './review-links.ts';
-import { findFinding } from './review-view.ts';
 
 export interface PostFindingOptions {
   // Publish immediately instead of adding to the pending review; start the comment with the agent disclaimer; only
@@ -82,12 +81,6 @@ export async function postFinding(
   });
 
   const { id } = extracted;
-  const sourceFinding = findFinding(data, id);
-  const expectedFinding = {
-    title: sourceFinding.title,
-    severity: sourceFinding.severity,
-    description: sourceFinding.description,
-  };
   const own = linksOf(links, id).find((link) => link.role === 'own');
   const comment = own === undefined ? extracted.comment : { ...extracted.comment, commentRef: own.ref };
   const body = composeBody(comment.body, options.byAgent);
@@ -131,7 +124,7 @@ export async function postFinding(
     const { reportError } = await changeReviewState(
       arg,
       (state) => ({
-        state: recordPosted(state, id, posted, action, published.state, deps.now(), expectedFinding),
+        state: recordPosted(state, id, posted, action, published.state, deps.now()),
         result: undefined,
       }),
       { pullRequest: ref, knownRef: posted },
@@ -148,17 +141,7 @@ export async function postFinding(
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    const byAgentFlag = options.byAgent ? ' --by-agent' : '';
-    const postCommand = `"pr-comments finding post --db ${quotedDb}${byAgentFlag} ${id}"`;
-    const advice =
-      error instanceof ReconnectedError
-        ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}`
-        : error instanceof FindingChangedError
-          ? own === undefined
-            ? `run "pr-comments pr sync --db ${quotedDb}", record it with ${linkOwnCommand}, then run ${postCommand} again to update the comment`
-            : `run ${postCommand} again to update the comment`
-          : `record it with ${linkOwnCommand}`;
-    const message = `${was}, but it could not be recorded in the review (${reason}); ${advice}`;
+    const message = `${was}, but it could not be recorded in the review (${reason}); record it with ${linkOwnCommand}`;
     return {
       finding: id,
       result: { ...published, action: 'error', message },

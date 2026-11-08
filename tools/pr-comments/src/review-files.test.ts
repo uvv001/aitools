@@ -19,7 +19,6 @@ import {
   refuseDatabase,
   renderReportFile,
   reviewPaths,
-  snapshotGeneration,
   syncReviewFile,
 } from './review-files.ts';
 import { dumpReview } from './review-dump.ts';
@@ -1048,106 +1047,6 @@ describe('mutateReviewFile', () => {
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
-  it('never leaves an older report on disk when an earlier writer finishes its report write after a newer writer commits', async () => {
-    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-    let releaseFirstWrite!: () => void;
-    const firstWritePaused = new Promise<void>((resolve) => {
-      releaseFirstWrite = resolve;
-    });
-    let firstReportWriteSeen!: () => void;
-    const reachedFirstWrite = new Promise<void>((resolve) => {
-      firstReportWriteSeen = resolve;
-    });
-    let intercepted = false;
-    vi.mocked(writeFile).mockImplementation(async (target, data, options) => {
-      if (!intercepted && String(target) === report && String(data).startsWith('# Review — First committed change\n')) {
-        intercepted = true;
-        firstReportWriteSeen();
-        await firstWritePaused;
-      }
-      return actualFs.writeFile(target, data, options);
-    });
-    try {
-      const first = mutateReviewFile(db, retarget('First committed change'));
-      await reachedFirstWrite;
-      const second = mutateReviewFile(db, retarget('Second committed change'));
-      await second;
-      releaseFirstWrite();
-      await first;
-    } finally {
-      vi.mocked(writeFile).mockImplementation(actualFs.writeFile);
-    }
-    expect((await loadReviewFile(db)).data.target).toBe('Second committed change');
-    expect((await readFile(report, 'utf8')).startsWith('# Review — Second committed change\n')).toBe(true);
-  });
-
-  it('never leaves an older report on disk when a delayed renderReportFile finishes after a newer mutation commits', async () => {
-    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-    await writeFile(report, 'stale manual edit\n', 'utf8');
-    let releaseRenderWrite!: () => void;
-    const renderWritePaused = new Promise<void>((resolve) => {
-      releaseRenderWrite = resolve;
-    });
-    let renderWriteSeen!: () => void;
-    const reachedRenderWrite = new Promise<void>((resolve) => {
-      renderWriteSeen = resolve;
-    });
-    let intercepted = false;
-    vi.mocked(writeFile).mockImplementation(async (target, data, options) => {
-      if (!intercepted && String(target) === report && String(data).startsWith('# Review — PR 42\n')) {
-        intercepted = true;
-        renderWriteSeen();
-        await renderWritePaused;
-      }
-      return actualFs.writeFile(target, data, options);
-    });
-    try {
-      const renderPromise = renderReportFile(db);
-      await reachedRenderWrite;
-      await mutateReviewFile(db, retarget('Committed during render'));
-      releaseRenderWrite();
-      await renderPromise;
-    } finally {
-      vi.mocked(writeFile).mockImplementation(actualFs.writeFile);
-    }
-    expect((await loadReviewFile(db)).data.target).toBe('Committed during render');
-    expect((await readFile(report, 'utf8')).startsWith('# Review — Committed during render\n')).toBe(true);
-  });
-
-  it('never leaves the initial empty report on disk when initReviewFile finishes its report write after a first mutation commits', async () => {
-    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-    const freshReport = join(dir, 'fresh.md');
-    const freshDb = join(dir, 'fresh.sqlite');
-    let releaseInitWrite!: () => void;
-    const initWritePaused = new Promise<void>((resolve) => {
-      releaseInitWrite = resolve;
-    });
-    let initWriteSeen!: () => void;
-    const reachedInitWrite = new Promise<void>((resolve) => {
-      initWriteSeen = resolve;
-    });
-    let intercepted = false;
-    vi.mocked(writeFile).mockImplementation(async (target, data, options) => {
-      if (!intercepted && String(target) === freshReport && String(data).startsWith('# Review — Initial state\n')) {
-        intercepted = true;
-        initWriteSeen();
-        await initWritePaused;
-      }
-      return actualFs.writeFile(target, data, options);
-    });
-    try {
-      const initPromise = initReviewFile('Initial state', { report: freshReport, now: NOW });
-      await reachedInitWrite;
-      await mutateReviewFile(freshDb, retarget('New committed state'));
-      releaseInitWrite();
-      await initPromise;
-    } finally {
-      vi.mocked(writeFile).mockImplementation(actualFs.writeFile);
-    }
-    expect((await loadReviewFile(freshDb)).data.target).toBe('New committed state');
-    expect((await readFile(freshReport, 'utf8')).startsWith('# Review — New committed state\n')).toBe(true);
-  });
-
   it('keeps the meta values of the database', async () => {
     const raw = openReviewDb(db, 'existing');
     try {
@@ -1522,8 +1421,7 @@ describe('changeReviewState', () => {
   });
 
   describe('with knownRef', () => {
-    it('records one or more comment refs in linkable before change runs, bumps snapshotGeneration, and rolls back when change fails', async () => {
-      const genBefore = snapshotGeneration(db);
+    it('records one or more comment refs in linkable before change runs, and rolls back when change fails', async () => {
       const changed = await changeReviewState(
         db,
         (state) => ({
@@ -1534,10 +1432,8 @@ describe('changeReviewState', () => {
       );
       expect(changed.result).toBe(true);
       expect((await loadReviewFile(db)).known.has('r999')).toBe(true);
-      expect(snapshotGeneration(db)).toBe(genBefore + 1);
 
       const before = await bytes();
-      const genAfterFirst = snapshotGeneration(db);
       await expect(
         changeReviewState(
           db,
@@ -1548,15 +1444,13 @@ describe('changeReviewState', () => {
         ),
       ).rejects.toThrow('failed after knownRef');
       expect((await loadReviewFile(db)).known.has('c888')).toBe(false);
-      expect(snapshotGeneration(db)).toBe(genAfterFirst);
       expect((await bytes()).equals(before)).toBe(true);
     });
 
-    it('restores a gone = 1 ref and records a new ref when given an array of refs, and rejects an older same-second sync', async () => {
+    it('restores a gone = 1 ref and records a new ref when given an array of refs', async () => {
       await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
       await syncReviewFile(db, snapshotOf(['r0', 'r2'], { fetchedAt: '2026-10-09T12:01:00Z' }));
       expect(linkable(db).find((row) => row.ref === 'r1')).toEqual({ ref: 'r1', gone: 1 });
-      const staleGen = snapshotGeneration(db);
 
       const changed = await changeReviewState(
         db,
@@ -1569,13 +1463,6 @@ describe('changeReviewState', () => {
       expect(changed.result).toEqual([true, true]);
       expect(linkable(db).find((row) => row.ref === 'r1')).toEqual({ ref: 'r1', gone: 0 });
       expect(linkable(db).find((row) => row.ref === 'r10')).toEqual({ ref: 'r10', gone: 0 });
-      expect(snapshotGeneration(db)).toBe(staleGen + 1);
-
-      await expect(
-        syncReviewFile(db, snapshotOf(['r0', 'r2'], { fetchedAt: '2026-10-09T12:01:00Z' }), { expectedGeneration: staleGen }),
-      ).rejects.toThrow(
-        new Error(`a newer pull request snapshot (2026-10-09T12:01:00Z) is already stored; run "pr-comments pr sync --db ${db}" again`),
-      );
       expect((await loadReviewFile(db)).known.has('r1')).toBe(true);
       expect((await loadReviewFile(db)).known.has('r10')).toBe(true);
     });
@@ -1868,34 +1755,6 @@ describe('syncReviewFile', () => {
     expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c9999']));
   });
 
-  it('refuses a same-second snapshot when the generation changed meanwhile', async () => {
-    await syncReviewFile(db, snapshotOf(['r1'], { fetchedAt: '2026-01-06T12:01:00Z' }));
-    const sameSecondGen = snapshotGeneration(db);
-    await syncReviewFile(db, snapshotOf(['r1', 'c9999'], { fetchedAt: '2026-01-06T12:01:00Z' }));
-    const afterSameSecond = await bytes();
-
-    await expect(
-      syncReviewFile(db, snapshotOf(['r1'], { fetchedAt: '2026-01-06T12:01:00Z' }), { expectedGeneration: sameSecondGen }),
-    ).rejects.toThrow(
-      new Error(`a newer pull request snapshot (2026-01-06T12:01:00Z) is already stored; run "pr-comments pr sync --db ${db}" again`),
-    );
-    expect((await bytes()).equals(afterSameSecond)).toBe(true);
-    expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c9999']));
-  });
-
-  it('accepts a snapshot with a later fetchedAt even when the generation changed', async () => {
-    await syncReviewFile(db, snapshotOf(['r1'], { fetchedAt: '2026-01-06T12:00:00Z' }));
-    const staleGen = snapshotGeneration(db);
-    await syncReviewFile(db, snapshotOf(['r1', 'c9999'], { fetchedAt: '2026-01-06T12:01:00Z' }));
-
-    await syncReviewFile(
-      db,
-      snapshotOf(['r1', 'c9999', 'c10000'], { fetchedAt: '2026-01-06T12:02:00Z' }),
-      { expectedGeneration: staleGen },
-    );
-    expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c9999', 'c10000']));
-  });
-
   describe('with a comment whose url holds no comment id', () => {
     // The comment r2 is read from an address that names a review instead of a comment: it has no ref.
     const withOdd = () => {
@@ -2090,7 +1949,6 @@ describe('mutateReviewFile with several processes', () => {
     expect(new Set(ids).size).toBe(writers);
     const saved = (await loadReviewFile(db)).data;
     expect(saved.findings.map((finding) => finding.id).sort()).toEqual(ids);
-    expect(await readFile(join(dir, 'r.md'), 'utf8')).toBe(renderReport(saved));
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }, 60_000);
 
@@ -2182,7 +2040,6 @@ describe('changeReviewState with several processes', () => {
     expect(loaded.data.findings.map((each) => each.id).sort()).toEqual(answers.map((answer) => answer.split(' ')[0]).sort());
     expect(loaded.links.map((link) => `${link.finding} ${link.ref}`).sort()).toEqual(answers.sort());
     expect(new Set(loaded.links.map((link) => link.ref)).size).toBe(writers);
-    expect(await readFile(join(dir, 'r.md'), 'utf8')).toBe(renderReport(loaded.data));
     expect(userVersion(db)).toBe(REVIEW_SCHEMA_VERSION);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }

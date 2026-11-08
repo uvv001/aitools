@@ -1,6 +1,6 @@
 import { commentLink, isAnnotationRef, isLinkRef } from './comment-ref.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
-import type { Finding, ReviewData } from './review-model.ts';
+import type { ReviewData } from './review-model.ts';
 import { amend, oneLineText } from './review-ops.ts';
 import { findFinding } from './review-view.ts';
 
@@ -177,9 +177,6 @@ export function unlink(state: ReviewState, ref: string, now: Date, note?: string
 
 export type PostedAction = 'created' | 'updated' | 'unchanged';
 
-// The finding's title, severity, or description changed while its comment was being posted.
-export class FindingChangedError extends Error {}
-
 // What `finding post` records after publishing the finding's comment `ref`. The finding's own link becomes `ref`
 // (a finding whose own link is another comment is an error: a posted comment cannot move). `unchanged` with an
 // own link that already is `ref` changes nothing and returns the same state. `where` is the publish state.
@@ -190,7 +187,6 @@ export function recordPosted(
   action: PostedAction,
   where: 'pending' | 'posted' | undefined,
   now: Date,
-  expected?: { title: string; severity: Finding['severity']; description: string },
 ): ReviewState {
   refuseAnnotation(ref, ONLY_DUPLICATE);
   const found = findFinding(state.data, findingId);
@@ -200,12 +196,6 @@ export function recordPosted(
   if (linked !== undefined && !(linked.role === 'own' && linked.finding === found.id)) throw alreadyLinked(linked);
   const own = ownOf(state.links, found.id);
   if (own !== undefined && own.ref !== ref) throw alreadyHasOwn(found.id, own, 'a posted comment cannot move: ');
-  if (
-    expected !== undefined &&
-    (found.title !== expected.title || found.severity !== expected.severity || found.description !== expected.description)
-  ) {
-    throw new FindingChangedError(`${found.id} changed while its comment was being posted`);
-  }
   if (own !== undefined && action === 'unchanged') return state;
   const pending = where === 'pending' ? ' to the pending review' : '';
   const comment = commentLink(state.pullRequest, ref);
@@ -231,7 +221,6 @@ export function recordReplied(
   replyRef: string,
   where: 'pending' | 'posted' | undefined,
   now: Date,
-  expected?: { finding: string; own: string },
 ): ReviewState {
   refuseAnnotation(ref, NOTHING_TO_REPLY);
   checkedRef(ref);
@@ -247,28 +236,6 @@ export function recordReplied(
         ? `${ref} is recorded as a note, not as a duplicate of a finding`
         : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`,
     );
-  }
-  if (expected !== undefined) {
-    if (link.finding !== expected.finding) {
-      throw new Error(
-        `${ref} is linked as a duplicate of ${link.finding!}, not of ${expected.finding}; ` +
-          `restore the link with "pr-comments link remove ${DB_HINT_PLACEHOLDER} ${ref}" and ` +
-          `"pr-comments link duplicate ${DB_HINT_PLACEHOLDER} ${expected.finding} ${ref}"`,
-      );
-    }
-    const currentOwn = linksOf(state.links, expected.finding).find((item) => item.role === 'own');
-    if (currentOwn === undefined) {
-      throw new Error(
-        `${expected.finding} has no own comment; link ${expected.own} with "pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`,
-      );
-    }
-    if (currentOwn.ref !== expected.own) {
-      throw new Error(
-        `the own comment of ${expected.finding} is ${currentOwn.ref}, not ${expected.own}; ` +
-          `restore ${expected.own} with "pr-comments link remove ${DB_HINT_PLACEHOLDER} ${currentOwn.ref}" and ` +
-          `"pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`,
-      );
-    }
   }
   const found = findFinding(state.data, link.finding!);
   const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;

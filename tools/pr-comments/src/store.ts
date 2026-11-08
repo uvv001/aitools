@@ -377,16 +377,15 @@ export function loadKnownRefs(db: DatabaseSync): Set<string> {
 }
 
 // Records a comment ref (`r…` or `c…`) in `linkable` as not gone, so a link can point at a comment that was just
-// published before the next `pr sync`. Returns whether `linkable` changed.
-export function recordKnownCommentRef(db: DatabaseSync, ref: string): boolean {
+// published before the next `pr sync`.
+export function recordKnownCommentRef(db: DatabaseSync, ref: string): void {
   if (!isCommentRef(ref)) throw new Error(`"${ref}" is not a comment id; expected r544830 or c623843`);
   const kind = ref.startsWith('r') ? COMMENT_KINDS.review : COMMENT_KINDS.issue;
   const existing = db.prepare('SELECT kind, gone FROM linkable WHERE ref = ?').get(ref) as
     | { kind: string; gone: number }
     | undefined;
-  if (existing?.kind === kind && existing.gone === 0) return false;
+  if (existing?.kind === kind && existing.gone === 0) return;
   db.prepare(
     'INSERT INTO linkable (ref, kind, gone) VALUES (?, ?, 0) ON CONFLICT (ref) DO UPDATE SET kind = excluded.kind, gone = 0',
   ).run(ref, kind);
-  return true;
 }

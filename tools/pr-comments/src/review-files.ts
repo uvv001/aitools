@@ -275,17 +275,6 @@ export async function ensureAiGitExcluded(repoRoot: string, targetPaths: string[
   }
 }
 
-async function writeReportUntilStable(target: string, initial: string, renderLatest: () => string): Promise<void> {
-  let text = initial;
-  await mkdir(dirname(target), { recursive: true });
-  while (true) {
-    await writeFile(target, text, 'utf8');
-    const latest = renderLatest();
-    if (latest === text) break;
-    text = latest;
-  }
-}
-
 // Creates the database of a new review named `name` (the title of its report): no rounds or findings. It
 // lives at `options.report` (a report or a database path) or, without one, at the default place of a review of that
 // name (`.ai/review-with-docs/` of the repository of `cwd`); `options.db` names another file, which must end in
@@ -324,14 +313,8 @@ export async function initReviewFile(
   const created = await createDatabase(dbPath, data, pullRequest);
   if (!created) throw existingDatabase(dbPath);
   try {
-    await writeReportUntilStable(reportTarget, rendered, () => {
-      const handle = openReviewDb(dbPath, 'readonly');
-      try {
-        return renderReport(loadReview(handle));
-      } finally {
-        handle.close();
-      }
-    });
+    await mkdir(dirname(reportTarget), { recursive: true });
+    await writeFile(reportTarget, rendered, 'utf8');
   } catch (error) {
     // The database has already been published; do not fail the creation if the initial report cannot be written,
     // but surface the error to the caller so it can warn.
@@ -394,11 +377,12 @@ export async function renderReportFile(arg: string, options: { out?: string } = 
   await refuseDatabase(target, paths.db);
   const db = openReviewDb(paths.db, 'readonly');
   try {
-    const text = renderReport(loadReview(db));
+    const rendered = renderReport(loadReview(db));
     const current = await readExisting(target);
-    const action: RenderResult['action'] = current === text ? 'unchanged' : current === undefined ? 'created' : 'updated';
+    const action: RenderResult['action'] = current === rendered ? 'unchanged' : current === undefined ? 'created' : 'updated';
     if (action !== 'unchanged') {
-      await writeReportUntilStable(target, text, () => renderReport(loadReview(db)));
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, rendered, 'utf8');
     }
     return { report: target, action };
   } finally {
@@ -419,37 +403,11 @@ export interface StateChange<T> {
   reportError?: Error;
 }
 
-const SNAPSHOT_GENERATION = 'snapshot_generation';
-
-function readSnapshotGeneration(db: DatabaseSync): number {
-  return Number(getMeta(db, SNAPSHOT_GENERATION) ?? '0');
-}
-
-function bumpSnapshotGeneration(db: DatabaseSync): void {
-  const next = String(readSnapshotGeneration(db) + 1);
-  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(
-    SNAPSHOT_GENERATION,
-    next,
-  );
-}
-
-export function snapshotGeneration(arg: string): number {
-  const db = openReviewDb(reviewPaths(arg).db, 'readonly');
-  try {
-    return readSnapshotGeneration(db);
-  } finally {
-    db.close();
-  }
-}
-
 const samePullRequest = (a: PullRequestRef, b: PullRequestRef): boolean =>
   a.number === b.number &&
   a.host.toLowerCase() === b.host.toLowerCase() &&
   a.owner.toLowerCase() === b.owner.toLowerCase() &&
   a.repo.toLowerCase() === b.repo.toLowerCase();
-
-// The review was connected to another pull request while a download or post was in flight.
-export class ReconnectedError extends Error {}
 
 function assertConnectedPullRequest(db: DatabaseSync, dbPath: string, expected: PullRequestRef): void {
   const connected = getMeta(db, PULL_REQUEST);
@@ -459,27 +417,16 @@ function assertConnectedPullRequest(db: DatabaseSync, dbPath: string, expected: 
     );
   }
   if (!samePullRequest(parsePullRequestUrl(connected), expected)) {
-    throw new ReconnectedError(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
+    throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
   }
 }
 
-function assertFreshSnapshot(
-  db: DatabaseSync,
-  dbPath: string,
-  snapshot: PullRequestData,
-  expectedGeneration?: number,
-): void {
+function assertFreshSnapshot(db: DatabaseSync, dbPath: string, snapshot: PullRequestData): void {
   const stored = db.prepare('SELECT host, owner, repo, number, fetched_at FROM pr_pull_requests LIMIT 1').get() as
     | { host: string; owner: string; repo: string; number: number; fetched_at: string }
     | undefined;
   const samePr = stored !== undefined && samePullRequest(stored, snapshot.pullRequest);
-  const staleByTime = samePr && snapshot.pullRequest.fetchedAt < stored.fetched_at;
-  const staleByGeneration =
-    samePr &&
-    snapshot.pullRequest.fetchedAt === stored.fetched_at &&
-    expectedGeneration !== undefined &&
-    readSnapshotGeneration(db) !== expectedGeneration;
-  if (staleByTime || staleByGeneration) {
+  if (samePr && snapshot.pullRequest.fetchedAt < stored.fetched_at) {
     throw new Error(
       `a newer pull request snapshot (${stored.fetched_at}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`,
     );
@@ -493,9 +440,9 @@ function assertFreshSnapshot(
 // when its object is not the loaded one, the links when their content differs, the pull request when it differs).
 // `options.snapshot`, a pull request that was just downloaded, is saved first and always (after verifying the review
 // is still connected to `options.pullRequest` when given and no newer snapshot was stored meanwhile), and
-// `options.knownRef` records one or more newly published or verified comment refs in `linkable` before loading (and
-// bumps `snapshot_generation`), so the state that `change` gets (`known` included) already holds the comments, and a
-// link to them is allowed; if the change fails, everything is rolled back with it. The transaction takes the write
+// `options.knownRef` records one or more newly published or verified comment refs in `linkable` before loading, so the
+// state that `change` gets (`known` included) already holds the comments, and a link to them is allowed; if the change
+// fails, everything is rolled back with it. The transaction takes the write
 // lock before it loads, so writers
 // in several processes run one after the other, each on what the one before saved; a writer waits for the lock (up to
 // the busy timeout) instead of working on stale data. When the review changes, the report is rendered and written
@@ -506,7 +453,6 @@ export async function changeReviewState<T>(
   options: {
     snapshot?: PullRequestData;
     pullRequest?: PullRequestRef;
-    expectedGeneration?: number;
     knownRef?: string | readonly string[];
   } = {},
 ): Promise<StateChange<T>> {
@@ -517,19 +463,15 @@ export async function changeReviewState<T>(
     const changed = await inTransactionAsync(
       db,
       async () => {
-        let bumpedGeneration = false;
         if (options.pullRequest !== undefined) assertConnectedPullRequest(db, paths.db, options.pullRequest);
         if (options.snapshot !== undefined) {
-          assertFreshSnapshot(db, paths.db, options.snapshot, options.expectedGeneration);
+          assertFreshSnapshot(db, paths.db, options.snapshot);
           savePullRequest(db, options.snapshot);
-          bumpSnapshotGeneration(db);
-          bumpedGeneration = true;
         }
-        let recordedKnownRef = false;
         if (options.knownRef !== undefined) {
           const refs = typeof options.knownRef === 'string' ? [options.knownRef] : options.knownRef;
           for (const ref of refs) {
-            if (recordKnownCommentRef(db, ref)) recordedKnownRef = true;
+            recordKnownCommentRef(db, ref);
           }
         }
         const before = loadState(db);
@@ -556,13 +498,8 @@ export async function changeReviewState<T>(
             // downloaded for the new one yet.
             if (before.pullRequest !== undefined && options.snapshot === undefined) {
               clearPullRequest(db);
-              bumpSnapshotGeneration(db);
-              bumpedGeneration = true;
             }
           }
-        }
-        if (!bumpedGeneration && options.knownRef !== undefined && (recordedKnownRef || state !== before)) {
-          bumpSnapshotGeneration(db);
         }
         if (rendered !== undefined) {
           await refuseDatabase(paths.report, paths.db);
@@ -573,7 +510,8 @@ export async function changeReviewState<T>(
     );
     if (rendered !== undefined) {
       try {
-        await writeReportUntilStable(paths.report, rendered, () => renderReport(loadReview(db)));
+        await mkdir(dirname(paths.report), { recursive: true });
+        await writeFile(paths.report, rendered, 'utf8');
       } catch (error) {
         // The database transaction has already committed; do not report the saved change as failed if the derived
         // report cannot be refreshed right now, but surface the refresh error to the caller so it can warn.
@@ -617,11 +555,7 @@ export interface SyncResult {
 // Stores a downloaded pull request in the database, in one transaction under the write lock. The review must be
 // connected to a pull request, and it must be this one (host, owner and repository compared without regard to case).
 // The links stay as they are: what they point at is kept, as gone, when the pull request no longer has it.
-export async function syncReviewFile(
-  arg: string,
-  data: PullRequestData,
-  options: { expectedGeneration?: number } = {},
-): Promise<SyncResult> {
+export async function syncReviewFile(arg: string, data: PullRequestData): Promise<SyncResult> {
   const paths = reviewPaths(arg);
   const db = openReviewDb(paths.db, 'existing');
   try {
@@ -629,9 +563,8 @@ export async function syncReviewFile(
       db,
       () => {
         assertConnectedPullRequest(db, paths.db, data.pullRequest);
-        assertFreshSnapshot(db, paths.db, data, options.expectedGeneration);
+        assertFreshSnapshot(db, paths.db, data);
         savePullRequest(db, data);
-        bumpSnapshotGeneration(db);
       },
       { immediate: true },
     );
