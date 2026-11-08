@@ -2060,8 +2060,7 @@ function unlink$1(state, ref, now, note) {
 		links
 	};
 }
-var FindingChangedError = class extends Error {};
-function recordPosted(state, findingId, ref, action, where, now, expected) {
+function recordPosted(state, findingId, ref, action, where, now) {
 	refuseAnnotation(ref, ONLY_DUPLICATE);
 	const found = findFinding(state.data, findingId);
 	checkedRef(ref);
@@ -2070,7 +2069,6 @@ function recordPosted(state, findingId, ref, action, where, now, expected) {
 	if (linked !== void 0 && !(linked.role === "own" && linked.finding === found.id)) throw alreadyLinked(linked);
 	const own = ownOf(state.links, found.id);
 	if (own !== void 0 && own.ref !== ref) throw alreadyHasOwn(found.id, own, "a posted comment cannot move: ");
-	if (expected !== void 0 && (found.title !== expected.title || found.severity !== expected.severity || found.description !== expected.description)) throw new FindingChangedError(`${found.id} changed while its comment was being posted`);
 	if (own !== void 0 && action === "unchanged") return state;
 	const pending = where === "pending" ? " to the pending review" : "";
 	const comment = commentLink(state.pullRequest, ref);
@@ -2090,7 +2088,7 @@ function recordPosted(state, findingId, ref, action, where, now, expected) {
 		}] : state.links
 	};
 }
-function recordReplied(state, ref, replyRef, where, now, expected) {
+function recordReplied(state, ref, replyRef, where, now) {
 	refuseAnnotation(ref, NOTHING_TO_REPLY);
 	checkedRef(ref);
 	checkedRef(replyRef);
@@ -2098,12 +2096,6 @@ function recordReplied(state, ref, replyRef, where, now, expected) {
 	const link = linkOf(state.links, ref);
 	if (link === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate ${DB_HINT_PLACEHOLDER} <finding> ${ref}"`);
 	if (link.role !== "duplicate") throw new Error(link.role === "note" ? `${ref} is recorded as a note, not as a duplicate of a finding` : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`);
-	if (expected !== void 0) {
-		if (link.finding !== expected.finding) throw new Error(`${ref} is linked as a duplicate of ${link.finding}, not of ${expected.finding}; restore the link with "pr-comments link remove ${DB_HINT_PLACEHOLDER} ${ref}" and "pr-comments link duplicate ${DB_HINT_PLACEHOLDER} ${expected.finding} ${ref}"`);
-		const currentOwn = linksOf(state.links, expected.finding).find((item) => item.role === "own");
-		if (currentOwn === void 0) throw new Error(`${expected.finding} has no own comment; link ${expected.own} with "pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`);
-		if (currentOwn.ref !== expected.own) throw new Error(`the own comment of ${expected.finding} is ${currentOwn.ref}, not ${expected.own}; restore ${expected.own} with "pr-comments link remove ${DB_HINT_PLACEHOLDER} ${currentOwn.ref}" and "pr-comments link own ${DB_HINT_PLACEHOLDER} ${expected.finding} ${expected.own}"`);
-	}
 	const found = findFinding(state.data, link.finding);
 	const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;
 	const recorded = (text) => {
@@ -2608,9 +2600,8 @@ function recordKnownCommentRef(db, ref) {
 	if (!isCommentRef(ref)) throw new Error(`"${ref}" is not a comment id; expected r544830 or c623843`);
 	const kind = ref.startsWith("r") ? COMMENT_KINDS.review : COMMENT_KINDS.issue;
 	const existing = db.prepare("SELECT kind, gone FROM linkable WHERE ref = ?").get(ref);
-	if (existing?.kind === kind && existing.gone === 0) return false;
+	if (existing?.kind === kind && existing.gone === 0) return;
 	db.prepare("INSERT INTO linkable (ref, kind, gone) VALUES (?, ?, 0) ON CONFLICT (ref) DO UPDATE SET kind = excluded.kind, gone = 0").run(ref, kind);
-	return true;
 }
 const SCHEMA = `
 CREATE TABLE review (
@@ -3041,16 +3032,6 @@ async function ensureAiGitExcluded(repoRoot, targetPaths = []) {
 	}
 	if (!await isReviewIgnoredByGit(repoRoot, relTargets)) throw new Error("a .gitignore rule negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git");
 }
-async function writeReportUntilStable(target, initial, renderLatest) {
-	let text = initial;
-	await mkdir(dirname(target), { recursive: true });
-	while (true) {
-		await writeFile(target, text, "utf8");
-		const latest = renderLatest();
-		if (latest === text) break;
-		text = latest;
-	}
-}
 async function initReviewFile(name, options = {}) {
 	mustBeDatabase(options.db);
 	reportMatchesDatabase(options.report, options.db);
@@ -3074,14 +3055,8 @@ async function initReviewFile(name, options = {}) {
 	if (repoRoot !== void 0 && isInsideReviewFolder(targetDir, repoRoot)) await ensureAiGitExcluded(repoRoot, [resolve(cwd, dbPath), resolve(cwd, reportTarget)]);
 	if (!await createDatabase(dbPath, data, pullRequest)) throw existingDatabase(dbPath);
 	try {
-		await writeReportUntilStable(reportTarget, rendered, () => {
-			const handle = openReviewDb(dbPath, "readonly");
-			try {
-				return renderReport(loadReview(handle));
-			} finally {
-				handle.close();
-			}
-		});
+		await mkdir(dirname(reportTarget), { recursive: true });
+		await writeFile(reportTarget, rendered, "utf8");
 	} catch (error) {
 		return {
 			db: dbPath,
@@ -3132,10 +3107,13 @@ async function renderReportFile(arg, options = {}) {
 	await refuseDatabase(target, paths.db);
 	const db = openReviewDb(paths.db, "readonly");
 	try {
-		const text = renderReport(loadReview(db));
+		const rendered = renderReport(loadReview(db));
 		const current = await readExisting(target);
-		const action = current === text ? "unchanged" : current === void 0 ? "created" : "updated";
-		if (action !== "unchanged") await writeReportUntilStable(target, text, () => renderReport(loadReview(db)));
+		const action = current === rendered ? "unchanged" : current === void 0 ? "created" : "updated";
+		if (action !== "unchanged") {
+			await mkdir(dirname(target), { recursive: true });
+			await writeFile(target, rendered, "utf8");
+		}
 		return {
 			report: target,
 			action
@@ -3151,35 +3129,15 @@ async function dumpReviewFile(arg) {
 		links
 	});
 }
-const SNAPSHOT_GENERATION = "snapshot_generation";
-function readSnapshotGeneration(db) {
-	return Number(getMeta(db, SNAPSHOT_GENERATION) ?? "0");
-}
-function bumpSnapshotGeneration(db) {
-	const next = String(readSnapshotGeneration(db) + 1);
-	db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(SNAPSHOT_GENERATION, next);
-}
-function snapshotGeneration(arg) {
-	const db = openReviewDb(reviewPaths(arg).db, "readonly");
-	try {
-		return readSnapshotGeneration(db);
-	} finally {
-		db.close();
-	}
-}
 const samePullRequest = (a, b) => a.number === b.number && a.host.toLowerCase() === b.host.toLowerCase() && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase();
-var ReconnectedError = class extends Error {};
 function assertConnectedPullRequest(db, dbPath, expected) {
 	const connected = getMeta(db, PULL_REQUEST);
 	if (connected === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(dbPath)} <url>"`);
-	if (!samePullRequest(parsePullRequestUrl(connected), expected)) throw new ReconnectedError(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
+	if (!samePullRequest(parsePullRequestUrl(connected), expected)) throw new Error(`the review is connected to ${connected}, not to ${formatPullRequestUrl(expected)}`);
 }
-function assertFreshSnapshot(db, dbPath, snapshot, expectedGeneration) {
+function assertFreshSnapshot(db, dbPath, snapshot) {
 	const stored = db.prepare("SELECT host, owner, repo, number, fetched_at FROM pr_pull_requests LIMIT 1").get();
-	const samePr = stored !== void 0 && samePullRequest(stored, snapshot.pullRequest);
-	const staleByTime = samePr && snapshot.pullRequest.fetchedAt < stored.fetched_at;
-	const staleByGeneration = samePr && snapshot.pullRequest.fetchedAt === stored.fetched_at && expectedGeneration !== void 0 && readSnapshotGeneration(db) !== expectedGeneration;
-	if (staleByTime || staleByGeneration) throw new Error(`a newer pull request snapshot (${stored.fetched_at}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`);
+	if (stored !== void 0 && samePullRequest(stored, snapshot.pullRequest) && snapshot.pullRequest.fetchedAt < stored.fetched_at) throw new Error(`a newer pull request snapshot (${stored.fetched_at}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`);
 }
 async function changeReviewState(arg, change, options = {}) {
 	const paths = reviewPaths(arg);
@@ -3187,18 +3145,14 @@ async function changeReviewState(arg, change, options = {}) {
 	let rendered;
 	try {
 		const changed = await inTransactionAsync(db, async () => {
-			let bumpedGeneration = false;
 			if (options.pullRequest !== void 0) assertConnectedPullRequest(db, paths.db, options.pullRequest);
 			if (options.snapshot !== void 0) {
-				assertFreshSnapshot(db, paths.db, options.snapshot, options.expectedGeneration);
+				assertFreshSnapshot(db, paths.db, options.snapshot);
 				savePullRequest(db, options.snapshot);
-				bumpSnapshotGeneration(db);
-				bumpedGeneration = true;
 			}
-			let recordedKnownRef = false;
 			if (options.knownRef !== void 0) {
 				const refs = typeof options.knownRef === "string" ? [options.knownRef] : options.knownRef;
-				for (const ref of refs) if (recordKnownCommentRef(db, ref)) recordedKnownRef = true;
+				for (const ref of refs) recordKnownCommentRef(db, ref);
 			}
 			const before = loadState(db);
 			let result;
@@ -3218,19 +3172,15 @@ async function changeReviewState(arg, change, options = {}) {
 				if (state.pullRequest !== before.pullRequest) {
 					if (state.pullRequest === void 0) throw new Error("internal error: a review cannot be disconnected from its pull request");
 					setMeta(db, PULL_REQUEST, state.pullRequest);
-					if (before.pullRequest !== void 0 && options.snapshot === void 0) {
-						clearPullRequest(db);
-						bumpSnapshotGeneration(db);
-						bumpedGeneration = true;
-					}
+					if (before.pullRequest !== void 0 && options.snapshot === void 0) clearPullRequest(db);
 				}
 			}
-			if (!bumpedGeneration && options.knownRef !== void 0 && (recordedKnownRef || state !== before)) bumpSnapshotGeneration(db);
 			if (rendered !== void 0) await refuseDatabase(paths.report, paths.db);
 			return result;
 		}, { immediate: true });
 		if (rendered !== void 0) try {
-			await writeReportUntilStable(paths.report, rendered, () => renderReport(loadReview(db)));
+			await mkdir(dirname(paths.report), { recursive: true });
+			await writeFile(paths.report, rendered, "utf8");
 		} catch (error) {
 			return {
 				...changed,
@@ -3262,15 +3212,14 @@ async function mutateReviewFile(arg, mutate) {
 		result
 	};
 }
-async function syncReviewFile(arg, data, options = {}) {
+async function syncReviewFile(arg, data) {
 	const paths = reviewPaths(arg);
 	const db = openReviewDb(paths.db, "existing");
 	try {
 		inTransaction(db, () => {
 			assertConnectedPullRequest(db, paths.db, data.pullRequest);
-			assertFreshSnapshot(db, paths.db, data, options.expectedGeneration);
+			assertFreshSnapshot(db, paths.db, data);
 			savePullRequest(db, data);
-			bumpSnapshotGeneration(db);
 		}, { immediate: true });
 	} finally {
 		db.close();
@@ -3686,12 +3635,6 @@ async function postFinding(arg, findingId, options, deps) {
 		reportPath: paths.report
 	});
 	const { id } = extracted;
-	const sourceFinding = findFinding(data, id);
-	const expectedFinding = {
-		title: sourceFinding.title,
-		severity: sourceFinding.severity,
-		description: sourceFinding.description
-	};
 	const own = linksOf(links, id).find((link) => link.role === "own");
 	const comment = own === void 0 ? extracted.comment : {
 		...extracted.comment,
@@ -3735,7 +3678,7 @@ async function postFinding(arg, findingId, options, deps) {
 	const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
 	try {
 		const { reportError } = await changeReviewState(arg, (state) => ({
-			state: recordPosted(state, id, posted, action, published.state, deps.now(), expectedFinding),
+			state: recordPosted(state, id, posted, action, published.state, deps.now()),
 			result: void 0
 		}), {
 			pullRequest: ref,
@@ -3752,9 +3695,7 @@ async function postFinding(arg, findingId, options, deps) {
 			...reportError === void 0 ? {} : { reportError }
 		};
 	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
-		const postCommand = `"pr-comments finding post --db ${quotedDb}${options.byAgent ? " --by-agent" : ""} ${id}"`;
-		const message = `${was}, but it could not be recorded in the review (${reason}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(ref)}" and "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}` : error instanceof FindingChangedError ? own === void 0 ? `run "pr-comments pr sync --db ${quotedDb}", record it with ${linkOwnCommand}, then run ${postCommand} again to update the comment` : `run ${postCommand} again to update the comment` : `record it with ${linkOwnCommand}`}`;
+		const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); record it with ${linkOwnCommand}`;
 		return {
 			finding: id,
 			result: {
@@ -3813,10 +3754,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 	const was = result.action === "created" ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
 	try {
 		const { reportError } = await changeReviewState(arg, (state) => ({
-			state: recordReplied(state, ref, replyRef, result.state, deps.now(), {
-				finding,
-				own: own.ref
-			}),
+			state: recordReplied(state, ref, replyRef, result.state, deps.now()),
 			result: void 0
 		}), {
 			pullRequest: pullRequestRef,
@@ -3827,7 +3765,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 			reportError
 		};
 	} catch (error) {
-		const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); ${error instanceof ReconnectedError ? `reconnect with "pr-comments pr connect --db ${quotedDb} ${formatPullRequestUrl(pullRequestRef)}" and "pr-comments pr sync --db ${quotedDb}", restore the links with "pr-comments link own --db ${quotedDb} ${finding} ${own.ref}" and "pr-comments link duplicate --db ${quotedDb} ${finding} ${ref}", then run the command again to record it` : "run the command again to record it"}`;
+		const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); run the command again to record it`;
 		return {
 			...replied,
 			result: {
@@ -3842,7 +3780,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+4f2c3b6`;
+	return `pr-comments ${VERSION}+0529bf1`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4054,8 +3992,7 @@ async function syncPullRequest({ env }, db) {
 	const { pullRequest } = await loadReviewFile(db);
 	if (pullRequest === void 0) throw new Error(`the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"`);
 	const ref = parsePullRequestUrl(pullRequest);
-	const expectedGeneration = snapshotGeneration(db);
-	const { reviews, threads, comments, annotations } = await syncReviewFile(db, await env.getPullRequest(ref), { expectedGeneration });
+	const { reviews, threads, comments, annotations } = await syncReviewFile(db, await env.getPullRequest(ref));
 	env.print(`Synced ${ref.owner}/${ref.repo}#${ref.number}: ${reviews} reviews, ${threads} threads, ${comments} comments, ${annotations} annotations\n`);
 	return 0;
 }
