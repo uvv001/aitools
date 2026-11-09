@@ -142,14 +142,8 @@ calls for — a verdict is step 5, a publish or sync request step 6, new changes
    **Ready when:**
    - **posts:** `finding list --state approved --unposted` lists only findings
      the user chose to hold back or whose refused post is the user's call;
-   - the pull request's comments are **reconciled**:
-     - **links:** `link pending` prints nothing and no thread has an unlinked
-       reply ([pull-request.md](pull-request.md));
-     - **edits:** no unrecorded edit ([pull-request.md](pull-request.md))
-       remains;
-     - **verdicts:** the verdict marker ([pull-request.md](pull-request.md)) of
-       every nonempty submitted review verdict body that raises or addresses a
-       concern appears in `report dump`;
+   - the pull request's comments are **reconciled**: `link pending` prints
+     nothing;
    - **tier bound:** where a PR-comment dispatch ran, the index shows the tier
      bound of [fleet.md](fleet.md);
    - the user knows the pending review waits for their submit.

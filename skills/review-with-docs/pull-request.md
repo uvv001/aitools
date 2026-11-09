@@ -16,28 +16,16 @@ the user to create it.
 
 ## Read what others wrote
 
-A **verdict marker** is `<review-url> (<timestamp>)`: the `[link]` URL and the
-`edited` (or submit) timestamp that `report comments` prints for a submitted
-review. An **edited-comment marker** is `<ref> edited <timestamp>`: the
-comment's ref and the `edited` timestamp in its `report comments` header. An
-**unlinked reply** is a reply ref that `report comments` shows in a thread and
-that has no `link` line in `report dump`. An **unrecorded edit** is a linked
-comment whose `report comments` header shows `edited` and whose
-edited-comment marker does not appear in `report dump`.
-
 `pr sync` downloads the PR into the database — comments, reviews, threads,
 check annotations. Run it after every push and before every publish.
 `link pending` then lists each top-level comment and check annotation that no
-link names yet; empty output means every top-level item is linked. Read the
-full pending threads and annotations with `report comments --pending`
-(unlinked replies in those threads included), and read unfiltered
-`report comments` for nonempty submitted review verdict bodies whose verdict
-marker does not yet appear in `report dump` and, on a re-sync, for unlinked
-replies in already linked threads and for unrecorded edits (`report dump`
-lists every linked ref, note, and finding update). Then classify each item and
-record it from the orchestrator:
+link names yet; empty output means every one is handled. Read the full pending
+threads and annotations with `report comments --pending` — past a handful of
+pending items, the parallel agents below read them instead — then classify
+each comment (replies included) and annotation and record it from the
+orchestrator:
 
-| The comment, annotation, or review verdict body | Command |
+| The comment or annotation | Command |
 |---|---|
 | a comment the user wrote by hand saying what a finding says | `link own <F> <ref>` |
 | the same concern as a finding | `link duplicate <F> <ref>` |
@@ -45,22 +33,14 @@ record it from the orchestrator:
 | chatter or a status comment that raises no concern | `link note <ref> '<reason>'` |
 | a concern no finding covers yet | `finding add`, then `link duplicate <F> <ref>` |
 | a check annotation, always | `link duplicate <F> <ref>` |
-| a review verdict body repeating a finding, written by the user as that finding, or giving counter-evidence on it | `finding update <F> '<verdict-marker>: <text>'` |
-| a review verdict body raising a concern no finding covers yet | `finding add --note '<verdict-marker>'` |
 
 Links are records in the database; nothing reaches GitHub. A note attaches to
-no finding and leaves no trace in the report, so every comment or review
-verdict body that raises a concern on the changeset — even one the agent
-refutes or that collides with a rule — goes to a finding (with the
-counter-evidence recorded there) for the user to triage. `link remove <ref>`
-undoes a link; every record of a comment whose header shows `edited` carries
-its edited-comment marker in `--note`, the `link note` reason, or the `finding
-update` text (run `link remove <ref>` first when the comment is already
-linked).
+no finding and leaves no trace in the report, so every comment that raises a
+concern on the changeset — even one the agent refutes or that collides with a
+rule — goes to a finding (with the counter-evidence recorded there) for the
+user to triage. `link remove <ref>` undoes a link.
 
-Past a handful of refs to read, the orchestrator reads the review verdict
-bodies and slices the pending refs, unlinked replies, and unrecorded edits
-(keeping each thread's refs in one slice) across parallel **PR-comment
+Past a handful of pending items, slice the refs across parallel **PR-comment
 agents**, each dispatched with its `model` per [fleet.md](fleet.md). Each brief
 carries:
 
@@ -69,18 +49,17 @@ carries:
   `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`,
   run in the reviewed repository;
 - the findings the review carries (listed as in the Later rounds of
-  [fleet.md](fleet.md)), the already linked refs, the user's login, the
-  edited-comment marker definition, and the table and the paragraph after it;
+  [fleet.md](fleet.md)), the user's login, and the table and the paragraph
+  after it;
 - the output: a description file per [fleet.md](fleet.md) for each concern no
   finding covers yet;
-- the reply: one classification per pending ref, unlinked reply, or unrecorded
-  edit in its slice — `own <F>`, `duplicate <F>`,
+- the reply: one classification per comment (replies included) or annotation
+  in its slice — `own <F>`, `duplicate <F>`,
   `counter-evidence <F> '<counter-evidence>'`, `note '<reason>'`, or the new
-  finding's reply line per [fleet.md](fleet.md) — plus its edited-comment
-  marker where its header shows `edited`, for the orchestrator to record.
-  Where `<F>` is a new finding of the slice, the agent writes the `<ref>` of
-  its file `pr-comments/<ref>.md`, and the orchestrator records the id that
-  `finding add` gives that file.
+  finding's reply line per [fleet.md](fleet.md) — for the orchestrator to
+  record. Where `<F>` is a new finding of the slice, the agent writes the
+  `<ref>` of its file `pr-comments/<ref>.md`, and the orchestrator records the
+  id that `finding add` gives that file.
 
 ## Publish
 
