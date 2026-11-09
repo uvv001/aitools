@@ -6,7 +6,7 @@ reply` write to GitHub; `pr sync` reads.
 
 ## Connect
 
-`pr show --json` tells whether the review is connected. `init --pr <url>`
+`pr show` tells whether the review is connected. `init --pr <url>`
 connects it at the start; `pr connect <url>` later, where the PR did not
 exist yet. `pr sync`, `finding post` (dry runs too), and `link reply` need a
 token, and the last two need write permission. The tool reads tokens from the
