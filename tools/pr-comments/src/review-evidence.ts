@@ -74,9 +74,8 @@ function nextFenceBeforeAnchor(lines: string[], from: number): { at: number; ope
 }
 
 // Evidence is an anchor line followed, past blank lines or explanation prose before the next anchor, by a code fence.
-// Fences that follow no anchor are skipped whole, so an anchor-shaped line inside one is content, not an anchor; the
-// report parser, which rejects a report with an unclosed fence, is what guards against such a fence swallowing the
-// anchors below it.
+// Fences that follow no anchor are skipped whole, so an anchor-shaped line inside one is content, not an anchor (an
+// unclosed fence runs to the end of the description).
 export function extractEvidence(description: string): Evidence[] {
   const lines = splitLines(description);
   const found: Evidence[] = [];

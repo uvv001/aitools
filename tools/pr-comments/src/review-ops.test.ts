@@ -230,14 +230,6 @@ describe('openRound', () => {
     refuses(fresh(), (input) => openRound(input, { revision: 'a`b', base: null }), 'revision "a`b" must be one word, without backticks');
     refuses(fresh(), (input) => openRound(input, { revision: 'abc', base: 'x\ny' }), 'base "x\ny" must be one word, without backticks');
   });
-
-  it('refuses a note with an unclosed code fence', () => {
-    refuses(
-      fresh(),
-      (input) => openRound(input, { revision: 'abc1234', base: null, note: 'see\n```ts\nx' }),
-      'note has an unclosed code fence (opened on line 2)',
-    );
-  });
 });
 
 describe('updateRound', () => {
@@ -338,7 +330,7 @@ describe('addFinding', () => {
     expect(first(data).description).toBe('    indented first line\n\nsecond  ');
   });
 
-  it('keeps a description of markdown that looks like structure but is none', () => {
+  it('keeps a description of markdown verbatim', () => {
     const description = lines(
       '#hashtag and ##### five hashes',
       '    #### indented four spaces',
@@ -363,98 +355,28 @@ describe('addFinding', () => {
     expect(first(data).description).toBe(description);
   });
 
-  it.each([
-    ['# Title', 'a\n\n# Title', 3],
-    ['## Findings', '## Findings', 1],
-    ['### ✅ 🔴 F9 — quoted', 'a\n### ✅ 🔴 F9 — quoted', 2],
-    ['#### Updates', 'a\n\n#### Updates', 3],
-    ['#### Whatever', '#### Whatever', 1],
-    ['####\tTabbed', 'x\n####\tTabbed', 2],
-    ['## Findings', '   ## Findings', 1],
-    ['Some text', 'Some text\n===', 2],
-    ['**Fix:** use the helper', '**Fix:** use the helper\n---', 2],
-    ['+1 for this', '+1 for this\n---', 2],
-    ['1.5 seconds', '1.5 seconds\n===', 2],
-    ['-flag', '-flag\n===', 2],
-    ['an indented line', 'The value wraps onto\n    an indented line\n---', 3],
-    ['an indented line', 'The value wraps onto\n\tan indented line\n===', 3],
-    ['2. of the loop', 'The call happens in step\n2. of the loop\n---', 3],
-    ['*', 'Text\n*\n---', 3],
-    ['1.', 'Text\n1.\n---', 3],
-    ['<span>', 'Text\n<span>\n===', 3],
-    ['<custom-element>', 'Text\n<custom-element>\n---', 3],
-    ['# run the tests', '<pre>\n# run the tests\n</pre>', 2],
-    ['#### Updates', '<!--\n#### Updates\n-->', 2],
-    ['Text', '- item\n<!-- status -->\nText\n===', 4],
-    ['Title', '-\nTitle\n---', 3],
-    ['#### Updates', '```\nx\n```\n#### Updates', 4],
-  ])('refuses the heading "%s" in a description', (heading, description, line) => {
-    refuses(
-      open(),
-      (input) => addFinding(input, { ...FINDING, description }, at()),
-      `description contains a "${heading}" heading (line ${line}) — quote it in a code fence`,
+  it('accepts and preserves headings, unclosed code fences, and unclosed HTML blocks in descriptions and notes', () => {
+    const blocks = lines('# H1', 'Setext', '---', '<div>', '<!-- comment', '```ts', 'const x = 1;');
+    const indented = lines(
+      '# H1',
+      '  Setext',
+      '  ---',
+      '  <div>',
+      '  <!-- comment',
+      '  ```ts',
+      '  const x = 1;',
     );
-  });
+    let { data } = raise(open(), { ...FINDING, description: blocks, note: blocks }, at(1));
+    expect(first(data).description).toBe(blocks);
+    expect(first(data).updates[0]?.text).toBe(`2026-10-08 09:06 — Round 1: raised ⏳ — ${indented}`);
 
-  it('refuses a description with an unclosed code fence', () => {
-    for (const [description, line] of [
-      ['a\n```ts\nb', 2],
-      ['```markdown\n```ts', 1],
-      ['```\n```\u00a0', 1],
-      ['~~~\nx', 1],
-      ['```\n~~~\nx', 1],
-      ['````\n```\nx', 1],
-      ['```\nx\n```\n```', 4],
-    ] as const) {
-      refuses(open(), (input) => addFinding(input, { ...FINDING, description }, at()), `description has an unclosed code fence (opened on line ${line})`);
-    }
-    expect(() =>
-      addFinding(
-        open(),
-        {
-          ...FINDING,
-          description:
-            '```markdown\n```ts\n    ```\n# quoted heading\n```\n\n```inline span```\n\n- item\n  continued\n---\n> quote\nlazy\n---\nText\n<!-- status -->\n---\n<!--\nstatus\n===\n-->\n<div\nclass="example">\n---\nTitle\n===\n</div>\n[a]: /url\n---\n    code\n---\n___\n---',
-          note: 'checked:\n\n  ```md\n# literal heading\n  ```',
-        },
-        at(),
-      ),
-    ).not.toThrow();
-    refuses(
-      open(),
-      (input) => addFinding(input, { ...FINDING, description: '<!-- TODO' }, at()),
-      'description has an unclosed HTML block (opened on line 1)',
-    );
-    refuses(
-      open(),
-      (input) => addFinding(input, { ...FINDING, note: 'first\n# heading' }, at()),
-      'note contains a "# heading" heading (line 2) — quote it in a code fence',
-    );
-    refuses(
-      open(),
-      (input) => addFinding(input, { ...FINDING, note: 'first\n  # heading' }, at()),
-      'note contains a "# heading" heading (line 2) — quote it in a code fence',
-    );
-    refuses(
-      open(),
-      (input) => addFinding(input, { ...FINDING, note: 'first\n\t#### x' }, at()),
-      'note contains a "#### x" heading (line 2) — quote it in a code fence',
-    );
-    refuses(
-      open(),
-      (input) => addFinding(input, { ...FINDING, note: 'first\n \t#### x' }, at()),
-      'note contains a "#### x" heading (line 2) — quote it in a code fence',
-    );
-    refuses(
-      open(),
-      (input) => addFinding(input, { ...FINDING, note: 'first\n---' }, at()),
-      'note contains a "first" heading (line 2) — quote it in a code fence',
-    );
-    refuses(
-      open(),
-      (input) => addFinding(input, { ...FINDING, note: 'first\n   ---' }, at()),
-      'note contains a "first" heading (line 2) — quote it in a code fence',
-    );
+    const updatedBlocks = `${blocks}\nmore`;
+    data = pure(data, (input) => setDescription(input, 'F1', { description: updatedBlocks, note: blocks }, at(2)));
+    expect(first(data).description).toBe(updatedBlocks);
+    expect(first(data).updates[1]?.text).toBe(`2026-10-08 09:07 — description revised — ${indented}`);
+
+    data = pure(data, (input) => addUpdate(input, 'F1', { text: blocks }, at(3)));
+    expect(first(data).updates[2]?.text).toBe(`2026-10-08 09:08 — ${indented}`);
   });
 
   it('refuses an empty description and a lone carriage return', () => {
@@ -623,10 +545,9 @@ describe('setDescription', () => {
     refuses(reviewWith(1), (input) => setDescription(input, 'F1', { description: '\r\n\r\nSee `src/a.ts:3`.\n\n' }, at()), 'F1 already has this description');
   });
 
-  it('refuses what would break the report', () => {
+  it('refuses an empty description and a lone carriage return', () => {
     refuses(reviewWith(1), (input) => setDescription(input, 'F1', { description: '' }, at()), 'description is empty');
-    refuses(reviewWith(1), (input) => setDescription(input, 'F1', { description: 'a\n#### Updates' }, at()), 'description contains a "#### Updates" heading (line 2) — quote it in a code fence');
-    refuses(reviewWith(1), (input) => setDescription(input, 'F1', { description: '```ts\nx' }, at()), 'description has an unclosed code fence (opened on line 1)');
+    refuses(reviewWith(1), (input) => setDescription(input, 'F1', { description: 'a\rb' }, at()), 'description contains a carriage return or line separator that is not a line break');
   });
 });
 
@@ -659,9 +580,8 @@ describe('addUpdate', () => {
     );
   });
 
-  it('refuses an empty text, an unclosed fence and an unknown finding', () => {
+  it('refuses an empty text and an unknown finding', () => {
     refuses(reviewWith(1), (input) => addUpdate(input, 'F1', { text: ' \n' }, at()), 'update text is empty');
-    refuses(reviewWith(1), (input) => addUpdate(input, 'F1', { text: 'x\n```' }, at()), 'update text has an unclosed code fence (opened on line 2)');
     refuses(reviewWith(1), (input) => addUpdate(input, 'F3', { text: 'x' }, at()), 'unknown finding "F3"; the report has F1');
     refuses(reviewWith(1), (input) => addUpdate(input, 'F1', { text: 'x', round: 0 }, at()), 'round 0 is not a round number; rounds count from 1');
   });
@@ -860,7 +780,7 @@ describe('scales and item parsers', () => {
 });
 
 describe('blanks at the end of the first line', () => {
-  it('reads back as it was written', () => {
+  it('renders cleanly after trimming the first line', () => {
     for (const note of ['a  \nb', 'a\t \nb', 'a\u00a0 \r\nb', 'a   \n\n  b  \nc', ' a \t\n b']) {
       sound(openRound(fresh(), { revision: 'abc1234', base: null, note }));
     }
@@ -872,7 +792,7 @@ describe('blanks at the end of the first line', () => {
   });
 });
 
-describe('text that would break the report', () => {
+describe('hostile and invalid text', () => {
   const HOSTILE = [
     '# Title',
     '## Findings',
@@ -935,7 +855,7 @@ describe('text that would break the report', () => {
     ['updateRound text', (text) => updateRound(open(), { text }), 'text'],
   ];
 
-  it.each(sweeps)('%s is refused, or written so that the report reads back as the data', (_name, run) => {
+  it.each(sweeps)('%s is refused, or written so that the report renders cleanly', (_name, run) => {
     let accepted = 0;
     for (const hostile of HOSTILE) {
       let result: ReviewData;
@@ -980,7 +900,7 @@ describe('text that would break the report', () => {
 });
 
 // A seeded walk of many operations over texts with blanks at the ends of their lines: every operation is either
-// refused, with the review unchanged, or leaves a review that reads back as it is.
+// refused, with the review unchanged, or leaves a review that renders cleanly.
 describe('random walks over every operation', () => {
   function seeded(seed: number): () => number {
     let state = seed;
@@ -1037,7 +957,7 @@ describe('random walks over every operation', () => {
     return { operation, run: runs[operation] as (input: ReviewData) => ReviewData };
   }
 
-  it('refuses or leaves a review that reads back as it is, in 60 walks of 40 steps', () => {
+  it('refuses or leaves a review that renders cleanly, in 60 walks of 40 steps', () => {
     const accepted = new Set<number>();
     let refused = 0;
     for (let seed = 1; seed <= 60; seed++) {

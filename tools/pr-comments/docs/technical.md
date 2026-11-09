@@ -132,7 +132,7 @@ A read command must not change the committed file. A read-only connection (`new 
 
 Mutating commands and `report render` run one at a time per review database. A connection waits up to 10 seconds for a lock (`timeout` of `DatabaseSync`), which guards read-only queries against a write transaction.
 
-The texts of a review are checked when they come in (`review-ops.ts`): no control characters except tab and newline, no `#`…`####` or setext heading outside a code fence in a description or a note, no unclosed code fence or HTML block, a title on one line, a revision as one word.
+The texts of a review are checked when they come in (`review-ops.ts`): no control characters except tab and newline, no lone carriage return or line separator, a title on one line, a revision as one word.
 
 `mutateReviewFile` is `changeReviewState` for changes of the review alone. The report is rendered on `init` and on every change of the review (written after the database is published or `COMMIT` succeeds; if the report write fails afterwards, the saved database change still succeeds with exit `0` and the CLI warns `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"` on `stderr`), and `report render` re-renders it on demand (or writes `--out`).
 

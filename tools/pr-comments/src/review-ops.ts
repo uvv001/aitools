@@ -1,4 +1,3 @@
-import { closesFence, openingFence } from './review-evidence.ts';
 import { STATES } from './review-model.ts';
 import type { Finding, Intro, IntroEntry, ReviewData, ReviewedItem, UpdateItem } from './review-model.ts';
 import { findFinding, parseSeverity, parseState } from './review-view.ts';
@@ -6,9 +5,9 @@ import { findFinding, parseSeverity, parseState } from './review-view.ts';
 // Pure operations on a review: each returns a NEW ReviewData (the input is never changed) and throws an Error with a
 // helpful message when the operation does not apply. `now` stamps the Updates text as `yyyy-mm-dd hh:mm` in local
 // time. The text written here is the canonical report text of review-render.ts, and the derived fields of the items
-// (at, round, revision ...) are read from that text for queries. Text that would break the rendered report structure
-// (a heading, an unclosed code fence or HTML block, a line break inside a title, a control character ...) is
-// refused. A round that was never opened is no round to write an Updates entry under.
+// (at, round, revision ...) are read from that text for queries. Invalid input (a line break inside a title, a lone
+// carriage return or line separator, a control character ...) is refused. A round that was never opened is no round
+// to write an Updates entry under.
 
 export type SeverityName = 'high' | 'medium' | 'low';
 
@@ -41,35 +40,11 @@ export function updateItem(text: string): UpdateItem {
   return item;
 }
 
-// Patterns used to validate text so the rendered report keeps its structure.
+// Patterns used to validate text.
 const BLANK = /^[ \t]*$/u;
 const LINE_SEPARATORS = /[\r\n\u2028\u2029]/u;
 // NUL, the C0 controls other than TAB, LF and CR (CR is a line break matter), and DEL.
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
-const HEADING = /^ {0,3}#{1,4}\s+.*\S\s*$/u;
-const SETEXT_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/u;
-const THEMATIC_BREAK = /^ {0,3}(?:(?:_[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:-[ \t]*){3,})$/u;
-const QUOTE_LINE = /^ {0,3}>/u;
-const LIST_ITEM_WITH_CONTENT = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S/u;
-const EMPTY_LIST_ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]*$/u;
-const INTERRUPTS_PARAGRAPH = /^ {0,3}(?:(?:[-*+]|0{0,8}1[.)])[ \t]+\S|>)/u;
-const HTML_BLOCK_TAG =
-  /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|\/?>|$)/iu;
-const HTML_INLINE_LINE =
-  /^ {0,3}<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*)>[ \t]*$/u;
-const LINK_DEFINITION =
-  /^ {0,3}\[[^\]]+\]:[ \t]*(?:<[^<>\r\n]*>|[^\s<>]+)(?:[ \t]+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\([^()]*\)))?[ \t]*$/u;
-
-function openingHtmlBlock(line: string): RegExp | undefined {
-  const tag = /^ {0,3}<(script|pre|style|textarea)(?:[ \t>]|$)/iu.exec(line)?.[1];
-  if (tag !== undefined) return new RegExp(`</${tag}>`, 'iu');
-  if (/^ {0,3}<!--/u.test(line)) return /-->/u;
-  if (/^ {0,3}<\?/u.test(line)) return /\?>/u;
-  if (/^ {0,3}<![A-Z]/u.test(line)) return />/u;
-  if (/^ {0,3}<!\[CDATA\[/u.test(line)) return /\]\]>/u;
-  return undefined;
-}
-
 const WORD = /^[^\s`]+$/u;
 
 // `yyyy-mm-dd hh:mm`, local time.
@@ -99,119 +74,13 @@ function splitLines(what: string, text: string): string[] {
   return lines;
 }
 
-// Checks the lines of a block: a fence closes on a marker of its own character, at least as long, and
-// a heading counts outside the fences only.
-function checkLines(what: string, lines: string[], headings = true): void {
-  let open: { marker: string; line: number } | undefined;
-  let openHtml: { close: RegExp; line: number } | undefined;
-  let inHtmlBlock = false;
-  let plainTextAbove = false;
-  let inQuote = false;
-  let inList = false;
-  for (const [index, line] of lines.entries()) {
-    if (open !== undefined) {
-      if (closesFence(line, open.marker)) {
-        open = undefined;
-        plainTextAbove = false;
-        inQuote = false;
-        inList = false;
-        inHtmlBlock = false;
-      }
-      continue;
-    }
-    const marker = openingFence(line)?.marker;
-    if (marker !== undefined) {
-      open = { marker, line: index + 1 };
-      plainTextAbove = false;
-      inQuote = false;
-      inList = false;
-      inHtmlBlock = false;
-      continue;
-    }
-    if (headings && HEADING.test(line)) {
-      throw new Error(`${what} contains a "${line.trim()}" heading (line ${index + 1}) — quote it in a code fence`);
-    }
-    if (openHtml !== undefined) {
-      if (openHtml.close.test(line)) openHtml = undefined;
-      continue;
-    }
-    const htmlClose = openingHtmlBlock(line);
-    if (headings && plainTextAbove && SETEXT_UNDERLINE.test(line)) {
-      const heading = lines[index - 1]!.replace(/^x: /u, '').trim();
-      throw new Error(`${what} contains a "${heading}" heading (line ${index + 1}) — quote it in a code fence`);
-    } else if (htmlClose !== undefined) {
-      plainTextAbove = false;
-      inQuote = false;
-      inList = false;
-      inHtmlBlock = false;
-      if (!htmlClose.test(line)) openHtml = { close: htmlClose, line: index + 1 };
-    } else if (BLANK.test(line)) {
-      plainTextAbove = false;
-      inQuote = false;
-      inList = false;
-      inHtmlBlock = false;
-    } else if (HTML_BLOCK_TAG.test(line)) {
-      plainTextAbove = false;
-      inQuote = false;
-      inList = false;
-      inHtmlBlock = true;
-    } else if (inHtmlBlock) {
-      // Inside a Type 6 or Type 7 HTML block until the next blank line.
-    } else if (THEMATIC_BREAK.test(line)) {
-      plainTextAbove = false;
-      inQuote = false;
-      inList = false;
-    } else if (plainTextAbove) {
-      if (INTERRUPTS_PARAGRAPH.test(line)) {
-        plainTextAbove = false;
-        inQuote = QUOTE_LINE.test(line);
-        inList = !inQuote;
-      }
-    } else if (QUOTE_LINE.test(line)) {
-      inQuote = true;
-      inList = false;
-    } else if (LIST_ITEM_WITH_CONTENT.test(line)) {
-      inList = true;
-      inQuote = false;
-    } else if (EMPTY_LIST_ITEM.test(line)) {
-      inList = false;
-      inQuote = false;
-    } else if (inList && /^(?: {2,}|\t)/u.test(line)) {
-      // Indented continuation of the open list item.
-    } else if (inQuote) {
-      // Lazy continuation of the open blockquote.
-    } else if (HTML_INLINE_LINE.test(line)) {
-      inHtmlBlock = true;
-    } else {
-      inList = false;
-      if (!/^(?: {4}|\t)/u.test(line) && !LINK_DEFINITION.test(line)) {
-        plainTextAbove = true;
-      }
-    }
-  }
-  if (open !== undefined) throw new Error(`${what} has an unclosed code fence (opened on line ${open.line})`);
-  if (openHtml !== undefined) throw new Error(`${what} has an unclosed HTML block (opened on line ${openHtml.line})`);
-}
-
-function expandBulletIndent(line: string): string {
-  let col = 2;
-  let index = 0;
-  while (index < line.length && (line[index] === ' ' || line[index] === '\t')) {
-    col = line[index] === '\t' ? col + (4 - (col % 4)) : col + 1;
-    index++;
-  }
-  return ' '.repeat(col - 2) + line.slice(index);
-}
-
 // The text of a bullet, or of a note after a dash; undefined when blank. The lines after the first are indented by
 // two spaces, which keeps them inside the bullet; blank ones stay empty. The first line loses its trailing blanks.
 function bulletText(what: string, text: string): string | undefined {
   const [head = '', ...rest] = splitLines(what, trimmed(what, text));
   const first = head.trimEnd();
   if (first === '') return undefined;
-  checkLines(what, [`x: ${first}`, ...rest.map(expandBulletIndent)], true);
   const lines = [first, ...rest.map((line) => (BLANK.test(line) ? '' : `  ${line}`))];
-  checkLines(what, [`x: ${first}`, ...lines.slice(1)], false);
   return lines.join('\n');
 }
 
@@ -230,7 +99,6 @@ function descriptionText(text: string): string {
   const from = lines.findIndex((line) => !BLANK.test(line));
   if (from < 0) throw new Error('description is empty');
   const kept = lines.slice(from, lines.findLastIndex((line) => !BLANK.test(line)) + 1);
-  checkLines('description', kept);
   return kept.join('\n');
 }
 

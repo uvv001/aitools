@@ -557,7 +557,7 @@ describe('initReviewFile', () => {
     expect(listing()).toEqual(['NAMED.SQLITE', 'NAMED.md']);
   });
 
-  it('is rendered into a report that parses', async () => {
+  it('is rendered into the expected report', async () => {
     const { report } = await initReviewFile('PR 42', { report: join(dir, 'r.md'), now: NOW });
     expect(await renderReportFile(report)).toEqual({ report, action: 'unchanged' });
     const text = await readFile(report, 'utf8');
@@ -1489,7 +1489,7 @@ describe('the report of a review connected to a pull request', () => {
   const PULL = 'https://ghe.example.com/acme/widgets/pull/157';
   const COMMENTS = ['r544861', 'r544900', 'c623843', 'r546201', 'a00000001'];
 
-  it('names every comment with its URL, through the operations and the check of the changed review, and reads back as the review', async () => {
+  it('names every comment with its URL across the operations and renders the report', async () => {
     const report = join(dir, 'r.md');
     const { db } = await initReviewFile('PR 157', { report, now: NOW, pr: 'https://GHE.example.com/acme/widgets/pull/157/' });
     await changeReviewState(db, (state) => ({ state: { ...state, data: withFinding(state.data, 'F1') }, result: null }), { snapshot: snapshotOf(COMMENTS) });

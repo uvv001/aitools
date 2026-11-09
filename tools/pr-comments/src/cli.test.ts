@@ -1442,13 +1442,6 @@ describe('cli', () => {
       await fails(add('--description-file', missing), new Error(`cannot read ${missing}: no such file`));
     });
 
-    it('refuses a description that would break the report', async () => {
-      stdin = '```ts\nunclosed';
-      await fails(add('--description-file', '-'), /unclosed code fence/u);
-      stdin = '#### Updates\nnot a real one';
-      await fails(add('--description-file', '-'), /heading/u);
-    });
-
     describe('says in a few words why a description file cannot be read', () => {
       it('names the file as typed, for finding add and for set-description, and changes nothing', async () => {
         await fails(add('--description-file', 'no-such-description.md'), new Error('cannot read no-such-description.md: no such file'));

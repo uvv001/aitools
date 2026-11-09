@@ -119,8 +119,8 @@ function linkToFinding(
 //   recordPosted  created: `posted PR comment r544830` (`... to the pending review` when `where` is 'pending');
 //                 updated: `updated PR comment r544830`;
 //                 unchanged and not linked yet (an identical comment was adopted): `adopted PR comment r544830 (identical)`
-// Texts that reach the review (note) follow the rules of review-ops.ts (no control characters, no line breaks in
-// one-line texts, nothing that would break the report).
+// Texts that reach the review (note) follow the rules of review-ops.ts (no control characters, no lone carriage
+// returns or line separators, no line breaks in one-line texts).
 //
 // A check annotation ref ("a3f9c2d1e") is accepted by linkDuplicate and unlink only: linkOwn, linkNote, recordPosted
 // and recordReplied refuse it with a message that says why, before any other check.

@@ -141,10 +141,9 @@ describe('linkOwn', () => {
     expect(updatesOf(blank, 'F1').at(-1)).toBe(`${stamp(5)} — PR comment r1 linked as its own`);
   });
 
-  it('refuses a note the report could not hold, and links nothing', () => {
+  it('refuses a note with a control character or lone carriage return, and links nothing', () => {
     const input = stateWith([note('r9')]);
     refuses(input, (state) => linkOwn(state, 'F1', 'r1', at(5), 'a\u0007b'), 'note contains a control character (U+0007) at line 1');
-    refuses(input, (state) => linkOwn(state, 'F1', 'r1', at(5), 'x\n```ts\ny'), 'note has an unclosed code fence (opened on line 2)');
     refuses(input, (state) => linkOwn(state, 'F1', 'r1', at(5), 'a\rb'), 'note contains a carriage return or line separator that is not a line break');
   });
 

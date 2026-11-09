@@ -485,7 +485,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 - `--help` works on every command and group. It prints to stdout and exits with 0.
 - Errors exit with 1. Pending work in `link pending` is not an error.
 - `--json` exists only where a program must act on the result: `finding add`, `finding list`, `finding show`, `finding post`, `link reply`, `link pending`, `pr show`. Anywhere else it is an error.
-- Text, from a file or an argument, must not contain control characters other than tab and newline. A description must not contain a markdown heading outside a code block, or an unclosed code block, because it would break the report. The tool says so.
+- Text, from a file or an argument, must not contain control characters other than tab and newline.
 
 ## Git
 
