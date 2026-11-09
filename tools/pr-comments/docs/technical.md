@@ -43,7 +43,7 @@ Every module that changes a review is pure: it takes the review (and links) and 
 - Every other command opens an existing file. A missing file is `<path> does not exist`. Nothing is created as a side effect.
 - The file uses a rollback journal (`journal_mode = DELETE`). There is no `-wal` or `-shm` file. A `-journal` file exists only while a command writes.
 - `foreign_keys = ON` on every connection. The review tables are `STRICT`.
-- `PRAGMA user_version` holds the schema version, now 5 (`REVIEW_SCHEMA_VERSION`). There is no cross-version migration (within schema 5, `savePullRequest` adds `pr_threads.original_start_line` if absent). An older database (version 4 included) is refused with `<path> was written by an older pr-comments (schema <n>); start again with "pr-comments init"`. A newer one is refused with `… was written by a newer pr-comments (schema <n>); update the tool`. A SQLite file without the review tables is `<path> is not a review database`.
+- `PRAGMA user_version` holds the schema version, now 6 (`REVIEW_SCHEMA_VERSION`). There is no cross-version migration (within schema 6, `savePullRequest` adds `pr_threads.original_start_line` if absent). An older database (version 5 included) is refused with `<path> was written by an older pr-comments (schema <n>); start again with "pr-comments init"`. A newer one is refused with `… was written by a newer pr-comments (schema <n>); update the tool`. A SQLite file without the review tables is `<path> is not a review database`.
 - Meta keys: `pull_request` (the connected pull request, canonical URL).
 
 ### 2.2 Tables
@@ -53,12 +53,12 @@ The review half:
 | Table | Content |
 | --- | --- |
 | `review` | One row (`id = 1`): `target` (the title) |
-| `intro_items` | The items of **Reviewed** in `position` order: `text`, and the columns derived from it: `round`, `revision`, `base`, `base_none` |
+| `intro_items` | The items of **Reviewed** in `position` order: `round`, `revision`, `base` (`NULL` for `--no-base`), and `notes` (a JSON array of strings when notes are present) |
 | `findings` | `position`, `id` (`F<n>`, unique), `state` and `severity` (the markers), `title`, `description` |
-| `updates` | `finding`, `position`, `text` (the whole line, stamp included), `at`, `round` |
+| `updates` | `finding`, `position`, `kind`, `at`, `round`, and the structured event columns (`state`, `from_value`, `to_value`, `revision`, `ref`, `reply_ref`, `role`, `action`, `pending`, `pull_request`, `note`) |
 | `meta` | Key and value |
 
-The text is the source. The derived columns are read from it with `reviewedItem` and `updateItem` (`review-ops.ts`), and `renderReport` needs only the text.
+Rounds and finding updates are stored as structured columns (`intro_items` and `updates`), never as pre-rendered Markdown strings. `renderReport`, `showText`, and `dumpReview` format the bullet text from them at render time with `formatRoundItem` and `formatUpdateItem` (`review-render.ts`).
 
 The pull request half (the snapshot of the last `pr sync`):
 
@@ -395,7 +395,7 @@ The lookup loop never gives up. …
   | `link reply` | `replied to duplicate [r…](<url>) with [r…](<url>)[ in the pending review]` |
 
   A `--note` is added after ` — `. `--round <n>` adds `Round <n>: ` at the start. It must name a round that was opened. `link note` writes nothing under Updates, because a note belongs to no finding. Nothing else writes under Updates.
-- The report carries the URL of every comment it names, because the web UI cannot search comments by id. In the table `[r…](<url>)` is the id as a markdown link to the comment on the connected pull request, `<pull request URL>#discussion_r…` (`#issuecomment-…` for a `c…`). The URL is written into the text of the entry when the entry is made, so `renderReport` stays a function of the data alone. A check annotation has no URL on GitHub and stays bare (`check annotation a…`), and so does a comment of a review that is not connected to a pull request. Entries written before this change keep their bare ids.
+- The report carries the URL of every comment it names, because the web UI cannot search comments by id. In the table `[r…](<url>)` is the id as a markdown link to the comment on the connected pull request, `<pull request URL>#discussion_r…` (`#issuecomment-…` for a `c…`). The pull request URL is stored on the structured update entry when the entry is made, and `renderReport` compiles the link from that field at render time, so `renderReport` stays a function of the review data alone. A check annotation has no URL on GitHub and stays bare (`check annotation a…`), and so does a comment of a review that is not connected to a pull request.
 - The links and the pull request are not in the report. They are only in the database (and in `report dump`).
 
 `report dump` is a text form of the review for `git diff`:
@@ -451,4 +451,4 @@ Tests (`pnpm test` runs `vitest run`; `pnpm typecheck` runs `tsc --noEmit`):
 - The text of a review verdict has no comment id, so it cannot be linked and `link pending` does not list it.
 - Only the head commit's check annotations are kept. After a push, run `pr sync` again.
 - A database is one writer at a time. A binary file cannot be merged: after a git conflict take one side and redo the other changes with the commands.
-- No cross-version migration. A database of an older schema version must be started again with `init` (within schema 5, `savePullRequest` — run by `pr sync` — adds `pr_threads.original_start_line` if absent).
+- No cross-version migration. A database of an older schema version must be started again with `init` (within schema 6, `savePullRequest` — run by `pr sync` — adds `pr_threads.original_start_line` if absent).

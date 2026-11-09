@@ -16,7 +16,7 @@ import { AGENT_DISCLAIMER } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult, ReplyTarget } from './reply.ts';
 import { dumpReviewFile, loadReviewFile, loadSnapshot, reviewPaths } from './review-files.ts';
 import { pendingItems, pendingLines } from './review-pending.ts';
-import { renderReport } from './review-render.ts';
+import { formatRoundItem, formatUpdateItem, renderReport } from './review-render.ts';
 import { removeScratch, scratchDir } from './review-test-support.ts';
 import { VERSION } from './version.ts';
 
@@ -225,7 +225,7 @@ describe('cli', () => {
   const tree = async (dir = work) => (await readdir(dir, { recursive: true })).sort();
   const loaded = () => loadReviewFile(review);
   const findingOf = async (id: string) => (await loaded()).data.findings.find((finding) => finding.id === id);
-  const updatesOf = async (id: string) => (await findingOf(id))?.updates.map(({ text }) => text);
+  const updatesOf = async (id: string) => (await findingOf(id))?.updates.map(formatUpdateItem);
   const shown = (path: string) => relative(work, path);
   const line = (path = review) => `Review database: ${shown(path)}\n`;
 
@@ -1308,9 +1308,11 @@ describe('cli', () => {
       expect((await loaded()).data.intro.reviewed.items).toMatchObject([
         { round: 1, revision: '1a2b3c4d', base: null },
         { round: 2, revision: '1a2b3c4d', base: '5e6f7a8b' },
-        { round: 3, revision: '9c0d1e2f', base: null },
+        { round: 3, revision: '9c0d1e2f', base: null, notes: ['scope: src/ only'] },
       ]);
-      expect((await loaded()).data.intro.reviewed.items.at(-1)?.text).toBe('Round 3 — `9c0d1e2f`, base none — reviewed as it stands; scope: src/ only');
+      expect(formatRoundItem((await loaded()).data.intro.reviewed.items.at(-1)!)).toBe(
+        'Round 3 — `9c0d1e2f`, base none — reviewed as it stands; scope: src/ only',
+      );
     });
 
     it('says in its help that the note is where the scope of the review is written', async () => {
@@ -1332,11 +1334,11 @@ describe('cli', () => {
       await step('round', 'open', '--no-base', '--db', review);
       expect(await step('round', 'update', 'no new findings', '--db', review)).toBe(0);
       expect(printed).toBe('Round 2 updated\n');
-      expect((await loaded()).data.intro.reviewed.items[1]?.text).toContain('; no new findings');
+      expect(formatRoundItem((await loaded()).data.intro.reviewed.items[1]!)).toContain('; no new findings');
 
       expect(await step('round', 'update', '11 fixed', '--round', '1', '--db', review)).toBe(0);
       expect(printed).toBe('Round 1 updated\n');
-      expect((await loaded()).data.intro.reviewed.items[0]?.text).toContain('; 11 fixed');
+      expect(formatRoundItem((await loaded()).data.intro.reviewed.items[0]!)).toContain('; 11 fixed');
 
       await fails(['round', 'update', ' ', '--db', review], 'the text must not be empty');
       await fails(['round', 'update', 'note', '--round', '9', '--db', review], 'round 9 was never opened; the latest round is 2');

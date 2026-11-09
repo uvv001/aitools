@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { Finding, IntroEntry, ReviewData } from './review-model.ts';
-import { renderReport, slug } from './review-render.ts';
+import type { Finding, IntroEntry, ReviewData, ReviewedItem, UpdateItem } from './review-model.ts';
+import { formatRoundItem, formatUpdateItem, renderReport, slug } from './review-render.ts';
 
-function entry(...texts: string[]): IntroEntry<{ text: string }> {
-  return { items: texts.map((text) => ({ text })) };
+function entry(...items: ReviewedItem[]): IntroEntry<ReviewedItem> {
+  return { items };
 }
 
 function finding(number: number, state = '⏳', severity = '🔴', title = `Title ${number}`): Finding {
@@ -13,7 +13,7 @@ function finding(number: number, state = '⏳', severity = '🔴', title = `Titl
     severity,
     title,
     description: `Body of F${number}.`,
-    updates: [{ text: '2026-10-05 11:15 — Round 1: raised' }],
+    updates: [{ kind: 'raised', at: '2026-10-05 11:15', round: 1, state: '⏳' }],
   };
 }
 
@@ -21,7 +21,7 @@ function data(changes: Partial<ReviewData> = {}): ReviewData {
   return {
     target: 'PR 42',
     intro: {
-      reviewed: entry('Round 1 — `abc1234`, base none — reviewed as it stands; tracked tree clean.'),
+      reviewed: entry({ round: 1, revision: 'abc1234', base: null, notes: ['tracked tree clean.'] }),
     },
     findings: [],
     ...changes,
@@ -32,7 +32,13 @@ const lines = (text: string): string[] => text.split('\n');
 
 describe('renderReport', () => {
   it('writes the title, Reviewed as the only intro entry, the generated dashboard and the findings section', () => {
-    const rendered = renderReport(data({ intro: { reviewed: entry('Round 1 — `<revision>`, <base>; <clean or dirty tree>.') } }));
+    const rendered = renderReport(
+      data({
+        intro: {
+          reviewed: entry({ round: 1, revision: 'abc1234', base: 'def5678', notes: ['tracked tree clean.'] }),
+        },
+      }),
+    );
     expect(rendered).toBe(
       [
         '# Review — PR 42',
@@ -41,7 +47,7 @@ describe('renderReport', () => {
         '',
         '**Reviewed**',
         '',
-        '- Round 1 — `<revision>`, <base>; <clean or dirty tree>.',
+        '- Round 1 — `abc1234`, base `def5678`; tracked tree clean.',
         '',
         '## Dashboard',
         '',
@@ -124,7 +130,7 @@ describe('renderReport', () => {
         '',
         '#### Updates',
         '',
-        '- 2026-10-05 11:15 — Round 1: raised',
+        '- 2026-10-05 11:15 — Round 1: raised ⏳',
         '',
         '### ⏳ 🔴 F2 — Title 2',
         '',
@@ -134,7 +140,7 @@ describe('renderReport', () => {
         '',
         '#### Updates',
         '',
-        '- 2026-10-05 11:15 — Round 1: raised',
+        '- 2026-10-05 11:15 — Round 1: raised ⏳',
         '',
       ].join('\n'),
     );
@@ -152,17 +158,19 @@ describe('renderReport', () => {
     const multi: Finding = {
       ...finding(1),
       description: 'a\n\n```\n#### Updates\n```',
-      updates: [{ text: '2026-10-05 11:15 — Round 1: raised\n  continued' }],
+      updates: [{ kind: 'raised', at: '2026-10-05 11:15', round: 1, state: '⏳', note: 'first\n  continued' }],
     };
     expect(renderReport(data({ findings: [multi] }))).toContain(
-      '#### Description\n\na\n\n```\n#### Updates\n```\n\n#### Updates\n\n- 2026-10-05 11:15 — Round 1: raised\n  continued\n',
+      '#### Description\n\na\n\n```\n#### Updates\n```\n\n#### Updates\n\n- 2026-10-05 11:15 — Round 1: raised ⏳ — first\n  continued\n',
     );
   });
 
   it('writes the label of the entry on its own line, the items as bullets below it', () => {
-    const forms: [IntroEntry<{ text: string }>, string[]][] = [
-      [entry('Round 1 — x', 'Round 2 — y'), ['**Reviewed**', '', '- Round 1 — x', '- Round 2 — y']],
-      [entry('Round 1 — x'), ['**Reviewed**', '', '- Round 1 — x']],
+    const r1: ReviewedItem = { round: 1, revision: 'abc1234', base: 'def5678' };
+    const r2: ReviewedItem = { round: 2, revision: 'bbb2222', base: null };
+    const forms: [IntroEntry<ReviewedItem>, string[]][] = [
+      [entry(r1, r2), ['**Reviewed**', '', '- Round 1 — `abc1234`, base `def5678`', '- Round 2 — `bbb2222`, base none — reviewed as it stands']],
+      [entry(r1), ['**Reviewed**', '', '- Round 1 — `abc1234`, base `def5678`']],
       [entry(), ['**Reviewed**']],
     ];
     for (const [reviewed, written] of forms) {
@@ -171,15 +179,32 @@ describe('renderReport', () => {
     }
   });
 
-  it('never needs the derived fields of the items', () => {
-    const derived = data({
-      intro: {
-        reviewed: { items: [{ text: 'Round 1 — `abc1234`, base `def5678`; clean.', round: 1, revision: 'abc1234', base: 'def5678' }] },
-      },
-      findings: [{ ...finding(1), updates: [{ text: '2026-10-05 11:15 — Round 1: raised', at: '2026-10-05 11:15', round: 1 }] }],
-    });
-    const bare = JSON.parse(JSON.stringify(derived, (key, value) => (['round', 'revision', 'base', 'at'].includes(key) ? undefined : value)));
-    expect(renderReport(bare)).toBe(renderReport(derived));
+  it('compiles round items and every kind of finding update from structured fields', () => {
+    expect(
+      formatRoundItem({
+        round: 1,
+        revision: 'abc1234',
+        base: 'def5678',
+        notes: ['dirty tree:\n  - `src/a.ts` modified', 'no findings'],
+      }),
+    ).toBe('Round 1 — `abc1234`, base `def5678`; dirty tree:; no findings\n  - `src/a.ts` modified');
+
+    const pr = 'https://github.com/acme/widgets/pull/42';
+    const cases: [UpdateItem, string][] = [
+      [{ kind: 'raised', at: '2026-10-05 11:15', round: 1, state: '⏳' }, '2026-10-05 11:15 — Round 1: raised ⏳'],
+      [{ kind: 'state', at: '2026-10-05 11:20', round: 2, from: '⏳', to: '🔧', revision: 'abc1234', note: 'fixed' }, '2026-10-05 11:20 — Round 2: ⏳ → 🔧 at `abc1234` — fixed'],
+      [{ kind: 'severity', at: '2026-10-05 11:25', from: '🟡', to: '🔴' }, '2026-10-05 11:25 — severity 🟡 → 🔴'],
+      [{ kind: 'title', at: '2026-10-05 11:30', from: 'Old', to: 'New' }, '2026-10-05 11:30 — title changed: "Old" → "New"'],
+      [{ kind: 'description', at: '2026-10-05 11:35', note: 'expanded' }, '2026-10-05 11:35 — description revised — expanded'],
+      [{ kind: 'note', at: '2026-10-05 11:40', round: 1, note: 'checked' }, '2026-10-05 11:40 — Round 1: checked'],
+      [{ kind: 'linked', at: '2026-10-05 11:45', ref: 'r1', role: 'own', pullRequest: pr }, '2026-10-05 11:45 — PR comment [r1](https://github.com/acme/widgets/pull/42#discussion_r1) linked as its own'],
+      [{ kind: 'unlinked', at: '2026-10-05 11:50', ref: 'a3f9c2d1e', role: 'duplicate' }, '2026-10-05 11:50 — check annotation a3f9c2d1e unlinked (was a duplicate)'],
+      [{ kind: 'posted', at: '2026-10-05 11:55', ref: 'r2', action: 'created', pending: true }, '2026-10-05 11:55 — posted PR comment r2 to the pending review'],
+      [{ kind: 'replied', at: '2026-10-05 12:00', ref: 'r2', replyRef: 'r3', pending: true }, '2026-10-05 12:00 — replied to duplicate r2 with r3 in the pending review'],
+    ];
+    for (const [update, expected] of cases) {
+      expect(formatUpdateItem(update)).toBe(expected);
+    }
   });
 
   it('renders every state and severity', () => {

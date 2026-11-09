@@ -1,5 +1,6 @@
 import type { CommentLink } from './review-links.ts';
-import type { Finding, IntroEntry, ReviewData } from './review-model.ts';
+import type { Finding, IntroEntry, ReviewData, ReviewedItem } from './review-model.ts';
+import { formatRoundItem, formatUpdateItem } from './review-render.ts';
 
 // A deterministic, line-oriented text form of the review for readable `git diff`s of the binary database
 // (used as a git textconv). Stable across runs; a change to one finding changes only the lines of that finding.
@@ -10,7 +11,7 @@ import type { Finding, IntroEntry, ReviewData } from './review-model.ts';
 //   target="PR 42"                 header and field values are JSON: strings quoted, null written out
 //
 //   intro reviewed
-//   item 1 round=1 revision="abc1234" base=null      derived fields appear only where the model has them
+//   item 1 round=1 revision="abc1234" base=null
 //   | Round 1 — `abc1234`, base none — …            free text, every line behind the prefix "| "
 //
 //   finding F4 | ✅ | 🔴 | Title
@@ -34,28 +35,26 @@ import type { Finding, IntroEntry, ReviewData } from './review-model.ts';
 // removed and a single added line in a diff. Nothing is numbered across findings, so adding a finding or an update
 // never rewrites the lines of the others; the dump carries no time of its own.
 
-const ITEM_FIELDS = ['round', 'revision', 'base'];
-const UPDATE_FIELDS = ['at', 'round'];
+const ITEM_FIELDS = ['round', 'revision', 'base'] as const;
+const UPDATE_FIELDS = ['at', 'round', 'kind'] as const;
 const LINK_FIELDS = ['role', 'finding', 'note'] as const;
-
-type Text = { text: string };
 
 const field = (key: string, value: unknown): string => `${key}=${JSON.stringify(value)}`;
 
 const quoted = (text: string): string[] => text.split('\n').map((line) => (line === '' ? '|' : `| ${line}`));
 
-function fields(item: Text, keys: string[]): string {
+function fields(item: object, keys: readonly string[]): string {
   const values = item as Record<string, unknown>;
   return keys.filter((key) => values[key] !== undefined).map((key) => ` ${field(key, values[key])}`).join('');
 }
 
-function entryLines(entry: IntroEntry<Text>): string[] {
-  const items = entry.items.flatMap((item, at) => [`item ${at + 1}${fields(item, ITEM_FIELDS)}`, ...quoted(item.text)]);
+function entryLines(entry: IntroEntry<ReviewedItem>): string[] {
+  const items = entry.items.flatMap((item, at) => [`item ${at + 1}${fields(item, ITEM_FIELDS)}`, ...quoted(formatRoundItem(item))]);
   return ['', 'intro reviewed', ...items];
 }
 
 function findingLines({ id, state, severity, title, description, updates }: Finding): string[] {
-  const entries = updates.flatMap((update, at) => [`update ${at + 1}${fields(update, UPDATE_FIELDS)}`, ...quoted(update.text)]);
+  const entries = updates.flatMap((update, at) => [`update ${at + 1}${fields(update, UPDATE_FIELDS)}`, ...quoted(formatUpdateItem(update))]);
   return ['', `finding ${id} | ${state} | ${severity} | ${title}`, 'description', ...quoted(description), ...entries];
 }
 

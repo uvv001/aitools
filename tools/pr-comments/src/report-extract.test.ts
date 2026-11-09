@@ -6,13 +6,20 @@ import { STATES, type Finding, type ReviewData } from './review-model.ts';
 const REPORT_PATH = 'docs/2026-10-05_demo_review.md';
 const STEM = '2026-10-05_demo_review';
 
-const UPDATES = '2026-10-05 11:15 — Round 1: raised ⏳ — see [round 1](round-1/notes.md)';
+const UPDATES = 'see [round 1](round-1/notes.md)';
 
 function finding(header: string, description: string, updates: string[] = [UPDATES]): Finding {
   const match = /^(?<state>\S+)\s+(?<severity>\S+)\s+(?<id>\S+)\s+—\s+(?<title>.+)$/u.exec(header);
   if (!match?.groups) throw new Error(`bad test header: ${header}`);
   const { state = '', severity = '', id = '', title = '' } = match.groups;
-  return { id, state, severity, title, description, updates: updates.map((text) => ({ text })) };
+  return {
+    id,
+    state,
+    severity,
+    title,
+    description,
+    updates: updates.map((note) => ({ kind: 'raised', at: '2026-10-05 11:15', round: 1, state: '⏳', note })),
+  };
 }
 
 const f4 = (description: string, header = '✅ 🔴 F4 — Icon-only button has no name', updates?: string[]) =>
@@ -20,7 +27,7 @@ const f4 = (description: string, header = '✅ 🔴 F4 — Icon-only button has 
 
 const reviewOf = (...findings: Finding[]): ReviewData => ({
   target: 'Demo',
-  intro: { reviewed: { items: [{ text: 'Round 1' }] } },
+  intro: { reviewed: { items: [{ round: 1, revision: 'abc1234', base: null }] } },
   findings,
 });
 

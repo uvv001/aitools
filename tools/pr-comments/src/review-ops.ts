@@ -1,44 +1,27 @@
 import { STATES } from './review-model.ts';
-import type { Finding, Intro, IntroEntry, ReviewData, ReviewedItem, UpdateItem } from './review-model.ts';
+import type {
+  Finding,
+  FindingLinkRole,
+  Intro,
+  IntroEntry,
+  PostedUpdateAction,
+  ReviewData,
+  ReviewedItem,
+  UpdateItem,
+} from './review-model.ts';
 import { findFinding, parseSeverity, parseState } from './review-view.ts';
 
 // Pure operations on a review: each returns a NEW ReviewData (the input is never changed) and throws an Error with a
-// helpful message when the operation does not apply. `now` stamps the Updates text as `yyyy-mm-dd hh:mm` in local
-// time. The text written here is the canonical report text of review-render.ts, and the derived fields of the items
-// (at, round, revision ...) are read from that text for queries. Invalid input (a line break inside a title, a lone
-// carriage return or line separator, a control character ...) is refused. A round that was never opened is no round
-// to write an Updates entry under.
+// helpful message when the operation does not apply. `now` stamps the Updates entry as `yyyy-mm-dd hh:mm` in local
+// time. Rounds and finding updates are stored as structured records and formatted by review-render.ts. Invalid input
+// (a line break inside a title, a lone carriage return or line separator, a control character ...) is refused. A round
+// that was never opened is no round to write an Updates entry under.
 
 export type SeverityName = 'high' | 'medium' | 'low';
 
 const AWAITING = '⏳';
 const UNVERIFIED = '❓';
 const FIXED = '🔧';
-
-const STAMP = String.raw`\d{4}-\d{2}-\d{2} \d{2}:\d{2}`;
-const ROUND = /^Round (\d+)\b/u;
-const REVISION = /^Round \d+ — `([^`]+)`/u;
-const BASE = /\bbase\s+(?:`([^`]+)`|none\s+—\s+reviewed\s+as\s+it\s+stands)/u;
-const UPDATE = new RegExp(`^(${STAMP}) — (?:Round (\\d+): )?`, 'u');
-
-export function reviewedItem(text: string): ReviewedItem {
-  const item: ReviewedItem = { text };
-  const round = ROUND.exec(text)?.[1];
-  const revision = REVISION.exec(text)?.[1];
-  const base = BASE.exec(text);
-  if (round) item.round = Number(round);
-  if (revision) item.revision = revision;
-  if (base) item.base = base[1] ?? null;
-  return item;
-}
-
-export function updateItem(text: string): UpdateItem {
-  const item: UpdateItem = { text };
-  const match = UPDATE.exec(text);
-  if (match) item.at = match[1];
-  if (match?.[2]) item.round = Number(match[2]);
-  return item;
-}
 
 // Patterns used to validate text.
 const BLANK = /^[ \t]*$/u;
@@ -143,7 +126,7 @@ function withIntro(data: ReviewData, changes: Partial<Intro>): ReviewData {
 
 // The highest round of **Reviewed**; undefined while no round was opened.
 function latestRound(data: ReviewData): number | undefined {
-  const rounds = data.intro.reviewed.items.flatMap(({ round }) => (round === undefined ? [] : [round]));
+  const rounds = data.intro.reviewed.items.map(({ round }) => round);
   return rounds.length === 0 ? undefined : Math.max(...rounds);
 }
 
@@ -162,14 +145,18 @@ export interface RoundInput {
   note?: string;
 }
 
-// Appends `Round <n> — `<revision>`, base `<base>`` (n = highest round + 1, starting at 1), plus `; <note>`.
+// Appends a round (n = highest round + 1, starting at 1) with its revision, base, and optional note.
 export function openRound(data: ReviewData, input: RoundInput): ReviewData {
   const revision = revisionWord('revision', input.revision);
   const base = input.base === null ? null : revisionWord('base', input.base);
   const note = optionalText('note', input.note);
   const round = (latestRound(data) ?? 0) + 1;
-  const against = base === null ? 'base none — reviewed as it stands' : `base \`${base}\``;
-  const item = reviewedItem(`Round ${round} — \`${revision}\`, ${against}${note === undefined ? '' : `; ${note}`}`);
+  const item: ReviewedItem = {
+    round,
+    revision,
+    base,
+    ...(note === undefined ? {} : { notes: [note] }),
+  };
   return withIntro(data, { reviewed: appended(data.intro.reviewed, [item]) });
 }
 
@@ -178,7 +165,7 @@ export interface UpdateRoundInput {
   round?: number;
 }
 
-// Appends `; <text>` to the first line of the Reviewed item of `round` (the latest round when omitted).
+// Appends `text` to the notes of the Reviewed item of `round` (the latest round when omitted).
 export function updateRound(data: ReviewData, input: UpdateRoundInput): ReviewData {
   const note = oneLineText('text', input.text);
   const target = input.round === undefined ? latestRound(data) : openedRound(data, input.round);
@@ -187,8 +174,7 @@ export function updateRound(data: ReviewData, input: UpdateRoundInput): ReviewDa
   const items = data.intro.reviewed.items.map((item) => {
     if (item.round !== target) return item;
     matched = true;
-    const [first = '', ...rest] = item.text.split('\n');
-    return reviewedItem([`${first}; ${note}`, ...rest].join('\n'));
+    return { ...item, notes: [...(item.notes ?? []), note] };
   });
   if (!matched) throw new Error(`round ${target} was never opened; the latest round is ${latestRound(data)}`);
   return withIntro(data, { reviewed: { items } });
@@ -206,13 +192,28 @@ export interface AddFindingInput {
   note?: string;
 }
 
-// One Updates entry: `<stamp> — [Round <n>: ]<what>[ — <note>]`; `what` and `note` are cleaned already.
-function updateEntry(data: ReviewData, now: Date, round: number | undefined, what: string, note?: string): UpdateItem {
-  const lead = round === undefined ? '' : `Round ${openedRound(data, round)}: `;
-  const entry = updateItem(`${formatStamp(now)} — ${lead}${what}${note === undefined ? '' : ` — ${note}`}`);
-  // `what` can open with a round of its own, which `updateItem` reads as the round of the entry.
-  if (round === undefined && entry.round !== undefined) openedRound(data, entry.round);
-  return entry;
+export type UpdateEvent =
+  | { kind: 'raised'; round: number; state: string }
+  | { kind: 'state'; from: string; to: string; revision?: string }
+  | { kind: 'severity'; from: string; to: string }
+  | { kind: 'title'; from: string; to: string }
+  | { kind: 'description' }
+  | { kind: 'note'; note: string }
+  | { kind: 'linked'; ref: string; role: FindingLinkRole; pullRequest?: string }
+  | { kind: 'unlinked'; ref: string; role: FindingLinkRole; pullRequest?: string }
+  | { kind: 'posted'; ref: string; action: PostedUpdateAction; pending?: boolean; pullRequest?: string }
+  | { kind: 'replied'; ref: string; replyRef: string; pending?: boolean; pullRequest?: string };
+
+// One Updates entry: stamped with `now`, optional `round` and cleaned `note`.
+function updateEntry(data: ReviewData, now: Date, input: ChangeInput, event: UpdateEvent): UpdateItem {
+  const round = input.round === undefined ? undefined : openedRound(data, input.round);
+  const note = optionalText('note', input.note);
+  const base = {
+    at: formatStamp(now),
+    ...(round === undefined ? {} : { round }),
+    ...(note === undefined ? {} : { note }),
+  };
+  return { ...base, ...event } as UpdateItem;
 }
 
 // The next free F<n>: the highest number there is, plus one, so an id is never reused.
@@ -229,7 +230,7 @@ export function addFinding(data: ReviewData, input: AddFindingInput, now: Date):
   const title = titleText(input.title);
   const description = descriptionText(input.description);
   const state = input.unverified ? UNVERIFIED : AWAITING;
-  const updates = [updateEntry(data, now, round, `raised ${state}`, optionalText('note', input.note))];
+  const updates = [updateEntry(data, now, { round, note: input.note }, { kind: 'raised', round, state })];
   const id = nextId(data);
   const finding: Finding = { id, state, severity, title, description, updates };
   return { data: { ...data, findings: [...data.findings, finding] }, id };
@@ -241,16 +242,16 @@ export interface ChangeInput {
   round?: number;
 }
 
-// Logs the change `what` of a finding as a new Updates entry, and applies the changes to it.
+// Logs the change `event` of a finding as a new Updates entry, and applies the changes to it.
 export function amend(
   data: ReviewData,
   found: Finding,
   now: Date,
   input: ChangeInput,
-  what: string,
+  event: UpdateEvent,
   changes: Partial<Finding> = {},
 ): ReviewData {
-  const entry = updateEntry(data, now, input.round, what, optionalText('note', input.note));
+  const entry = updateEntry(data, now, input, event);
   const next = { ...found, ...changes, updates: [...found.updates, entry] };
   return { ...data, findings: data.findings.map((finding) => (finding === found ? next : finding)) };
 }
@@ -270,22 +271,29 @@ export function setState(
   if (state === FIXED && input.revision === undefined) {
     throw new Error(`moving ${found.id} to ${describeState(FIXED)} needs the revision that fixes it`);
   }
-  const at = input.revision === undefined ? '' : ` at \`${revisionWord('revision', input.revision)}\``;
-  return amend(data, found, now, input, `${found.state} → ${state}${at}`, { state });
+  const revision = input.revision === undefined ? undefined : revisionWord('revision', input.revision);
+  return amend(
+    data,
+    found,
+    now,
+    input,
+    { kind: 'state', from: found.state, to: state, ...(revision === undefined ? {} : { revision }) },
+    { state },
+  );
 }
 
 export function setSeverity(data: ReviewData, id: string, input: ChangeInput & { severity: SeverityName }, now: Date): ReviewData {
   const found = findFinding(data, id);
   const severity = parseSeverity(input.severity);
   if (severity === found.severity) throw new Error(`${found.id} already has severity ${severity}`);
-  return amend(data, found, now, input, `severity ${found.severity} → ${severity}`, { severity });
+  return amend(data, found, now, input, { kind: 'severity', from: found.severity, to: severity }, { severity });
 }
 
 export function setTitle(data: ReviewData, id: string, input: ChangeInput & { title: string }, now: Date): ReviewData {
   const found = findFinding(data, id);
   const title = titleText(input.title);
   if (title === found.title) throw new Error(`${found.id} already has the title "${title}"`);
-  return amend(data, found, now, input, `title changed: "${found.title}" → "${title}"`, { title });
+  return amend(data, found, now, input, { kind: 'title', from: found.title, to: title }, { title });
 }
 
 // The description always holds the latest version; the change is logged under Updates.
@@ -298,11 +306,11 @@ export function setDescription(
   const found = findFinding(data, id);
   const description = descriptionText(input.description);
   if (description === found.description) throw new Error(`${found.id} already has this description`);
-  return amend(data, found, now, input, 'description revised', { description });
+  return amend(data, found, now, input, { kind: 'description' }, { description });
 }
 
 // One Updates entry: a question, a verdict note, a revision check.
 export function addUpdate(data: ReviewData, id: string, input: { text: string; round?: number }, now: Date): ReviewData {
   const found = findFinding(data, id);
-  return amend(data, found, now, { round: input.round }, requiredText('update text', input.text));
+  return amend(data, found, now, { round: input.round }, { kind: 'note', note: requiredText('update text', input.text) });
 }

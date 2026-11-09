@@ -337,7 +337,7 @@ async function syncPullRequest({ env }: Context, db: string): Promise<number> {
   return 0;
 }
 
-const latestRound = (data: ReviewData): number => Math.max(0, ...data.intro.reviewed.items.map((item) => item.round ?? 0));
+const latestRound = (data: ReviewData): number => Math.max(0, ...data.intro.reviewed.items.map((item) => item.round));
 
 async function openReviewRound({ env, values }: Context, db: string): Promise<number> {
   const note = optional('--note', values.note);

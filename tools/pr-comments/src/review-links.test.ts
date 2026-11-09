@@ -12,7 +12,7 @@ import {
   setState,
   setTitle,
 } from './review-ops.ts';
-import { renderReport } from './review-render.ts';
+import { formatUpdateItem, renderReport } from './review-render.ts';
 
 const START = '2026-10-08 09:05';
 const PR = 'https://github.com/acme/widgets/pull/42';
@@ -113,7 +113,7 @@ const without = (state: ReviewState, ...refs: string[]): ReviewState => ({
 });
 
 const updatesOf = (state: ReviewState, id: string): string[] =>
-  state.data.findings.find((finding) => finding.id === id)?.updates.map((entry) => entry.text) ?? [];
+  state.data.findings.find((finding) => finding.id === id)?.updates.map(formatUpdateItem) ?? [];
 
 // Everything of the review except the Updates of its findings: the links never change it.
 function withoutUpdates(data: ReviewData): ReviewData {
@@ -578,11 +578,17 @@ describe('recordReplied', () => {
     },
   );
 
-  it('finds an entry that carries a remark, written by hand or by another tool', () => {
-    const data = addUpdate(input().data, 'F1', { text: 'replied to duplicate r2 with r10 — by hand' }, at(2));
-    stays({ ...input(), data }, reply('r2', 'r10', 'pending'));
-    const withSuffix = addUpdate(input().data, 'F1', { text: 'replied to duplicate r2 with r10 in the pending review — checked' }, at(2));
-    stays({ ...input(), data: withSuffix }, reply('r2', 'r10', 'posted'));
+  it('finds an entry that carries a remark on its structured record', () => {
+    const base = input();
+    const findings = base.data.findings.map((finding) =>
+      finding.id === 'F1'
+        ? {
+            ...finding,
+            updates: [...finding.updates, { kind: 'replied' as const, at: stamp(2), ref: 'r2', replyRef: 'r10', note: 'by hand' }],
+          }
+        : finding,
+    );
+    stays({ ...base, data: { ...base.data, findings } }, reply('r2', 'r10', 'pending'));
   });
 
   it('adds another entry for another reply, another duplicate, or the same words under another finding', () => {
@@ -1000,9 +1006,20 @@ describe('comment links in the Updates', () => {
       },
     );
 
-    it('is found when the entry carries a remark, written by hand or by another tool', () => {
-      const data = addUpdate(input().data, 'F1', { text: `replied to duplicate ${OTHER_REVIEW} with ${REPLY} — by hand` }, at(2));
-      stays({ ...input(), data }, reply('r544900', 'r546201', 'pending'));
+    it('is found when the entry carries a remark on its structured record', () => {
+      const base = input();
+      const findings = base.data.findings.map((finding) =>
+        finding.id === 'F1'
+          ? {
+              ...finding,
+              updates: [
+                ...finding.updates,
+                { kind: 'replied' as const, at: stamp(2), ref: 'r544900', replyRef: 'r546201', pullRequest: PULL, note: 'by hand' },
+              ],
+            }
+          : finding,
+      );
+      stays({ ...base, data: { ...base.data, findings } }, reply('r544900', 'r546201', 'pending'));
     });
 
     it('adds another entry for another reply or another duplicate', () => {

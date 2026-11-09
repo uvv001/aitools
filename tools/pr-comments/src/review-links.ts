@@ -1,6 +1,6 @@
-import { commentLink, isAnnotationRef, isLinkRef } from './comment-ref.ts';
+import { isAnnotationRef, isLinkRef } from './comment-ref.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
-import type { ReviewData } from './review-model.ts';
+import type { FindingLinkRole, PostedUpdateAction, ReviewData } from './review-model.ts';
 import { amend, oneLineText } from './review-ops.ts';
 import { findFinding } from './review-view.ts';
 
@@ -64,9 +64,6 @@ function refuseAnnotation(ref: string, why: string): void {
   if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation${why}`);
 }
 
-const subject = (state: ReviewState, ref: string): string =>
-  isAnnotationRef(ref) ? `check annotation ${ref}` : `PR comment ${commentLink(state.pullRequest, ref)}`;
-
 const linkOf = (links: CommentLink[], ref: string): CommentLink | undefined => links.find((link) => link.ref === ref);
 
 const ownOf = (links: CommentLink[], findingId: string): CommentLink | undefined =>
@@ -83,14 +80,15 @@ const alreadyLinked = (link: CommentLink): Error =>
 const alreadyHasOwn = (finding: string, own: CommentLink, lead = ''): Error =>
   new Error(`${lead}${finding} already has its own comment ${own.ref}; remove that link first with "${REMOVE} ${own.ref}"`);
 
-const asRole = (role: LinkRole): string => (role === 'own' ? 'its own' : 'a duplicate');
+const commentPullRequest = (state: ReviewState, ref: string): { pullRequest?: string } =>
+  !isAnnotationRef(ref) && state.pullRequest !== undefined ? { pullRequest: state.pullRequest } : {};
 
 // A finding's link: logged under its Updates. Nothing changes unless every check passes.
 function linkToFinding(
   state: ReviewState,
   findingId: string,
   ref: string,
-  role: 'own' | 'duplicate',
+  role: FindingLinkRole,
   now: Date,
   note: string | undefined,
 ): ReviewState {
@@ -101,17 +99,18 @@ function linkToFinding(
   if (linked !== undefined) throw alreadyLinked(linked);
   const own = role === 'own' ? ownOf(state.links, found.id) : undefined;
   if (own !== undefined) throw alreadyHasOwn(found.id, own);
-  const data = amend(state.data, found, now, { note }, `${subject(state, ref)} linked as ${asRole(role)}`);
+  const data = amend(state.data, found, now, { note }, { kind: 'linked', ref, role, ...commentPullRequest(state, ref) });
   return { ...state, data, links: [...state.links, { ref, role, finding: found.id }] };
 }
 
 // Every operation is pure: it returns a new state (never changes its argument), or throws an Error whose message
 // says what to do. An operation that changes nothing returns the very same state object.
 //
-// The ones that change a finding (own, duplicate, unlink of a finding's link, recordPosted) append an Updates entry
-// `<yyyy-mm-dd hh:mm> — <what>[ — <note>]` (no `Round n:` prefix). Their `what` (the web UI cannot search by id, so a
-// comment ref `r544861` below stands for `commentLink(state.pullRequest, ref)`, `[r544861](<pull request url>#discussion_r544861)`,
-// the bare ref when the review has no pull request yet; a check annotation is always bare):
+// The ones that change a finding (own, duplicate, unlink of a finding's link, recordPosted, recordReplied) append a
+// structured Updates entry that review-render.ts formats as `<yyyy-mm-dd hh:mm> — <what>[ — <note>]` (no `Round n:`
+// prefix). Their `what` (the web UI cannot search by id, so a comment ref `r544861` below stands for
+// `commentLink(pullRequest, ref)`, `[r544861](<pull request url>#discussion_r544861)`, the bare ref when the review
+// had no pull request yet; a check annotation is always bare):
 //   linkOwn       `PR comment r544861 linked as its own`
 //   linkDuplicate `PR comment r544900 linked as a duplicate`; a check annotation: `check annotation a3f9c2d1e linked as a duplicate`
 //   unlink        `PR comment r544900 unlinked (was a duplicate)` / `(was its own)`; an annotation:
@@ -171,11 +170,12 @@ export function unlink(state: ReviewState, ref: string, now: Date, note?: string
     return { ...state, links };
   }
   const found = findFinding(state.data, link.finding);
-  const data = amend(state.data, found, now, { note }, `${subject(state, ref)} unlinked (was ${asRole(link.role)})`);
+  const role = link.role as FindingLinkRole;
+  const data = amend(state.data, found, now, { note }, { kind: 'unlinked', ref, role, ...commentPullRequest(state, ref) });
   return { ...state, data, links };
 }
 
-export type PostedAction = 'created' | 'updated' | 'unchanged';
+export type PostedAction = PostedUpdateAction;
 
 // What `finding post` records after publishing the finding's comment `ref`. The finding's own link becomes `ref`
 // (a finding whose own link is another comment is an error: a posted comment cannot move). `unchanged` with an
@@ -197,24 +197,19 @@ export function recordPosted(
   const own = ownOf(state.links, found.id);
   if (own !== undefined && own.ref !== ref) throw alreadyHasOwn(found.id, own, 'a posted comment cannot move: ');
   if (own !== undefined && action === 'unchanged') return state;
-  const pending = where === 'pending' ? ' to the pending review' : '';
-  const comment = commentLink(state.pullRequest, ref);
-  const what = {
-    created: `posted PR comment ${comment}${pending}`,
-    updated: `updated PR comment ${comment}`,
-    unchanged: `adopted PR comment ${comment} (identical)`,
-  }[action];
-  const data = amend(state.data, found, now, {}, what);
+  const pending = action === 'created' && where === 'pending' ? { pending: true } : {};
+  const pullRequest = state.pullRequest === undefined ? {} : { pullRequest: state.pullRequest };
+  const data = amend(state.data, found, now, {}, { kind: 'posted', ref, action, ...pending, ...pullRequest });
   return { ...state, data, links: own === undefined ? [...state.links, { ref, role: 'own', finding: found.id }] : state.links };
 }
 
 // What `link reply` records after answering the duplicate comment `ref` (it must be linked with the role
 // `duplicate`; anything else is an error) with the reply `replyRef`: an Updates entry of
 // its finding, `replied to duplicate r546056 with r546201` (refs as in the list above; `... in the pending review` when
-// `where` is 'pending'), no `Round n:` prefix. When that finding's Updates already hold an entry that starts the same
-// way for the same two refs (`replied to duplicate <ref> with <replyRef>`), nothing changes and the very same state
-// comes back: a rerun finds the reply it made, and records nothing twice. The links themselves do not change. A check
-// annotation is never answered: refused, whatever the review. Only `ref` has to be in the database: the reply is no link.
+// `where` is 'pending'), no `Round n:` prefix. When that finding's Updates already hold a `replied` entry for the same
+// two refs (`ref` and `replyRef`), nothing changes and the very same state comes back: a rerun finds the reply it made,
+// and records nothing twice. The links themselves do not change. A check annotation is never answered: refused,
+// whatever the review. Only `ref` has to be in the database: the reply is no link.
 export function recordReplied(
   state: ReviewState,
   ref: string,
@@ -238,14 +233,21 @@ export function recordReplied(
     );
   }
   const found = findFinding(state.data, link.finding!);
-  const what = `replied to duplicate ${commentLink(state.pullRequest, ref)} with ${commentLink(state.pullRequest, replyRef)}`;
-  // A bare ref ends in digits: `r2` must not match the start of `r20`.
-  const recorded = (text: string): boolean => {
-    const rest = text.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} — /u, '');
-    return rest.startsWith(what) && !/^\d/u.test(rest.slice(what.length));
-  };
-  if (found.updates.some((entry) => recorded(entry.text))) return state;
-  return { ...state, data: amend(state.data, found, now, {}, `${what}${where === 'pending' ? ' in the pending review' : ''}`) };
+  if (
+    found.updates.some(
+      (entry) =>
+        entry.kind === 'replied' &&
+        entry.ref === ref &&
+        entry.replyRef === replyRef &&
+        entry.pullRequest === state.pullRequest,
+    )
+  ) {
+    return state;
+  }
+  const pending = where === 'pending' ? { pending: true } : {};
+  const pullRequest = state.pullRequest === undefined ? {} : { pullRequest: state.pullRequest };
+  const data = amend(state.data, found, now, {}, { kind: 'replied', ref, replyRef, ...pending, ...pullRequest });
+  return { ...state, data };
 }
 
 // Connects the review to the pull request `url` (any accepted pull request URL; stored canonical). The same

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CommentLink } from './review-links.ts';
-import { STATES, type Finding, type ReviewData } from './review-model.ts';
+import { STATES, type Finding, type ReviewData, type UpdateItem } from './review-model.ts';
 import {
   filterFindings,
   findFinding,
@@ -18,12 +18,15 @@ const lines = (...text: string[]) => text.join('\n');
 
 const FENCED = lines('`src/a.ts:3-5`', '', '```ts', 'const a = 1;', '```', '', 'Second place:', '', '`src/b.ts:10`');
 
-function finding(id: string, state: string, severity: string, title: string, description = 'Text.', updates: string[] = []): Finding {
-  return { id, state, severity, title, description, updates: updates.map((text) => ({ text })) };
+function finding(id: string, state: string, severity: string, title: string, description = 'Text.', updates: UpdateItem[] = []): Finding {
+  return { id, state, severity, title, description, updates };
 }
 
 const F1 = finding('F1', '⏳', '🟡', 'Waiting');
-const F2 = finding('F2', '✅', '🔴', 'Missing timeout', FENCED, ['2026-10-05 11:15 — Round 1: raised ⏳', '2026-10-05 12:00 — ✅']);
+const F2 = finding('F2', '✅', '🔴', 'Missing timeout', FENCED, [
+  { kind: 'raised', at: '2026-10-05 11:15', round: 1, state: '⏳' },
+  { kind: 'state', at: '2026-10-05 12:00', from: '⏳', to: '✅' },
+]);
 const F10 = finding('F10', '✅', '⚪', 'Rename');
 
 function review(findings: Finding[]): ReviewData {
@@ -165,7 +168,7 @@ describe('showText', () => {
         '',
         'Updates:',
         '- 2026-10-05 11:15 — Round 1: raised ⏳',
-        '- 2026-10-05 12:00 — ✅',
+        '- 2026-10-05 12:00 — ⏳ → ✅',
         '',
       ),
     );
@@ -176,8 +179,8 @@ describe('showText', () => {
   });
 
   it('indents the continuation lines of an update to two spaces, keeps deeper ones and its blank lines empty', () => {
-    const update = lines(
-      '2026-10-06 09:00 — fixed',
+    const note = lines(
+      'fixed',
       '',
       '  ```ts',
       '  const fixed = true;',
@@ -188,7 +191,7 @@ describe('showText', () => {
       '\tand a tab',
       '   ',
     );
-    expect(showText(finding('F3', '🔧', '🟡', 'Done', 'Text.', [update]))).toBe(
+    expect(showText(finding('F3', '🔧', '🟡', 'Done', 'Text.', [{ kind: 'note', at: '2026-10-06 09:00', note }]))).toBe(
       lines(
         '### 🔧 🟡 F3 — Done',
         '',
@@ -246,7 +249,10 @@ describe('showJson', () => {
   it('adds the evidence, snippets included, to the finding', () => {
     const json = showJson(F2);
     expect(json).toMatchObject({ id: 'F2', state: '✅', severity: '🔴', title: 'Missing timeout', description: FENCED });
-    expect(json.updates).toEqual([{ text: '2026-10-05 11:15 — Round 1: raised ⏳' }, { text: '2026-10-05 12:00 — ✅' }]);
+    expect(json.updates).toEqual([
+      { kind: 'raised', at: '2026-10-05 11:15', round: 1, state: '⏳' },
+      { kind: 'state', at: '2026-10-05 12:00', from: '⏳', to: '✅' },
+    ]);
     expect(json.evidence).toEqual([
       { path: 'src/a.ts', start: 3, end: 5, snippet: ['const a = 1;'], fence: 'ts', unclosed: false, line: 1 },
       { path: 'src/b.ts', start: 10, end: 10, snippet: null, fence: '', unclosed: false, line: 9 },

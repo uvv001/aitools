@@ -2,14 +2,22 @@ import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync } from 'no
 import { dirname, toNamespacedPath } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { CommentLink, LinkRole } from './review-links.ts';
-import type { Finding, Intro, IntroEntry, ReviewData, ReviewedItem, UpdateItem } from './review-model.ts';
+import type {
+  Finding,
+  FindingLinkRole,
+  Intro,
+  IntroEntry,
+  PostedUpdateAction,
+  ReviewData,
+  ReviewedItem,
+  UpdateItem,
+} from './review-model.ts';
 import { PULL_REQUEST_SCHEMA } from './store.ts';
 
-export const REVIEW_SCHEMA_VERSION = 5;
+export const REVIEW_SCHEMA_VERSION = 6;
 
-// Every table of the review is STRICT (typed columns). Lists keep their file order in `position`. Of an intro item, the
-// columns round, revision and base hold a value only where the model has one. `base` tells three cases apart: no base
-// stated (base NULL, base_none 0), `base none — reviewed as it stands` (base NULL, base_none 1) and a revision.
+// Every table of the review is STRICT (typed columns). Lists keep their order in `position`. Rounds and finding
+// updates are stored as structured columns (`intro_items` and `updates`), never as pre-rendered Markdown text.
 //
 // `linkable` holds the PR comments and check annotations that a link may point at (the tables `pr_*` hold the pull
 // request itself, see store.ts): `gone` marks one that the last sync no longer found but a link still names. The
@@ -24,11 +32,10 @@ CREATE TABLE review (
 
 CREATE TABLE intro_items (
   position INTEGER PRIMARY KEY CHECK (position >= 0),
-  text TEXT NOT NULL,
-  round INTEGER CHECK (round BETWEEN 0 AND 9007199254740991),
-  revision TEXT,
+  round INTEGER NOT NULL CHECK (round BETWEEN 1 AND 9007199254740991),
+  revision TEXT NOT NULL,
   base TEXT,
-  base_none INTEGER NOT NULL DEFAULT 0 CHECK (base_none IN (0, 1) AND (base_none = 0 OR base IS NULL))
+  notes TEXT CHECK (notes IS NULL OR (json_valid(notes) = 1 AND json_type(notes) = 'array' AND notes != '[]'))
 ) STRICT;
 
 CREATE TABLE findings (
@@ -43,9 +50,32 @@ CREATE TABLE findings (
 CREATE TABLE updates (
   finding TEXT NOT NULL REFERENCES findings (id) ON DELETE CASCADE,
   position INTEGER NOT NULL CHECK (position >= 0),
-  text TEXT NOT NULL,
-  at TEXT,
-  round INTEGER CHECK (round BETWEEN 0 AND 9007199254740991),
+  kind TEXT NOT NULL CHECK (kind IN ('raised', 'state', 'severity', 'title', 'description', 'note', 'linked', 'unlinked', 'posted', 'replied')),
+  at TEXT NOT NULL,
+  round INTEGER CHECK (round BETWEEN 1 AND 9007199254740991),
+  state TEXT,
+  from_value TEXT,
+  to_value TEXT,
+  revision TEXT,
+  ref TEXT,
+  reply_ref TEXT,
+  role TEXT CHECK (role IN ('own', 'duplicate')),
+  action TEXT CHECK (action IN ('created', 'updated', 'unchanged')),
+  pending INTEGER NOT NULL DEFAULT 0 CHECK (pending IN (0, 1)),
+  pull_request TEXT,
+  note TEXT,
+  CHECK (kind != 'raised' OR round IS NOT NULL),
+  CHECK ((kind = 'raised') = (state IS NOT NULL)),
+  CHECK ((kind IN ('state', 'severity', 'title')) = (from_value IS NOT NULL)),
+  CHECK ((kind IN ('state', 'severity', 'title')) = (to_value IS NOT NULL)),
+  CHECK (revision IS NULL OR kind = 'state'),
+  CHECK ((kind IN ('linked', 'unlinked', 'posted', 'replied')) = (ref IS NOT NULL)),
+  CHECK ((kind = 'replied') = (reply_ref IS NOT NULL)),
+  CHECK ((kind IN ('linked', 'unlinked')) = (role IS NOT NULL)),
+  CHECK ((kind = 'posted') = (action IS NOT NULL)),
+  CHECK (pending = 0 OR (kind = 'posted' AND action = 'created') OR kind = 'replied'),
+  CHECK (pull_request IS NULL OR kind IN ('linked', 'unlinked', 'posted', 'replied')),
+  CHECK (kind != 'note' OR note IS NOT NULL),
   PRIMARY KEY (finding, position)
 ) STRICT;
 
@@ -79,9 +109,6 @@ ${PULL_REQUEST_SCHEMA}`;
 
 // The tables every review database has, whatever its version, which is what tells one from any other SQLite file.
 const TABLES = ['review', 'intro_items', 'findings', 'updates', 'meta'];
-
-// The derived columns of a Reviewed item, in the key order of the model.
-const DERIVED = ['round', 'revision', 'base'];
 
 type Row = Record<string, string | number | null>;
 
@@ -174,10 +201,10 @@ export function openReviewDb(path: string, mode: OpenMode): DatabaseSync {
 }
 
 function insertIntro(db: DatabaseSync, entry: IntroEntry<ReviewedItem>): void {
-  const insert = db.prepare('INSERT INTO intro_items (position, text, round, revision, base, base_none) VALUES (?, ?, ?, ?, ?, ?)');
+  const insert = db.prepare('INSERT INTO intro_items (position, round, revision, base, notes) VALUES (?, ?, ?, ?, ?)');
   entry.items.forEach((item, position) => {
-    const { round, revision, base } = item;
-    insert.run(position, item.text, round ?? null, revision ?? null, base ?? null, base === null ? 1 : 0);
+    const notes = item.notes && item.notes.length > 0 ? JSON.stringify(item.notes) : null;
+    insert.run(position, item.round, item.revision, item.base, notes);
   });
 }
 
@@ -191,8 +218,29 @@ function insertFinding(db: DatabaseSync, finding: Finding, position: number): vo
     title,
     description,
   );
-  const insert = db.prepare('INSERT INTO updates (finding, position, text, at, round) VALUES (?, ?, ?, ?, ?)');
-  finding.updates.forEach((update, at) => insert.run(id, at, update.text, update.at ?? null, update.round ?? null));
+  const insert = db.prepare(
+    'INSERT INTO updates (finding, position, kind, at, round, state, from_value, to_value, revision, ref, reply_ref, role, action, pending, pull_request, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  finding.updates.forEach((update, at) => {
+    insert.run(
+      id,
+      at,
+      update.kind,
+      update.at,
+      update.round ?? null,
+      update.kind === 'raised' ? update.state : null,
+      update.kind === 'state' || update.kind === 'severity' || update.kind === 'title' ? update.from : null,
+      update.kind === 'state' || update.kind === 'severity' || update.kind === 'title' ? update.to : null,
+      update.kind === 'state' ? (update.revision ?? null) : null,
+      update.kind === 'linked' || update.kind === 'unlinked' || update.kind === 'posted' || update.kind === 'replied' ? update.ref : null,
+      update.kind === 'replied' ? update.replyRef : null,
+      update.kind === 'linked' || update.kind === 'unlinked' ? update.role : null,
+      update.kind === 'posted' ? update.action : null,
+      (update.kind === 'posted' || update.kind === 'replied') && update.pending ? 1 : 0,
+      update.kind === 'linked' || update.kind === 'unlinked' || update.kind === 'posted' || update.kind === 'replied' ? (update.pullRequest ?? null) : null,
+      update.note ?? null,
+    );
+  });
 }
 
 export interface TransactionOptions {
@@ -244,31 +292,72 @@ export function saveReview(db: DatabaseSync, data: ReviewData): void {
   });
 }
 
-// A column the model leaves out stays out of the object.
-function itemFrom(row: Row): ReviewedItem {
-  const item: ReviewedItem & Record<string, unknown> = { text: row.text as string };
-  for (const column of DERIVED) {
-    if (row[column] !== null) item[column] = row[column];
-    else if (column === 'base' && row.base_none === 1) item.base = null;
-  }
-  return item;
+function loadIntro(db: DatabaseSync): Intro {
+  const rows = db.prepare('SELECT round, revision, base, notes FROM intro_items ORDER BY position').all() as Row[];
+  const items = rows.map((row): ReviewedItem => {
+    const item: ReviewedItem = {
+      round: row.round as number,
+      revision: row.revision as string,
+      base: row.base as string | null,
+    };
+    if (row.notes !== null) {
+      const notes = JSON.parse(row.notes as string) as string[];
+      if (notes.length > 0) item.notes = notes;
+    }
+    return item;
+  });
+  return { reviewed: { items } };
 }
 
-function loadIntro(db: DatabaseSync): Intro {
-  const items = db.prepare('SELECT * FROM intro_items ORDER BY position').all() as Row[];
-  return { reviewed: { items: items.map(itemFrom) } };
+function updateFrom(row: Row): UpdateItem {
+  const base: { at: string; round?: number; note?: string } = { at: row.at as string };
+  if (row.round !== null) base.round = row.round as number;
+  if (row.note !== null) base.note = row.note as string;
+  const pullRequest = row.pull_request === null ? {} : { pullRequest: row.pull_request as string };
+  const pending: { pending?: true } = row.pending === 1 ? { pending: true } : {};
+  switch (row.kind as UpdateItem['kind']) {
+    case 'raised':
+      return { kind: 'raised', ...base, round: row.round as number, state: row.state as string };
+    case 'state':
+      return {
+        kind: 'state',
+        ...base,
+        from: row.from_value as string,
+        to: row.to_value as string,
+        ...(row.revision === null ? {} : { revision: row.revision as string }),
+      };
+    case 'severity':
+      return { kind: 'severity', ...base, from: row.from_value as string, to: row.to_value as string };
+    case 'title':
+      return { kind: 'title', ...base, from: row.from_value as string, to: row.to_value as string };
+    case 'description':
+      return { kind: 'description', ...base };
+    case 'note':
+      return { kind: 'note', ...base, note: row.note as string };
+    case 'linked':
+      return { kind: 'linked', ...base, ref: row.ref as string, role: row.role as FindingLinkRole, ...pullRequest };
+    case 'unlinked':
+      return { kind: 'unlinked', ...base, ref: row.ref as string, role: row.role as FindingLinkRole, ...pullRequest };
+    case 'posted':
+      return { kind: 'posted', ...base, ref: row.ref as string, action: row.action as PostedUpdateAction, ...pending, ...pullRequest };
+    case 'replied':
+      return { kind: 'replied', ...base, ref: row.ref as string, replyRef: row.reply_ref as string, ...pending, ...pullRequest };
+  }
 }
 
 function loadFindings(db: DatabaseSync): Finding[] {
   const updates = new Map<string, UpdateItem[]>();
-  for (const row of db.prepare('SELECT finding, text, at, round FROM updates ORDER BY finding, position').all() as Row[]) {
-    const update: UpdateItem = { text: row.text as string };
-    if (row.at !== null) update.at = row.at as string;
-    if (row.round !== null) update.round = row.round as number;
+  const rows = db
+    .prepare(
+      'SELECT finding, kind, at, round, state, from_value, to_value, revision, ref, reply_ref, role, action, pending, pull_request, note FROM updates ORDER BY finding, position',
+    )
+    .all() as Row[];
+  for (const row of rows) {
+    const update = updateFrom(row);
     updates.set(row.finding as string, [...(updates.get(row.finding as string) ?? []), update]);
   }
-  const rows = db.prepare('SELECT id, state, severity, title, description FROM findings ORDER BY position').all() as Row[];
-  return rows.map((row) => ({
+  const findingRows = db.prepare('SELECT id, state, severity, title, description FROM findings ORDER BY position').all() as Row[];
+  return findingRows.map((row) => ({
     id: row.id as string,
     state: row.state as string,
     severity: row.severity as string,

@@ -42,8 +42,8 @@ describe('dumpReview', () => {
       intro: {
         reviewed: {
           items: [
-            { text: 'Round 1 — `abc1234`, base `def5678`.\nSecond line.', round: 1, revision: 'abc1234', base: 'def5678' },
-            { text: 'Round 2 — `bbb2222`, base none.', round: 2, revision: 'bbb2222', base: null },
+            { round: 1, revision: 'abc1234', base: 'def5678', notes: ['First note.\n  Second line.'] },
+            { round: 2, revision: 'bbb2222', base: null },
           ],
         },
       },
@@ -52,8 +52,8 @@ describe('dumpReview', () => {
           state: '✅',
           description: 'Para one.\n\nPara two.',
           updates: [
-            { text: '2026-10-05 11:15 — Round 1: raised', at: '2026-10-05 11:15', round: 1 },
-            { text: 'no timestamp\nsecond line' },
+            { kind: 'raised', at: '2026-10-05 11:15', round: 1, state: '⏳' },
+            { kind: 'note', at: '2026-10-05 12:00', note: 'first line\n  second line' },
           ],
         }),
         finding('F5', { description: '' }),
@@ -66,21 +66,21 @@ describe('dumpReview', () => {
         '',
         'intro reviewed',
         'item 1 round=1 revision="abc1234" base="def5678"',
-        '| Round 1 — `abc1234`, base `def5678`.',
-        '| Second line.',
+        '| Round 1 — `abc1234`, base `def5678`; First note.',
+        '|   Second line.',
         'item 2 round=2 revision="bbb2222" base=null',
-        '| Round 2 — `bbb2222`, base none.',
+        '| Round 2 — `bbb2222`, base none — reviewed as it stands',
         '',
         'finding F4 | ✅ | 🔴 | Title of F4',
         'description',
         '| Para one.',
         '|',
         '| Para two.',
-        'update 1 at="2026-10-05 11:15" round=1',
-        '| 2026-10-05 11:15 — Round 1: raised',
-        'update 2',
-        '| no timestamp',
-        '| second line',
+        'update 1 at="2026-10-05 11:15" round=1 kind="raised"',
+        '| 2026-10-05 11:15 — Round 1: raised ⏳',
+        'update 2 at="2026-10-05 12:00" kind="note"',
+        '| 2026-10-05 12:00 — first line',
+        '|   second line',
         '',
         'finding F5 | ⏳ | 🔴 | Title of F5',
         'description',
@@ -142,34 +142,34 @@ describe('dumpReview', () => {
     const before = sample();
     const after = sample();
     const update = (after.findings[0] as Finding).updates[1];
-    if (update) update.text = update.text.replace('and a lazy third one.', 'and a changed third one.');
+    if (update && update.note) update.note = update.note.replace('and a lazy third one.', 'and a changed third one.');
     const [a, b] = [dumpReview(before), dumpReview(after)];
     expect(changedLines(a, b)).toHaveLength(1);
-    expect(lines(b)).toContain('| and a changed third one.');
+    expect(lines(b)).toContain('|   and a changed third one.');
   });
 
   it('adding a finding or an update leaves the lines of the others alone', () => {
     const before = dumpReview(sample());
     const more = sample();
     more.findings.push(finding('F11'));
-    (more.findings[1] as Finding).updates.push({ text: 'late update' });
+    (more.findings[1] as Finding).updates.push({ kind: 'note', at: '2026-10-08 11:00', note: 'late update' });
     const after = dumpReview(more);
     for (const id of ['F1', 'F3', 'F10']) expect(block(after, id)).toEqual(block(before, id));
-    expect(block(after, 'F2')).toEqual([...block(before, 'F2'), 'update 2', '| late update']);
+    expect(block(after, 'F2')).toEqual([...block(before, 'F2'), 'update 2 at="2026-10-08 11:00" kind="note"', '| 2026-10-08 11:00 — late update']);
     expect(block(after, 'F11')).toEqual(['finding F11 | ⏳ | 🔴 | Title of F11', 'description', '| Body of F11.']);
   });
 
   it('writes a multi-line update as its header line and one text line per line', () => {
     const dump = lines(dumpReview(sample()));
-    const at = dump.indexOf('update 3 at="2026-10-06 09:00" round=2');
+    const at = dump.indexOf('update 3 at="2026-10-06 09:00" round=2 kind="state"');
     expect(dump.slice(at, at + 7)).toEqual([
-      'update 3 at="2026-10-06 09:00" round=2',
-      '| 2026-10-06 09:00 — Round 2: re-checked at `bbb2222`; ✅ → 🔧 — fixed.',
+      'update 3 at="2026-10-06 09:00" round=2 kind="state"',
+      '| 2026-10-06 09:00 — Round 2: ✅ → 🔧 at `bbb2222` — fixed.',
       '|',
       '|   ```ts',
       '|   const fixed = true;',
       '|   ```',
-      'update 4',
+      'update 4 at="2026-10-06 10:00" kind="note"',
     ]);
   });
 
@@ -190,13 +190,11 @@ describe('dumpReview', () => {
     expect(dump.filter((line) => line.endsWith(' ') && !line.startsWith('|'))).toEqual([]);
   });
 
-  it('prints a derived field only where the data has it', () => {
+  it('prints the round, revision and base fields on each item header', () => {
     const dump = lines(dumpReview(sample()));
     expect(dump).toContain('item 1 round=1 revision="abc1234" base="def5678"');
     expect(dump).toContain('item 2 round=2 revision="bbb2222" base=null');
-    expect(dump).toContain('item 3 round=3 revision="ccc3333"');
-    const bare = emptyReview({ intro: { reviewed: { items: [{ text: 'a note' }] } } });
-    expect(lines(dumpReview(bare))).toContain('item 1');
+    expect(dump).toContain('item 3 round=3 revision="ccc3333" base="bbb2222"');
   });
 });
 

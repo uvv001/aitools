@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { commentUrl, isAnnotationRef } from './comment-ref.ts';
 import type { CheckRun, Comment, PullRequest, PullRequestData } from './model.ts';
 import type { ReviewData } from './review-model.ts';
-import { reviewedItem, updateItem } from './review-ops.ts';
 import { renderReport } from './review-render.ts';
 
 // Shared by the review database tests. The scratch folders live under the git-ignored `out/`, never in the OS temp dir.
@@ -101,7 +100,7 @@ const FENCED = [
   'finding F7 | ✅ | 🔴 | not a finding of the dump',
 ];
 
-// A sample review that uses every part of the model: the three states of `base`, markdown that looks like structure,
+// A sample review that uses every part of the model: both states of `base`, markdown that looks like structure,
 // emoji, empty bodies.
 export function sampleReview(): ReviewData {
   return {
@@ -109,9 +108,23 @@ export function sampleReview(): ReviewData {
     intro: {
       reviewed: {
         items: [
-          reviewedItem('Round 1 — `abc1234`, base `def5678` (merge-base with `origin/main`); tracked tree clean.'),
-          reviewedItem('Round 2 — `bbb2222`, base none — reviewed as it stands; dirty tree, `src/a.ts` modified.\n  - Round artifacts in `round-2/`.'),
-          reviewedItem('Round 3 — `ccc3333`, the whole changeset re-read.'),
+          {
+            round: 1,
+            revision: 'abc1234',
+            base: 'def5678',
+            notes: ['tracked tree clean.'],
+          },
+          {
+            round: 2,
+            revision: 'bbb2222',
+            base: null,
+            notes: ['dirty tree, `src/a.ts` modified.\n  - Round artifacts in `round-2/`.'],
+          },
+          {
+            round: 3,
+            revision: 'ccc3333',
+            base: 'bbb2222',
+          },
         ],
       },
     },
@@ -123,10 +136,34 @@ export function sampleReview(): ReviewData {
         title: 'Unguarded `resource.value()` crashes UsersPage',
         description: FENCED.join('\n'),
         updates: [
-          updateItem('2026-10-05 11:15 — Round 1: raised ⏳ — reproduced in the running app.'),
-          updateItem('2026-10-05 12:00 — ⏳ → ✅ the user agreed it is a finding.\n  A second line of the same entry,\nand a lazy third one.'),
-          updateItem('2026-10-06 09:00 — Round 2: re-checked at `bbb2222`; ✅ → 🔧 — fixed.\n\n  ```ts\n  const fixed = true;\n  ```'),
-          updateItem('an update without a timestamp'),
+          {
+            kind: 'raised',
+            at: '2026-10-05 11:15',
+            round: 1,
+            state: '⏳',
+            note: 'reproduced in the running app.',
+          },
+          {
+            kind: 'state',
+            at: '2026-10-05 12:00',
+            from: '⏳',
+            to: '✅',
+            note: 'the user agreed it is a finding.\n  A second line of the same entry,\n  and a lazy third one.',
+          },
+          {
+            kind: 'state',
+            at: '2026-10-06 09:00',
+            round: 2,
+            from: '✅',
+            to: '🔧',
+            revision: 'bbb2222',
+            note: 'fixed.\n\n  ```ts\n  const fixed = true;\n  ```',
+          },
+          {
+            kind: 'note',
+            at: '2026-10-06 10:00',
+            note: 'a free-form note without a round',
+          },
         ],
       },
       {
@@ -135,7 +172,7 @@ export function sampleReview(): ReviewData {
         severity: '🟡',
         title: 'Café “smart quotes” & <tags> 日本語 🎉',
         description: 'Para one.\n\n- list a\n- list b',
-        updates: [updateItem('2026-10-07 10:00 — Round 3: unchanged.')],
+        updates: [{ kind: 'note', at: '2026-10-07 10:00', round: 3, note: 'unchanged.' }],
       },
       {
         id: 'F3',
@@ -151,7 +188,7 @@ export function sampleReview(): ReviewData {
         severity: '🔴',
         title: 'Ids rise, they need not be dense',
         description: 'One line.',
-        updates: [updateItem('2026-10-07 10:05 — Round 3: deferred.')],
+        updates: [{ kind: 'state', at: '2026-10-07 10:05', round: 3, from: '⏳', to: '📌', note: 'deferred.' }],
       },
     ],
   };

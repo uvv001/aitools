@@ -2,6 +2,7 @@ import { extractEvidence } from './review-evidence.ts';
 import type { CommentLink } from './review-links.ts';
 import { SEVERITIES, STATES } from './review-model.ts';
 import type { Finding, ReviewData, UpdateItem } from './review-model.ts';
+import { formatUpdateItem } from './review-render.ts';
 
 // What the report commands print about a review, as text or as JSON-ready objects. Nothing here reads a file.
 
@@ -97,8 +98,8 @@ export function findFinding(data: ReviewData, id: string): Finding {
 
 // A bullet; the continuation lines of the text sit under it, indented by at least two spaces: the ones that are
 // indented already (the report writes them that way) stay as they are.
-function updateLines({ text }: UpdateItem): string[] {
-  return text.split('\n').map((line, index) => {
+function updateLines(update: UpdateItem): string[] {
+  return formatUpdateItem(update).split('\n').map((line, index) => {
     if (index === 0) return `- ${line}`;
     if (line.trim() === '') return '';
     return line.startsWith('  ') ? line : `  ${line.trimStart()}`;

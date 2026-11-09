@@ -13,7 +13,7 @@ import type { ReviewState } from './review-links.ts';
 import { addFinding, formatStamp, openRound } from './review-ops.ts';
 import { replyToDuplicate } from './review-reply.ts';
 import type { ReplyDuplicateDeps, ReplyDuplicateOptions } from './review-reply.ts';
-import { renderReport } from './review-render.ts';
+import { formatUpdateItem, renderReport } from './review-render.ts';
 import { removeScratch, scratchDir, snapshotOf } from './review-test-support.ts';
 
 const NOW = new Date(2026, 9, 8, 9, 5);
@@ -83,7 +83,7 @@ async function contentOf(db: string) {
 
 async function updatesOf(db: string, id: string): Promise<string[]> {
   const { data } = await loadReviewFile(db);
-  return data.findings.find((finding) => finding.id === id)!.updates.map((entry) => entry.text);
+  return data.findings.find((finding) => finding.id === id)!.updates.map(formatUpdateItem);
 }
 
 async function sameBytes(db: string, before: Buffer): Promise<void> {
@@ -476,7 +476,7 @@ describe('recording the reply', () => {
     });
     expect(replied).toMatchObject({ finding: 'F1', own: 'r1', link: OWN_OF_F1 });
     await sameBytes(db, before);
-    expect(await updatesOf(db, 'F1')).toEqual(loaded.data.findings.find((finding) => finding.id === 'F1')!.updates.map((entry) => entry.text));
+    expect(await updatesOf(db, 'F1')).toEqual(loaded.data.findings.find((finding) => finding.id === 'F1')!.updates.map(formatUpdateItem));
     expect((await loadReviewFile(db)).links).toEqual(loaded.links);
   });
 

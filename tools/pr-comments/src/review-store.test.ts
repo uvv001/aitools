@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { join, toNamespacedPath } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommentLink } from './review-links.ts';
-import type { Finding, IntroEntry, ReviewData } from './review-model.ts';
+import type { Finding, IntroEntry, ReviewData, ReviewedItem, UpdateItem } from './review-model.ts';
 import { REVIEW_SCHEMA_VERSION, getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
 import { removeScratch, sampleReview, scratchDir, snapshotOf } from './review-test-support.ts';
 import { savePullRequest } from './store.ts';
@@ -47,8 +47,8 @@ describe('openReviewDb', () => {
   it('creates the folders and a database at the current schema version', () => {
     const path = join(dir, 'a', 'b', 'r.sqlite');
     const db = openReviewDb(path, 'create');
-    expect(REVIEW_SCHEMA_VERSION).toBe(5);
-    expect(pragma(db, 'user_version')).toBe(5);
+    expect(REVIEW_SCHEMA_VERSION).toBe(6);
+    expect(pragma(db, 'user_version')).toBe(6);
     expect(pragma(db, 'journal_mode')).toBe('delete');
     expect(pragma(db, 'foreign_keys')).toBe(1);
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all();
@@ -293,12 +293,12 @@ describe('openReviewDb', () => {
 
       const bare = reviewFile('bare.sqlite');
       const other = new DatabaseSync(bare);
-      other.exec('PRAGMA user_version = 7');
+      other.exec('PRAGMA user_version = 8');
       other.close();
-      expect(() => openReviewDb(bare, mode)).toThrow(`${bare} was written by a newer pr-comments (schema 7); update the tool`);
+      expect(() => openReviewDb(bare, mode)).toThrow(`${bare} was written by a newer pr-comments (schema 8); update the tool`);
     });
 
-    it.each([1, 2, 3, 4])('refuses a database of the older schema %i, and leaves it as it was', (version) => {
+    it.each([1, 2, 3, 4, 5])('refuses a database of the older schema %i, and leaves it as it was', (version) => {
       const path = reviewFile();
       openReviewDb(path, 'create').close();
       const raw = new DatabaseSync(path);
@@ -338,15 +338,15 @@ describe('openReviewDb', () => {
   });
 });
 
-function entry(...texts: string[]): IntroEntry<{ text: string }> {
-  return { items: texts.map((text) => ({ text })) };
+function entry(...items: ReviewedItem[]): IntroEntry<ReviewedItem> {
+  return { items };
 }
 
 function review(changes: Partial<ReviewData> = {}): ReviewData {
   return {
     target: 'PR 42',
     intro: {
-      reviewed: entry('Round 1'),
+      reviewed: entry({ round: 1, revision: 'abc1234', base: null }),
     },
     findings: [],
     ...changes,
@@ -364,14 +364,13 @@ describe('saveReview and loadReview', () => {
     expect(roundTrip(data)).toStrictEqual(data);
   });
 
-  it('keeps the three states of a base apart: absent, `base none`, a revision', () => {
+  it('keeps both states of a base apart: `base none` and a revision', () => {
     const { items } = roundTrip(sample()).intro.reviewed;
-    expect(items.map((item) => item.base)).toEqual(['def5678', null, undefined]);
-    expect(items.map((item) => 'base' in item)).toEqual([true, true, false]);
+    expect(items.map((item) => item.base)).toEqual(['def5678', null, 'bbb2222']);
     const db = openNew('rows.sqlite');
     saveReview(db, sample());
-    const rows = db.prepare('SELECT base, base_none FROM intro_items ORDER BY position').all();
-    expect(rows.map((row) => [row.base, row.base_none])).toEqual([['def5678', 0], [null, 1], [null, 0]]);
+    const rows = db.prepare('SELECT base FROM intro_items ORDER BY position').all();
+    expect(rows.map((row) => row.base)).toEqual(['def5678', null, 'bbb2222']);
     db.close();
   });
 
@@ -383,9 +382,18 @@ describe('saveReview and loadReview', () => {
       severity: '🔴',
       title: text.replaceAll('\n', ' '),
       description: text,
-      updates: [{ text }, { text, at: text, round: at }],
+      updates: [
+        { kind: 'note', at: text, note: text },
+        { kind: 'raised', at: text, round: at + 1, state: '⏳', ...(text === '' ? {} : { note: text }) },
+      ],
     }));
-    const data = review({ target: odd[5] ?? '', findings, intro: { reviewed: entry(...odd) } });
+    const items: ReviewedItem[] = odd.map((text, at) => ({
+      round: at + 1,
+      revision: text,
+      base: at % 2 === 0 ? null : text,
+      notes: [text],
+    }));
+    const data = review({ target: odd[5] ?? '', findings, intro: { reviewed: entry(...items) } });
     expect(roundTrip(data)).toStrictEqual(data);
   });
 
@@ -429,7 +437,7 @@ describe('saveReview and loadReview', () => {
     saveReview(db, old);
     const broken = sample();
     const last = broken.findings.at(-1);
-    last?.updates.push({ text: 'too large a round', round: 2 ** 60 });
+    last?.updates.push({ kind: 'note', at: '2026-10-08 09:05', round: 2 ** 60, note: 'too large a round' });
     expect(() => saveReview(db, broken)).toThrow(/constraint/iu);
     expect(loadReview(db)).toStrictEqual(old);
 
@@ -629,18 +637,64 @@ const TEXTS = ['', 'plain', 'two\nlines', 'trailing\n', '\nleading', 'emoji 🎉
 function generated(seed: number): ReviewData {
   const next = random(seed);
   const chance = (p = 0.5): boolean => next() < p;
-  const pick = <T>(list: T[]): T => list[Math.floor(next() * list.length)] as T;
+  const pick = <T>(list: readonly T[]): T => list[Math.floor(next() * list.length)] as T;
   const count = (max: number): number => Math.floor(next() * (max + 1));
   const list = <T>(max: number, make: (at: number) => T): T[] => Array.from({ length: count(max) }, (_, at) => make(at));
   const text = (): string => pick(TEXTS);
-  const round = (): number => count(9999);
+  const round = (): number => 1 + count(9999);
   const part = <T>(key: string, make: () => T): Record<string, T> => (chance() ? { [key]: make() } : {});
   const frame = <T>(item: () => T): IntroEntry<T> => ({ items: list(3, item) });
   const base = (): string | null => (chance() ? null : text());
+  const update = (): UpdateItem => {
+    const baseFields = { at: text(), ...part('round', round), ...part('note', text) };
+    const kind = pick(['raised', 'state', 'severity', 'title', 'description', 'note', 'linked', 'unlinked', 'posted', 'replied'] as const);
+    switch (kind) {
+      case 'raised':
+        return { kind, ...baseFields, round: round(), state: pick(['⏳', '❓']) };
+      case 'state':
+        return { kind, ...baseFields, from: pick(['⏳', '✅']), to: pick(['🔧', '❌']), ...part('revision', text) };
+      case 'severity':
+        return { kind, ...baseFields, from: '🔴', to: '🟡' };
+      case 'title':
+        return { kind, ...baseFields, from: text(), to: text() };
+      case 'description':
+        return { kind, ...baseFields };
+      case 'note':
+        return { kind, ...baseFields, note: text() };
+      case 'linked':
+      case 'unlinked':
+        return { kind, ...baseFields, ref: pick(['r1', 'c2', 'a3f9c2d1e']), role: pick(['own', 'duplicate'] as const), ...part('pullRequest', text) };
+      case 'posted': {
+        const action = pick(['created', 'updated', 'unchanged'] as const);
+        return {
+          kind,
+          ...baseFields,
+          ref: pick(['r1', 'c2']),
+          action,
+          ...(action === 'created' && chance() ? { pending: true } : {}),
+          ...part('pullRequest', text),
+        };
+      }
+      case 'replied':
+        return {
+          kind,
+          ...baseFields,
+          ref: pick(['r1', 'c2']),
+          replyRef: pick(['r3', 'c4']),
+          ...(chance() ? { pending: true } : {}),
+          ...part('pullRequest', text),
+        };
+    }
+  };
   return {
     target: text(),
     intro: {
-      reviewed: frame(() => ({ text: text(), ...part('round', round), ...part('revision', text), ...part('base', base) })),
+      reviewed: frame((): ReviewedItem => ({
+        round: round(),
+        revision: text(),
+        base: base(),
+        ...(chance() ? { notes: [text(), ...list(2, text)] } : {}),
+      })),
     },
     findings: list(4, (at) => ({
       id: `F${at * 3 + 1 + count(2)}`,
@@ -648,7 +702,7 @@ function generated(seed: number): ReviewData {
       severity: pick(['🔴', '🟡', '⚪']),
       title: text(),
       description: text(),
-      updates: list(3, () => ({ text: text(), ...part('at', text), ...part('round', round) })),
+      updates: list(3, update),
     })),
   };
 }
@@ -675,15 +729,18 @@ describe('the schema rejects invalid states', () => {
     ['a second finding with an existing id', "INSERT INTO findings VALUES (9, 'F1', 's', 'v', 't', 'd')"],
     ['a second finding at an existing position', "INSERT INTO findings VALUES (0, 'F99', 's', 'v', 't', 'd')"],
     ['a negative finding position', "INSERT INTO findings VALUES (-1, 'F99', 's', 'v', 't', 'd')"],
-    ['an update of a missing finding', "INSERT INTO updates (finding, position, text) VALUES ('F99', 0, 'x')"],
-    ['an update at an existing position', "INSERT INTO updates (finding, position, text) VALUES ('F1', 0, 'x')"],
-    ['a negative update position', "INSERT INTO updates (finding, position, text) VALUES ('F1', -1, 'x')"],
-    ['a negative round', "INSERT INTO updates (finding, position, text, round) VALUES ('F1', 9, 'x', -1)"],
-    ['an item at an existing position', "INSERT INTO intro_items (position, text) VALUES (0, 'x')"],
-    ['a negative item position', "INSERT INTO intro_items (position, text) VALUES (-1, 'x')"],
-    ['a base that is both `none` and a revision', "INSERT INTO intro_items (position, text, base, base_none) VALUES (9, 'x', 'abc', 1)"],
+    ['an update of a missing finding', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F99', 0, 'note', 't', 'x')"],
+    ['an update at an existing position', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F1', 0, 'note', 't', 'x')"],
+    ['a negative update position', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F1', -1, 'note', 't', 'x')"],
+    ['a non-positive update round', "INSERT INTO updates (finding, position, kind, at, round, note) VALUES ('F1', 9, 'note', 't', 0, 'x')"],
+    ['an unknown update kind', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F1', 9, 'other', 't', 'x')"],
+    ['a raised update without a state', "INSERT INTO updates (finding, position, kind, at, round) VALUES ('F1', 9, 'raised', 't', 1)"],
+    ['a note update without its note', "INSERT INTO updates (finding, position, kind, at) VALUES ('F1', 9, 'note', 't')"],
+    ['an item at an existing position', "INSERT INTO intro_items (position, round, revision) VALUES (0, 1, 'abc')"],
+    ['a negative item position', "INSERT INTO intro_items (position, round, revision) VALUES (-1, 1, 'abc')"],
+    ['a non-positive item round', "INSERT INTO intro_items (position, round, revision) VALUES (9, 0, 'abc')"],
     ['a second review row', "INSERT INTO review VALUES (2, 't')"],
-    ['text in a number column', "INSERT INTO updates (finding, position, text) VALUES ('F1', 'x', 'y')"],
+    ['text in a number column', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F1', 'x', 'note', 't', 'y')"],
   ];
 
   it.each(REJECTED)('%s', (_name, sql) => {
@@ -701,11 +758,11 @@ describe('the schema rejects invalid states', () => {
     db.close();
   });
 
-  it('keeps for the review and its intro only what the report needs', () => {
+  it('keeps for the review and its intro only the structured columns', () => {
     const db = openNew();
     const columns = (table: string): unknown[] => db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
     expect(columns('review')).toEqual(['id', 'target']);
-    expect(columns('intro_items')).toEqual(['position', 'text', 'round', 'revision', 'base', 'base_none']);
+    expect(columns('intro_items')).toEqual(['position', 'round', 'revision', 'base', 'notes']);
     db.close();
   });
 });

@@ -26,7 +26,7 @@ import type { CommentLink, ReviewState } from './review-links.ts';
 import { linkDuplicate, linkNote, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { newReview } from './review-ops.ts';
-import { renderReport } from './review-render.ts';
+import { formatUpdateItem, renderReport } from './review-render.ts';
 import { REVIEW_SCHEMA_VERSION, getMeta, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
 import { removeScratch, sampleReport, sampleReview as sampleReviewData, scratchDir, snapshotOf } from './review-test-support.ts';
 
@@ -208,9 +208,9 @@ describe('loadReviewFile', () => {
     });
 
     it.each(OPENERS)('%s: an older one', async (_name, open) => {
-      const { path, before } = await withVersion(4);
+      const { path, before } = await withVersion(REVIEW_SCHEMA_VERSION - 1);
       await expect(open(path)).rejects.toThrow(
-        new Error(`${path} was written by an older pr-comments (schema 4); start again with "pr-comments init"`),
+        new Error(`${path} was written by an older pr-comments (schema ${REVIEW_SCHEMA_VERSION - 1}); start again with "pr-comments init"`),
       );
       expect((await readFile(path)).equals(before)).toBe(true);
       expect(listing()).toEqual(['r.sqlite']);
@@ -1528,7 +1528,7 @@ describe('the report of a review connected to a pull request', () => {
     await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL }, result: null }));
     await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'F1', 'r544900', NOW), result: null }));
 
-    const updates = (await loadReviewFile(db)).data.findings[0]!.updates.map((entry) => entry.text);
+    const updates = (await loadReviewFile(db)).data.findings[0]!.updates.map(formatUpdateItem);
 
     expect(updates).toEqual([
       '2026-10-09 14:30 — PR comment r544861 linked as a duplicate',
