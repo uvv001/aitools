@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { samplePullRequest } from './fixtures.ts';
-import { findUnknownAuthors, findUnknownRefs, renderMarkdown } from './markdown.ts';
+import { findUnknownRefs, renderMarkdown } from './markdown.ts';
 import type { CheckAnnotation, CheckRun, PullRequestData } from './model.ts';
 
 const url = 'https://ghe.example.com/acme/widgets/pull/157';
@@ -125,20 +125,6 @@ describe('renderMarkdown', () => {
     expect(markdown).not.toContain('↳');
   });
 
-  it('limits the report to one author, case-insensitively, and keeps the rest of their threads as context', () => {
-    const markdown = renderMarkdown(samplePullRequest(), { authors: ['BOB'] });
-
-    expect(markdown).toContain('- Filter: only comments by @BOB');
-    expect(markdown).not.toContain('## Conversation');
-    expect(markdown).not.toContain('docs/readme.md');
-    expect(markdown).toContain('@@ -40,3 +40,5 @@');
-    expect(markdown).toContain('- **@bob** · `r1001` · 2026-01-02T10:00:00Z');
-    expect(markdown).toContain('  - ↳ **@alice** _(context)_ · `r1002` · 2026-01-03T09:00:00Z');
-    expect(markdown).toContain('  - ↳ **@bob** · `r1003` · 2026-01-03T10:00:00Z');
-    expect(markdown).toContain('Yes, added an option.');
-    expect(markdown.match(/_\(context\)_/g)).toHaveLength(1);
-  });
-
   it('omits reviews that only wrap inline comments but keeps commented reviews that have text', () => {
     const data = samplePullRequest();
     data.reviews.push(
@@ -149,7 +135,6 @@ describe('renderMarkdown', () => {
     expect(markdown).not.toContain('@erin');
     expect(markdown).toContain('- **@frank** commented');
     expect(markdown).toContain('\n  General remark');
-    expect(renderMarkdown(data, { authors: ['erin'] })).toContain('_No comments._');
   });
 
   it('marks edited conversation comments and review summaries, and nothing else', () => {
@@ -163,36 +148,8 @@ describe('renderMarkdown', () => {
     expect(markdown.match(/edited/g)).toHaveLength(3);
   });
 
-  it('shows empty reviews and conversation comments of the selected author', () => {
-    const markdown = renderMarkdown(samplePullRequest(), { authors: ['dave'] });
-    expect(markdown).toContain('**@dave** approved');
-    expect(markdown).not.toContain('## Review threads');
-  });
-
-  it('matches bot accounts with or without the [bot] suffix and a leading @', () => {
-    const data = samplePullRequest();
-    comment(data, 'ic-1').author = 'dependabot';
-    for (const author of ['dependabot', 'dependabot[bot]', '@Dependabot[bot]']) {
-      expect(renderMarkdown(data, { authors: [author] })).toContain('  Thanks, will address.');
-    }
-  });
-
-  it('includes every listed author, showing threads they take part in with the others as context', () => {
-    const markdown = renderMarkdown(samplePullRequest(), { authors: ['alice', 'carol'] });
-
-    expect(markdown).toContain('- Filter: only comments by @alice, @carol');
-    expect(markdown).toContain('  Thanks, will address.');
-    expect(markdown).toContain('  Please address the inline comments.');
-    expect(markdown).toContain('  Typo here.');
-    expect(markdown).not.toContain('@dave');
-    expect(markdown).toContain('- **@bob** _(context)_ · `r1001` · 2026-01-02T10:00:00Z');
-    expect(markdown).toContain('  - ↳ **@alice** · `r1002` · 2026-01-03T09:00:00Z');
-    expect(markdown).toContain('  - ↳ **@bob** _(context)_ · `r1003` · 2026-01-03T10:00:00Z');
-    expect(markdown.indexOf('  Please address')).toBeLessThan(markdown.indexOf('  Thanks, will address.'));
-  });
-
   it('says so when nothing matches', () => {
-    expect(renderMarkdown(samplePullRequest(), { authors: ['nobody'] })).toContain('_No comments._');
+    expect(renderMarkdown(samplePullRequest(), { refs: ['r9999'] })).toContain('_No comments._');
   });
 
   it('uses a longer fence when the diff contains backticks', () => {
@@ -237,7 +194,7 @@ describe('renderMarkdown', () => {
 
     expect(markdown).toContain(`- **@alice** · 2026-01-03T08:00:00Z · [link](${url}#issuecomment-abc)`);
     expect(markdown).toContain('  - ↳ **@alice** · 2026-01-03T09:00:00Z · edited');
-    expect(renderMarkdown(data, { authors: ['bob'] })).toContain('  - ↳ **@alice** _(context)_ · 2026-01-03T09:00:00Z');
+    expect(renderMarkdown(data, { refs: ['r1001'] })).toContain('  - ↳ **@alice** _(context)_ · 2026-01-03T09:00:00Z');
     expect(markdown.match(/ · `[rc]\d+` · /g)).toHaveLength(3);
   });
 
@@ -347,7 +304,7 @@ describe('renderMarkdown check annotations', () => {
     expect(renderMarkdown({ ...samplePullRequest(), checkRuns: undefined })).toBe(plain);
     expect(renderMarkdown({ ...samplePullRequest(), checkRuns: [] })).toBe(plain);
     expect(plain).not.toContain('Checks');
-    expect(renderMarkdown({ ...samplePullRequest(), checkRuns: [] }, { authors: ['nobody'] })).toContain('_No comments._');
+    expect(renderMarkdown({ ...samplePullRequest(), checkRuns: [] }, { refs: ['r9999'] })).toContain('_No comments._');
   });
 
   it('sorts annotations by path, start line, end line and ref, and leaves the input alone', () => {
@@ -467,47 +424,6 @@ describe('renderMarkdown check annotations', () => {
     expect(loose).toContain('Message\n\n- `e0000002`');
   });
 
-  it('limits the report to the apps named by --author, with or without [bot] and a leading @', () => {
-    const data = withChecks(
-      checkRun([annotation({ message: 'Sonar finding' })]),
-      checkRun([annotation({ ref: 'e0000001', message: 'Lint finding' })], { id: 2, name: 'Lint', app: 'github-actions[bot]' }),
-    );
-    for (const author of ['sq-community-pr-decoration', 'SQ-Community-PR-Decoration[bot]', '@sq-community-pr-decoration[bot]']) {
-      const markdown = renderMarkdown(data, { authors: [author] });
-      expect(markdown).toContain('### SonarQube Code Analysis — failure');
-      expect(markdown).toContain('Sonar finding');
-      expect(markdown).not.toContain('Lint');
-    }
-    for (const author of ['github-actions', 'GitHub-Actions[bot]']) {
-      const markdown = renderMarkdown(data, { authors: [author] });
-      expect(markdown).toContain('### Lint — failure');
-      expect(markdown).not.toContain('Sonar');
-    }
-    expect(renderMarkdown(data, { authors: ['sq-community-pr-decoration', 'github-actions'] })).toContain('## Checks\n\n### Lint');
-  });
-
-  it('shows only the checks, not the comments, for an app, and says nothing of missing comments', () => {
-    const markdown = renderMarkdown(withChecks(checkRun([annotation()])), { authors: ['sq-community-pr-decoration'] });
-
-    expect(markdown).toContain('- Filter: only comments by @sq-community-pr-decoration');
-    expect(markdown).toContain('## Checks');
-    expect(markdown).not.toContain('## Conversation');
-    expect(markdown).not.toContain('## Review threads');
-    expect(markdown).not.toContain('_No comments._');
-  });
-
-  it('omits the section when --author excludes every app, and keeps the comments of that author', () => {
-    const data = withChecks(checkRun([annotation()]));
-
-    const bob = renderMarkdown(data, { authors: ['bob'] });
-    expect(bob).not.toContain('## Checks');
-    expect(bob).toContain('- **@bob** · `r1001`');
-
-    const nobody = renderMarkdown(data, { authors: ['nobody'] });
-    expect(nobody).not.toContain('## Checks');
-    expect(nobody).toContain('_No comments._');
-  });
-
   it('filters by refs', () => {
     const data = withChecks(checkRun([annotation({ ref: 'a3f9c2d1' }), annotation({ ref: 'b7c8d9e0', startLine: 10, endLine: 10 })]));
     const byRef = renderMarkdown(data, { refs: ['r1001', 'a3f9c2d1'] });
@@ -529,24 +445,6 @@ describe('renderMarkdown check annotations', () => {
     expect(byPending).toContain('`b7c8d9e0`');
     expect(byPending).not.toContain('`r1001`');
     expect(byPending).not.toContain('`a3f9c2d1`');
-  });
-});
-
-describe('findUnknownAuthors', () => {
-  const data = withChecks(checkRun([annotation()]));
-
-  it('knows commenters and reviewers', () => {
-    expect(findUnknownAuthors(samplePullRequest(), ['bob', 'Carol', 'dave', 'nobody'])).toEqual(['nobody']);
-  });
-
-  it('knows the app of a check run, with or without [bot] on either side', () => {
-    expect(findUnknownAuthors(data, ['sq-community-pr-decoration', '@SQ-Community-PR-Decoration[bot]', 'bob', 'nobody'])).toEqual(['nobody']);
-    expect(findUnknownAuthors(withChecks(checkRun([annotation()], { app: 'github-actions[bot]' })), ['github-actions'])).toEqual([]);
-  });
-
-  it('does not know an app without check runs', () => {
-    expect(findUnknownAuthors(samplePullRequest(), ['sq-community-pr-decoration'])).toEqual(['sq-community-pr-decoration']);
-    expect(findUnknownAuthors({ ...samplePullRequest(), checkRuns: [] }, ['sq-community-pr-decoration'])).toEqual(['sq-community-pr-decoration']);
   });
 });
 

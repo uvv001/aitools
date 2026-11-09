@@ -20,7 +20,7 @@ import {
   usageError,
 } from './help-catalog.ts';
 import type { ArgSpec, CommandSpec, CommandWords, OptionSpec } from './help-catalog.ts';
-import { findUnknownAuthors, findUnknownRefs, renderMarkdown } from './markdown.ts';
+import { findUnknownRefs, renderMarkdown } from './markdown.ts';
 import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl, type PullRequestRef } from './pr-url.ts';
 import { publishComment } from './publish.ts';
@@ -122,7 +122,6 @@ interface Values {
   db?: string;
   pr?: string;
   out?: string;
-  author?: string[];
   ref?: string[];
   pending?: boolean;
   'by-agent'?: boolean;
@@ -534,9 +533,7 @@ async function renderReview({ env, values }: Context, db: string): Promise<numbe
 }
 
 async function renderComments({ env, values }: Context, db: string): Promise<number> {
-  // pnpm on Windows turns "a,b" into "a b", and logins/refs never contain whitespace.
-  const authors = values.author?.flatMap((value) => value.split(/[\s,]+/)).filter(Boolean);
-  if (authors?.length === 0) throw new Error('--author needs at least one login');
+  // pnpm on Windows turns "a,b" into "a b", and refs never contain whitespace.
   const rawRefs = values.ref?.flatMap((value) => value.split(/[\s,]+/)).filter(Boolean);
   if (rawRefs?.length === 0) throw new Error('--ref needs at least one ref');
   const refs = rawRefs?.map((ref) => {
@@ -552,13 +549,10 @@ async function renderComments({ env, values }: Context, db: string): Promise<num
   const pendingRefs = values.pending
     ? new Set(pendingItems({ links: (await loadReviewFile(db)).links, data }).map((item) => item.ref))
     : undefined;
-  for (const login of findUnknownAuthors(data, authors ?? [])) {
-    env.warn(`Warning: no comments, reviews or check annotations by ${login} in this pull request\n`);
-  }
   for (const ref of findUnknownRefs(data, refs ?? [])) {
     env.warn(`Warning: no comment or check annotation ${ref} in this pull request\n`);
   }
-  const markdown = renderMarkdown(data, { authors, refs, pendingRefs });
+  const markdown = renderMarkdown(data, { refs, pendingRefs });
   if (values.out) {
     await mkdir(dirname(values.out), { recursive: true });
     await writeFile(values.out, markdown, 'utf8');

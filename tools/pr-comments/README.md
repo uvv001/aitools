@@ -173,7 +173,7 @@ pr-comments link reply r544900 --db $DB
 
 ```
 pr-comments report render --db $DB
-pr-comments report comments --author bob --out .ai/review-with-docs/pr-42_comments.md --db $DB
+pr-comments report comments --out .ai/review-with-docs/pr-42_comments.md --db $DB
 Wrote .ai/review-with-docs/pr-42_comments.md
 ```
 
@@ -461,11 +461,10 @@ pr-comments report render --db review.sqlite
 **`report comments`**: writes the pull request conversation as markdown. Writes the downloaded pull request (reviews, threads, comments and the Checks section) as markdown, to the screen unless --out is given. Run "pr-comments pr sync --db `<file.sqlite>`" first.
 
 ```
-pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] --db <file.sqlite>
-pr-comments report comments --author alice --out pr-42.md --db review.sqlite
+pr-comments report comments [--ref <ref>]... [--pending] [--out <file.md>] --db <file.sqlite>
+pr-comments report comments --pending --out pr-42.md --db review.sqlite
 ```
 
-- `--author <login>`: only comments and reviews by this user (several logins comma-separated); a check annotation counts for its app; may be repeated.
 - `--ref <ref>`: only these comments or check annotations (several refs comma-separated); a review comment includes its thread; may be repeated.
 - `--pending`: only comments and check annotations that no link names yet.
 - `--out <file.md>`: write the markdown to this file.

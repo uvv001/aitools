@@ -300,10 +300,10 @@ describe('cli', () => {
       }
     });
 
-    it('declares only --author and --ref as repeatable, the finding texts and --db as required, and the base of a round as one of two', () => {
+    it('declares only --ref as repeatable, the finding texts and --db as required, and the base of a round as one of two', () => {
       const flagged = (key: 'repeatable' | 'required') =>
         COMMANDS.flatMap(({ words, options }) => options.filter((option) => option[key]).map(({ name }) => `${words} --${name}`));
-      expect(flagged('repeatable')).toEqual(['report comments --author', 'report comments --ref']);
+      expect(flagged('repeatable')).toEqual(['report comments --ref']);
       expect(flagged('required')).toEqual([
         'pr connect --db',
         'pr show --db',
@@ -364,7 +364,7 @@ describe('cli', () => {
         'pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] --db <file.sqlite>',
       );
       expect(synopsis(command('report comments'))).toBe(
-        'pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] --db <file.sqlite>',
+        'pr-comments report comments [--ref <ref>]... [--pending] [--out <file.md>] --db <file.sqlite>',
       );
     });
 
@@ -585,7 +585,7 @@ describe('cli', () => {
       ['--unposted on a change', ['finding', 'set-state', 'F1', 'approved', '--unposted'], 'finding set-state', '--unposted does not apply to finding set-state'],
       ['--revision on update', ['finding', 'update', 'F1', 'x', '--revision', 'HEAD'], 'finding update', '--revision does not apply to finding update'],
       ['--dry-run on a link', ['link', 'own', 'F1', 'r1001', '--dry-run'], 'link own', '--dry-run does not apply to link own'],
-      ['--author on report render', ['report', 'render', '--author', 'alice'], 'report render', '--author does not apply to report render'],
+      ['--ref on report render', ['report', 'render', '--ref', 'r1001'], 'report render', '--ref does not apply to report render'],
       ['--out on pending', ['link', 'pending', '--out', 'x.md'], 'link pending', '--out does not apply to link pending'],
       ['--force, which no command has any more', ['report', 'render', '--force'], 'report render', 'unknown option --force'],
       ['--report, which no command has any more', ['init', 'Demo', '--report', 'r.md'], 'init', 'unknown option --report'],
@@ -669,8 +669,8 @@ describe('cli', () => {
       expect((await findingOf('F3'))?.updates.at(-1)).toMatchObject({ kind: 'severity', note: '-ish' });
     });
 
-    it('allows --author to be repeated, and nothing else', async () => {
-      expect(await step('report', 'comments', '--author', 'carol', '--author', 'bob')).toBe(0);
+    it('allows --ref to be repeated, and nothing else', async () => {
+      expect(await step('report', 'comments', '--ref', 'r1001', '--ref', 'r1004')).toBe(0);
     });
 
     describe('help', () => {
@@ -1648,39 +1648,15 @@ describe('cli', () => {
         expect(warned).toBe('');
       });
 
-      it('keeps only one author when asked, and the app that published the check annotations is the author of those', async () => {
-        await step('report', 'comments', '--author', 'carol');
-        expect(printed).toContain('Typo here.');
-        expect(printed).not.toContain('Should this be configurable?');
-
-        await step('report', 'comments', '--author', SONAR);
-        expect(printed).toContain('- Filter: only comments by @sq-community-pr-decoration');
-        expect(printed).toContain('### SonarQube Code Analysis — failure');
-        expect(printed).not.toContain('### Lint');
-        expect(printed).not.toContain('## Conversation');
-        expect(warned).toBe('');
-      });
-
-      it('takes several authors from a comma-separated list or a repeated option', async () => {
-        for (const args of [['--author=carol,bob'], ['--author', 'carol', '--author', 'bob'], ['--author', ' carol , bob ,'], ['--author=carol bob']]) {
+      it('takes several refs from a comma-separated list or a repeated option', async () => {
+        for (const args of [['--ref=r1004,r1001'], ['--ref', 'r1004', '--ref', 'r1001'], ['--ref', ' r1004 , r1001 ,'], ['--ref=r1004 r1001']]) {
           await step('report', 'comments', ...args);
-          expect(printed, args.join(' ')).toContain('- Filter: only comments by @carol, @bob');
+          expect(printed, args.join(' ')).toContain('- Filter: only refs `r1004`, `r1001`');
           expect(printed).toContain('Typo here.');
           expect(printed).toContain('Should this be configurable?');
           expect(printed).toContain('Yes, added an option.');
         }
         expect(warned).toBe('');
-      });
-
-      it('warns about an author who has nothing in the pull request, but still prints the others', async () => {
-        await step('report', 'comments', '--author', 'carol,carool');
-
-        expect(warned).toBe('Warning: no comments, reviews or check annotations by carool in this pull request\n');
-        expect(printed).toContain('Typo here.');
-      });
-
-      it('refuses an author option without any login', async () => {
-        await expect(step('report', 'comments', '--author', ' , ')).rejects.toThrow('--author needs at least one login');
       });
 
       it('filters by --ref and --pending, and validates ref format', async () => {

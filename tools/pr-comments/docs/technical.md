@@ -219,7 +219,7 @@ During `pr sync`, the GraphQL client fetches check annotations for the pull requ
 - Records the check suite's application slug as the annotation author.
 - Fails the entire sync if fetching check runs fails, preserving access-denied errors for token fallback.
 
-`report comments` renders check runs under a `## Checks` section (sorted by check run name) with each annotation's computed `a…` ID, level, file/line location, and message. `--author` filters check runs by their app slug.
+`report comments` renders check runs under a `## Checks` section (sorted by check run name) with each annotation's computed `a…` ID, level, file/line location, and message.
 
 ## 7. Tokens
 

@@ -355,7 +355,6 @@ export const COMMAND_SPECS: CommandSpec[] = [
       'screen unless --out is given. Run "pr-comments pr sync --db <file.sqlite>" first.',
     {
       options: [
-        opt('author', '<login>', 'only comments and reviews by this user (several logins comma-separated); a check annotation counts for its app', { repeatable: true }),
         opt('ref', '<ref>', 'only these comments or check annotations (several refs comma-separated); a review comment includes its thread', { repeatable: true }),
         flag('pending', 'only comments and check annotations that no link names yet'),
         opt('out', '<file.md>', 'write the markdown to this file'),
@@ -365,7 +364,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
         'On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.',
       ],
       database: 'readonly',
-      example: '--author alice --out pr-42.md',
+      example: '--pending --out pr-42.md',
     },
   ),
   spec(

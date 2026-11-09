@@ -2,7 +2,6 @@ import { commentRefFromUrl } from './comment-ref.ts';
 import { threadRange, type CheckAnnotation, type CheckRun, type Comment, type PullRequestData, type Review, type ReviewThread } from './model.ts';
 
 export interface RenderOptions {
-  authors?: string[];
   refs?: string[];
   pendingRefs?: Set<string>;
 }
@@ -167,20 +166,6 @@ function renderCheckRun(run: CheckRun): string {
   return [`### ${oneLine(run.name)} — ${state}`, info.join(' · '), items.join(isTight ? '\n' : '\n\n')].join('\n\n');
 }
 
-// GraphQL logins of bots lack the "[bot]" suffix that the REST API and the web UI show.
-const normalizeLogin = (login: string) => login.toLowerCase().replace(/^@/, '').replace(/\[bot\]$/, '');
-
-// Requested logins that never commented, reviewed or published check annotations, which usually means a typo.
-export function findUnknownAuthors(data: PullRequestData, logins: string[]): string[] {
-  const authors = [
-    ...data.comments.map((c) => c.author),
-    ...data.reviews.map((r) => r.author),
-    ...(data.checkRuns ?? []).map((run) => run.app),
-  ];
-  const known = new Set(authors.map(normalizeLogin));
-  return logins.filter((login) => !known.has(normalizeLogin(login)));
-}
-
 // Requested comment or annotation refs that do not exist in the pull request.
 export function findUnknownRefs(data: PullRequestData, refs: string[]): string[] {
   const known = new Set<string>();
@@ -196,8 +181,6 @@ export function findUnknownRefs(data: PullRequestData, refs: string[]): string[]
 
 export function renderMarkdown(data: PullRequestData, options: RenderOptions = {}): string {
   const { pullRequest: pr } = data;
-  const wanted = options.authors?.map(normalizeLogin);
-  const matches = (author: string) => wanted === undefined || wanted.includes(normalizeLogin(author));
   const wantedRefs = options.refs ? new Set(options.refs.map((r) => r.toLowerCase())) : undefined;
   const pending = options.pendingRefs;
   const matchesRef = (ref: string | undefined) =>
@@ -214,19 +197,18 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
     `- Created: ${pr.createdAt}`,
     `- Synced: ${pr.fetchedAt}`,
   ];
-  if (options.authors) meta.push(`- Filter: only comments by ${options.authors.map((a) => `@${a}`).join(', ')}`);
   if (options.refs) meta.push(`- Filter: only refs ${options.refs.map((r) => `\`${r.toLowerCase()}\``).join(', ')}`);
   if (options.pendingRefs) meta.push('- Filter: only pending comments and check annotations');
   out.push(meta.join('\n'));
 
   const conversation: ConversationItem[] = [
     ...data.comments
-      .filter((c) => c.kind === 'issue' && matches(c.author) && matchesRef(commentRefFromUrl(c.url)))
+      .filter((c) => c.kind === 'issue' && matchesRef(commentRefFromUrl(c.url)))
       .map((comment): ConversationItem => ({ at: comment.createdAt, kind: 'comment', comment })),
     // A COMMENTED review without text only wraps inline comments, which appear under "Review threads".
     ...(wantedRefs === undefined && pending === undefined
       ? data.reviews
-          .filter((r) => matches(r.author) && (r.state !== 'COMMENTED' || r.body.trim() !== ''))
+          .filter((r) => r.state !== 'COMMENTED' || r.body.trim() !== '')
           .map((review): ConversationItem => ({ at: review.submittedAt ?? '', kind: 'review', review }))
       : []),
   ].sort((a, b) => a.at.localeCompare(b.at));
@@ -239,7 +221,7 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
   const threads = data.threads
     .map((thread) => ({ thread, comments: threadComments(thread) }))
     .filter((t) => {
-      if (!t.comments.some((c) => matches(c.author))) return false;
+      if (t.comments.length === 0) return false;
       if (wantedRefs !== undefined && !t.comments.some((c) => {
         const ref = commentRefFromUrl(c.url);
         return ref !== undefined && wantedRefs.has(ref);
@@ -259,9 +241,7 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
         (a.comments[0]?.createdAt ?? '').localeCompare(b.comments[0]?.createdAt ?? ''),
     );
 
-  // A check run belongs to its app the way a comment belongs to its author.
   const checkRuns = (data.checkRuns ?? [])
-    .filter((run) => matches(run.app))
     .map((run) =>
       wantedRefs === undefined && pending === undefined
         ? run
@@ -275,9 +255,8 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
   }
 
   if (threads.length > 0) {
-    // With an author or ref filter, the other people's messages of a matching thread stay as context.
+    // With a ref filter, the other messages of a matching thread stay as context.
     const isContext = (comment: Comment) => {
-      if (wanted !== undefined && !matches(comment.author)) return true;
       if (wantedRefs !== undefined) {
         const ref = commentRefFromUrl(comment.url);
         if (ref === undefined || !wantedRefs.has(ref)) return true;
