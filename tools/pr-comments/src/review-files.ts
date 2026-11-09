@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { access, link, lstat, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { access, lstat, mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual, promisify } from 'node:util';
@@ -103,44 +102,27 @@ export function reviewPaths(dbPath: string): ReviewPaths {
   return { db: dbPath, report: `${stem}.md` };
 }
 
-// Makes the finished file appear under its final name without replacing a file that is there; false when one is.
-// A hard link is exclusive (EEXIST), so two writers cannot both win. Where the file system has none, the fallback is
-// a check followed by a rename, which cannot rule out a file created in between.
-async function publish(temp: string, target: string): Promise<boolean> {
-  try {
-    await link(temp, target);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
-  }
-  if (await exists(target)) return false;
-  await rename(temp, target);
-  return true;
-}
-
+// Creates the database file exclusively (`wx`), seeds the review and optional connected pull request in one
+// transaction, and removes the file if seeding fails.
 function buildDatabase(path: string, data: ReviewData, pullRequest: string | undefined): void {
-  const db = openReviewDb(path, 'create');
+  let db: DatabaseSync;
+  try {
+    db = openReviewDb(path, 'create');
+  } catch (error) {
+    if (error instanceof Error && error.message === `${path} already exists`) throw existingDatabase(path);
+    throw error;
+  }
   try {
     inTransaction(db, () => {
       saveReview(db, data);
       if (pullRequest !== undefined) setMeta(db, PULL_REQUEST, pullRequest);
     });
-  } finally {
+  } catch (error) {
     db.close();
+    rmSync(path, { force: true });
+    throw error;
   }
-}
-
-// The database is built under a temporary name next to its final one, the review and the pull request in one
-// transaction, and published whole: a crash leaves a stray `.tmp` file at worst, never a half-written database. The
-// temporary file is removed on every path.
-async function createDatabase(path: string, data: ReviewData, pullRequest: string | undefined): Promise<boolean> {
-  const temp = `${path}.${randomBytes(4).toString('hex')}.tmp`;
-  try {
-    buildDatabase(temp, data, pullRequest);
-    return await publish(temp, path);
-  } finally {
-    await rm(temp, { force: true, maxRetries: 5, retryDelay: 100 });
-  }
+  db.close();
 }
 
 const existingDatabase = (dbPath: string): Error =>
@@ -265,7 +247,7 @@ export async function ensureAiGitExcluded(repoRoot: string, targetPaths: string[
 // lives at `options.db` (which must end in `.sqlite`) or, without one, at the default place of a review of that
 // name (`.ai/review-with-docs/` of the repository of `cwd`). `options.pr` connects it to a pull request, validated
 // before anything is created and stored in the same file. The report is rendered and written next to the database.
-// Refuses an existing database or report file, and publishes the new database atomically.
+// Refuses an existing database or report file, and creates the new database exclusively.
 export async function initReviewFile(
   name: string,
   options: { db?: string; pr?: string; now?: Date; cwd?: string } = {},
@@ -288,13 +270,12 @@ export async function initReviewFile(
     await ensureAiGitExcluded(repoRoot, [resolve(cwd, dbPath), resolve(cwd, reportTarget)]);
   }
 
-  const created = await createDatabase(dbPath, data, pullRequest);
-  if (!created) throw existingDatabase(dbPath);
+  buildDatabase(dbPath, data, pullRequest);
   try {
     await mkdir(dirname(reportTarget), { recursive: true });
     await writeFile(reportTarget, rendered, 'utf8');
   } catch (error) {
-    // The database has already been published; do not fail the creation if the initial report cannot be written,
+    // The database has already been created; do not fail the creation if the initial report cannot be written,
     // but surface the error to the caller so it can warn.
     return {
       db: dbPath,

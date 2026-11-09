@@ -1,7 +1,7 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, linkSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
-import { link, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -45,8 +45,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...actual,
-    link: vi.fn(actual.link),
-    rename: vi.fn(actual.rename),
     writeFile: vi.fn(actual.writeFile),
   };
 });
@@ -608,19 +606,6 @@ describe('initReviewFile', () => {
       expect(loaded.data).toStrictEqual(NEW_REVIEW);
     });
 
-    it('is in the file when that is published, so there is no state of the review without it', async () => {
-      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-      let published: string | undefined;
-      vi.mocked(link).mockImplementationOnce(async (temp, target) => {
-        published = meta(String(temp), 'pull_request');
-        await actual.link(temp, target);
-      });
-      const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: 'https://github.com/o/r/pull/7' });
-      expect(published).toBe('https://github.com/o/r/pull/7');
-      expect(listing()).toEqual(['r.md', 'r.sqlite']);
-      expect(meta(db, 'pull_request')).toBe('https://github.com/o/r/pull/7');
-    });
-
     it.each([
       ['not a URL', 'pull 42'],
       ['a URL that is not a pull request', 'https://github.com/o/r/issues/7'],
@@ -834,48 +819,29 @@ describe('initReviewFile', () => {
   });
 
   describe('is all or nothing', () => {
-    async function rivalAppearsWhileBuilding(): Promise<void> {
-      const { saveReview: save } = await vi.importActual<typeof import('./review-store.ts')>('./review-store.ts');
-      vi.mocked(saveReview).mockImplementationOnce((db, data) => {
-        save(db, data);
-        writeFileSync(join(dir, 'r.sqlite'), 'precious');
-      });
-    }
-
-    it('builds under a temporary name and leaves nothing when it fails', async () => {
+    it('removes the newly created database and leaves nothing when seeding fails', async () => {
       let during: string[] = [];
       vi.mocked(saveReview).mockImplementationOnce(() => {
         during = listing();
         throw new Error('crash');
       });
       await expect(initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW })).rejects.toThrow('crash');
-      expect(during).toHaveLength(1);
-      expect(during[0]).toMatch(/^r\.sqlite\.[0-9a-f]{8}\.tmp$/u);
+      expect(during).toEqual(['r.sqlite']);
       expect(listing()).toEqual([]);
     });
 
-    it('never replaces a database that appears while the new one is built', async () => {
-      await rivalAppearsWhileBuilding();
+    it('never replaces a database that appears before exclusive creation', async () => {
+      const { openReviewDb: open } = await vi.importActual<typeof import('./review-store.ts')>('./review-store.ts');
+      vi.mocked(openReviewDb).mockImplementationOnce((path, mode) => {
+        writeFileSync(path, 'precious');
+        return open(path, mode);
+      });
       await expect(initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW })).rejects.toThrow('source of truth');
       expect(await readFile(join(dir, 'r.sqlite'), 'utf8')).toBe('precious');
       expect(listing()).toEqual(['r.sqlite']);
     });
 
-    it('publishes with a rename where the file system has no hard links', async () => {
-      vi.mocked(link).mockRejectedValueOnce(failure('EPERM'));
-      const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW });
-      expect(listing()).toEqual(['r.md', 'r.sqlite']);
-      expect((await loadReviewFile(db)).data).toStrictEqual(NEW_REVIEW);
-    });
-
-    it('leaves nothing when the publication fails', async () => {
-      vi.mocked(link).mockRejectedValueOnce(failure('EPERM'));
-      vi.mocked(rename).mockRejectedValueOnce(failure('EIO'));
-      await expect(initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW })).rejects.toThrow('failed: EIO');
-      expect(listing()).toEqual([]);
-    });
-
-    it('keeps the published database and returns reportError when writing the initial report fails', async () => {
+    it('keeps the created database and returns reportError when writing the initial report fails', async () => {
       vi.mocked(writeFile).mockRejectedValueOnce(failure('EPERM'));
       const result = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW });
       expect(result.db).toBe(join(dir, 'r.sqlite'));
@@ -883,14 +849,6 @@ describe('initReviewFile', () => {
       expect(result.reportError?.message).toBe('failed: EPERM');
       expect(listing()).toEqual(['r.sqlite']);
       expect((await loadReviewFile(result.db)).data.target).toBe('PR 42');
-    });
-
-    it('still refuses an existing database where the file system has no hard links, and leaves nothing behind', async () => {
-      await rivalAppearsWhileBuilding();
-      vi.mocked(link).mockRejectedValueOnce(failure('EPERM'));
-      await expect(initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW })).rejects.toThrow('already exists');
-      expect(await readFile(join(dir, 'r.sqlite'), 'utf8')).toBe('precious');
-      expect(listing()).toEqual(['r.sqlite']);
     });
 
     it('writes the review and the pull request in one transaction', async () => {

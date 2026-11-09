@@ -39,7 +39,7 @@ Every module that changes a review is pure: it takes the review (and links) and 
 
 - One SQLite file holds one review: the findings, the rounds, the links, and the downloaded pull request.
 - Its name ends in `.sqlite`. The default on `init` (when `--db` is not given) is `<yyyy-mm-dd>_<slug>_review.sqlite` in `.ai/review-with-docs/` at the git root, next to the report `….md`; whenever `init` places a review under `.ai/review-with-docs/` (subfolders included), it checks the target paths with `git check-ignore`, adds `/.ai/review-with-docs/` to `.git/info/exclude` when not already ignored (while `.ai/` itself can be versioned), and fails if a `.gitignore` rule still exposes the folder. `--db <file.sqlite>` is required on every command except `init`, and must end in `.sqlite`.
-- Only `init` creates it. It refuses an existing database or report path (symbolic links included) before creating anything, builds the database under a temporary name (`<path>.<8 hex digits>.tmp`), and publishes it with an exclusive hard link (a rename where the file system has no hard links). A crash leaves at most a `.tmp` file, never half a database.
+- Only `init` creates it. It refuses an existing database or report path (symbolic links included) before creating anything, opens the new file exclusively (`wx`), and writes the initial review and connected pull request in one transaction (removing the file if seeding fails).
 - Every other command opens an existing file. A missing file is `<path> does not exist`. Nothing is created as a side effect.
 - The file uses a rollback journal (`journal_mode = DELETE`). There is no `-wal` or `-shm` file. A `-journal` file exists only while a command writes.
 - `foreign_keys = ON` on every connection. The review tables are `STRICT`.
@@ -134,7 +134,7 @@ Mutating commands and `report render` run one at a time per review database. A c
 
 The texts of a review are checked when they come in (`review-ops.ts`): no control characters except tab and newline, no lone carriage return or line separator, a title on one line, a revision as one word.
 
-`mutateReviewFile` is `changeReviewState` for changes of the review alone. The report is rendered on `init` and on every change of the review (written after the database is published or `COMMIT` succeeds; if the report write fails afterwards, the saved database change still succeeds with exit `0` and the CLI warns `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"` on `stderr`), and `report render` re-renders it on demand (or writes `--out`).
+`mutateReviewFile` is `changeReviewState` for changes of the review alone. The report is rendered on `init` and on every change of the review (written after the database is created or `COMMIT` succeeds; if the report write fails afterwards, the saved database change still succeeds with exit `0` and the CLI warns `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"` on `stderr`), and `report render` re-renders it on demand (or writes `--out`).
 
 ### 2.5 `pr sync` and the snapshot
 
