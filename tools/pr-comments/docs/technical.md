@@ -242,9 +242,9 @@ The tool searches token sources from most specific to least specific, preferring
 
 When multiple tokens are configured for a host and owner:
 
-1. The token source that succeeded most recently for that operation (`<host>/<owner>` for reads, `<host>/<owner>#write` for writes) is tried first.
-2. If a token fails with an access-denied error before any data is written (and before creating a temporary pending review in `link reply`), the tool tries the next token source. Network, server, and validation errors stop immediately.
-3. The working source identifier (such as `file:ghe.example.com` or `env:PR_COMMENTS_TOKEN_GHE_EXAMPLE_COM` — never the secret token itself) is cached in `~/.cache/pr-comments/token-sources.json` (including on `--dry-run`, which verifies write access against GitHub). Cache read or write failures are ignored.
+1. The token source that succeeded most recently (`token_source` in `~/.cache/pr-comments/token-sources.json`) is tried first.
+2. If a token fails with an access-denied error before any data is written (and before creating a temporary pending review in `link reply`), the tool tries the remaining candidate tokens in discovery order. Network, server, and validation errors stop immediately.
+3. The working source identifier (such as `file:ghe.example.com` or `env:PR_COMMENTS_TOKEN_GHE_EXAMPLE_COM` — never the secret token itself) is saved as `token_source` in `~/.cache/pr-comments/token-sources.json` (including on `--dry-run`, which verifies write access against GitHub). Cache read or write failures are ignored.
 
 ### Token permissions
 

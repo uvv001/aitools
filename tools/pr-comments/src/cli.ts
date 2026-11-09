@@ -80,9 +80,9 @@ async function readProcessStdin(): Promise<Uint8Array> {
 export const defaultEnvironment: CliEnvironment = {
   getPullRequest: (ref) => downloadPullRequest(ref),
   publish: (ref, comment, options) =>
-    withWorkingToken(ref, (context) => publishComment(context, ref, comment, options), { purpose: 'write' }),
+    withWorkingToken(ref, (context) => publishComment(context, ref, comment, options)),
   reply: (ref, request, options) =>
-    withWorkingToken(ref, (context) => replyToComment(context, ref, request, options), { purpose: 'write' }),
+    withWorkingToken(ref, (context) => replyToComment(context, ref, request, options)),
   resolveRevision: (revision) => resolveRevision(revision, process.cwd()),
   print: (text) => process.stdout.write(text),
   warn: (text) => process.stderr.write(text),

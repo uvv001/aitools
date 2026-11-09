@@ -17,7 +17,6 @@ export interface TokenLoopOptions {
   env?: NodeJS.ProcessEnv;
   home?: string;
   fetchImpl?: typeof fetch;
-  purpose?: 'read' | 'write';
 }
 
 export interface DownloadOptions {
@@ -30,16 +29,14 @@ export interface DownloadOptions {
 // Runs `operation` with each available token until one is good enough, and remembers which one worked so the
 // next run starts with it. Only AccessDeniedError moves on to the next token; anything else is real and
 // propagates (an operation that has already written something must turn an access error into a plain Error).
-// A write-capable token is remembered apart from the one that merely works for reading.
 export async function withWorkingToken<T>(
   ref: { host: string; owner: string },
   operation: (context: TokenContext) => Promise<T>,
-  { env = process.env, home = homedir(), fetchImpl = fetch, purpose = 'read' }: TokenLoopOptions = {},
+  { env = process.env, home = homedir(), fetchImpl = fetch }: TokenLoopOptions = {},
 ): Promise<T> {
   const candidates = await resolveTokens(ref.host, ref.owner, { env, home });
   const memoPath = tokenMemoPath(home);
-  const key = `${ref.host}/${ref.owner}`.toLowerCase() + (purpose === 'write' ? '#write' : '');
-  const remembered = await recallTokenSource(memoPath, key);
+  const remembered = await recallTokenSource(memoPath);
   const ordered = [...candidates].sort((a, b) => Number(b.id === remembered) - Number(a.id === remembered));
 
   const refused: string[] = [];
@@ -48,7 +45,7 @@ export async function withWorkingToken<T>(
     try {
       const client = createGraphQLClient(ref.host, candidate.token, fetchImpl);
       const result = await operation({ client, token: candidate.token, host: ref.host, fetchImpl });
-      if (candidate.id !== remembered) await rememberTokenSource(memoPath, key, candidate.id);
+      if (candidate.id !== remembered) await rememberTokenSource(memoPath, candidate.id);
       return result;
     } catch (error) {
       if (!(error instanceof AccessDeniedError)) throw error;

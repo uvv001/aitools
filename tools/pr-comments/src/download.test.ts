@@ -10,7 +10,6 @@ import { tokenMemoPath } from './token-memo.ts';
 const ref = { host: 'ghe.example.com', owner: 'Acme', repo: 'widgets', number: 5 };
 const ownerScope = { host: ref.host, owner: ref.owner };
 const hostScope = { host: ref.host };
-const memoKey = 'ghe.example.com/acme';
 
 const prNode = {
   id: 'PR_1',
@@ -114,14 +113,14 @@ describe('downloadPullRequest', () => {
     const data = await download({ 'owner-token': 'ok', 'host-token': 'ok' });
     expect(data.pullRequest.title).toBe('Add widgets');
     expect(tried()).toEqual(['owner-token']);
-    expect(await memo()).toEqual({ [memoKey]: 'file:ghe.example.com_Acme' });
+    expect(await memo()).toEqual({ token_source: 'file:ghe.example.com_Acme' });
   });
 
   it('moves on to the next token when one cannot see the pull request, and remembers the one that worked', async () => {
     const data = await download({ 'owner-token': 'not-found', 'host-token': 'ok' });
     expect(data.pullRequest.title).toBe('Add widgets');
     expect(tried()).toEqual(['owner-token', 'host-token']);
-    expect(await memo()).toEqual({ [memoKey]: 'file:ghe.example.com' });
+    expect(await memo()).toEqual({ token_source: 'file:ghe.example.com' });
 
     await download({ 'owner-token': 'not-found', 'host-token': 'ok' });
     expect(tried()).toEqual(['host-token']);
@@ -137,7 +136,7 @@ describe('downloadPullRequest', () => {
 
     await download({ 'owner-token': 'ok', 'host-token': 'not-found' });
     expect(tried()).toEqual(['host-token', 'owner-token']);
-    expect(await memo()).toEqual({ [memoKey]: 'file:ghe.example.com_Acme' });
+    expect(await memo()).toEqual({ token_source: 'file:ghe.example.com_Acme' });
   });
 
   it('reads the check runs with annotations of the head commit, which only the download does', async () => {
@@ -151,7 +150,7 @@ describe('downloadPullRequest', () => {
     const data = await download({ 'owner-token': 'checks-denied', 'host-token': 'ok' });
     expect(data.checkRuns).toHaveLength(1);
     expect(tried()).toEqual(['owner-token', 'host-token']);
-    expect(await memo()).toEqual({ [memoKey]: 'file:ghe.example.com' });
+    expect(await memo()).toEqual({ token_source: 'file:ghe.example.com' });
   });
 
   it('does not move on after a failure of the check runs that is not about access, and says what failed', async () => {
@@ -184,7 +183,7 @@ describe('downloadPullRequest', () => {
     await download({ 'owner-token': 'ok' });
     expect(tried()).toEqual(['owner-token']);
 
-    await writeFile(tokenMemoPath(home), JSON.stringify({ [memoKey]: 'file:gone' }));
+    await writeFile(tokenMemoPath(home), JSON.stringify({ token_source: 'file:gone' }));
     await download({ 'owner-token': 'ok' });
     expect(tried()).toEqual(['owner-token']);
   });
@@ -197,7 +196,6 @@ describe('downloadPullRequest', () => {
 });
 
 describe('withWorkingToken', () => {
-  const writeKey = `${memoKey}#write`;
   let home: string;
   let seen: string[];
 
@@ -214,7 +212,7 @@ describe('withWorkingToken', () => {
   });
 
   // Refused for every token except `accepted`.
-  const run = (accepted: string, purpose?: 'read' | 'write') =>
+  const run = (accepted: string) =>
     withWorkingToken(
       ownerScope,
       async ({ token }) => {
@@ -222,7 +220,7 @@ describe('withWorkingToken', () => {
         if (token !== accepted) throw new AccessDeniedError('refused');
         return token;
       },
-      { env: {}, home, purpose },
+      { env: {}, home },
     );
   const memo = async () => JSON.parse(await readFile(tokenMemoPath(home), 'utf8')) as Record<string, string>;
 
@@ -249,7 +247,7 @@ describe('withWorkingToken', () => {
   it('moves on after an access error and remembers the token that worked', async () => {
     expect(await run('host-token')).toBe('host-token');
     expect(seen).toEqual(['owner-token', 'host-token']);
-    expect(await memo()).toEqual({ [memoKey]: 'file:ghe.example.com' });
+    expect(await memo()).toEqual({ token_source: 'file:ghe.example.com' });
   });
 
   it('stops at an error that is not about access and remembers nothing', async () => {
@@ -267,31 +265,19 @@ describe('withWorkingToken', () => {
     await expect(memo()).rejects.toThrow();
   });
 
-  it('remembers a write-capable token separately from the one that works for reading', async () => {
+  it('switches to a write-capable token when a later operation is refused by a remembered read-only token', async () => {
     await run('owner-token');
-    await run('host-token', 'write');
-    expect(seen).toEqual(['owner-token', 'owner-token', 'host-token']);
-    expect(await memo()).toEqual({ [memoKey]: 'file:ghe.example.com_Acme', [writeKey]: 'file:ghe.example.com' });
-
-    seen = [];
-    await run('host-token', 'write');
-    expect(seen).toEqual(['host-token']);
-
-    seen = [];
-    await run('owner-token', 'read');
     expect(seen).toEqual(['owner-token']);
-  });
+    expect(await memo()).toEqual({ token_source: 'file:ghe.example.com_Acme' });
 
-  it('keeps the remembered read and write sources apart when either one changes', async () => {
-    await run('host-token', 'write');
-    await run('owner-token', 'read');
-    expect(await memo()).toEqual({ [memoKey]: 'file:ghe.example.com_Acme', [writeKey]: 'file:ghe.example.com' });
+    seen = [];
+    await run('host-token');
+    expect(seen).toEqual(['owner-token', 'host-token']);
+    expect(await memo()).toEqual({ token_source: 'file:ghe.example.com' });
 
-    await run('owner-token', 'write');
-    expect(await memo()).toEqual({ [memoKey]: 'file:ghe.example.com_Acme', [writeKey]: 'file:ghe.example.com_Acme' });
-
-    await run('host-token', 'read');
-    expect(await memo()).toEqual({ [memoKey]: 'file:ghe.example.com', [writeKey]: 'file:ghe.example.com_Acme' });
+    seen = [];
+    await run('host-token');
+    expect(seen).toEqual(['host-token']);
   });
 
   it('lists every token source it tried, never the tokens themselves, when all are refused', async () => {
