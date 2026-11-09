@@ -92,15 +92,6 @@ describe('store', () => {
     expect(loadPullRequest(db)).toEqual(stored(data));
   });
 
-  it('adds original_start_line when saving to a schema-5 database created before that column existed', () => {
-    const db = openNew();
-    db.exec('ALTER TABLE pr_threads DROP COLUMN original_start_line');
-    const data = samplePullRequest();
-    data.threads[1] = { ...data.threads[1]!, startLine: null, originalStartLine: 5 };
-    savePullRequest(db, data);
-    expect(loadPullRequest(db)).toEqual(stored(data));
-  });
-
   it('returns undefined for a database that never had a pull request', () => {
     expect(loadPullRequest(openNew())).toBeUndefined();
   });

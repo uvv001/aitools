@@ -159,10 +159,6 @@ export function savePullRequest(db: DatabaseSync, data: PullRequestData): void {
   const present = new Map<string, string>();
 
   inTransaction(db, () => {
-    const threadCols = db.prepare('PRAGMA table_info(pr_threads)').all() as { name: string }[];
-    if (!threadCols.some(({ name }) => name === 'original_start_line')) {
-      db.exec('ALTER TABLE pr_threads ADD COLUMN original_start_line INTEGER');
-    }
     clearRows(db);
     insert('pr_pull_requests', {
       id: pr.id,
