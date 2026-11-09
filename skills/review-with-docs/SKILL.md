@@ -100,24 +100,34 @@ calls for — a verdict is step 5, a publish or sync request step 6, new changes
    changed line outside the exclusions read for purpose and the ecosystem's
    best practices, and every finding evidenced or opened as ❓ unverified;
    with a fleet, the round's folder holds a coverage file per agent — one per
-   rule, plus purpose fit, best practices, and `recheck` in a later round —
-   and the index shows the tier bound of [fleet.md](fleet.md) for the
-   dispatch.
-4. **Record.** `finding add --severity --title --description-file` records
-   each finding in the open round, with `--unverified` where its evidence
-   stayed unsettled — a fleet's reply line marks it ❓; the description follows
-   [Evidence](#evidence). With a fleet, findings on a shared anchor merge per
-   [fleet.md](fleet.md). Where the user asked up front for a sync, run it now
+   rule, plus purpose fit, best practices, and `recheck` (or `recheck-<i>`
+   shards) in a later round — and the index shows the tier bound of
+   [fleet.md](fleet.md) for each dispatch.
+4. **Record.** With a fleet, merge candidate findings that point at the same
+   anchor or the same underlying root cause into
+   `<report-stem>/round-<n>/merged/<slug>.md` and filter out candidates already
+   covered by existing findings per [fleet.md](fleet.md): when a round surfaces
+   more than 10 candidate findings or the review already carries more than 30
+   findings in `finding list`, dispatch a deduplication agent (or sharded
+   deduplication fleet when `candidates × existing findings` is large) with
+   access to the candidate finding files, `finding list` / `finding show`, and
+   the codebase before the orchestrator runs `finding add`. Then
+   `finding add --severity --title --description-file` records each surviving
+   finding in the open round, with `--unverified` where its evidence stayed
+   unsettled — a fleet's reply line marks it ❓; the description follows
+   [Evidence](#evidence). Where the user asked up front for a sync, run it now
    and record what others wrote ([pull-request.md](pull-request.md)). A round
    that still has no finding is a result: record it with
    `round update 'no findings'` (`'no new findings'` in a later round). Then
    tell the user and hand over the report's path.
-   **Ready when:** every finding carries severity, evidence, and a suggested
-   fix in its description and `finding list` shows each of them — or, where
-   the round has no finding, it records `no findings` (`no new findings` in a
-   later round) — where the user asked up front for a sync, the pull request's
-   comments are reconciled and the `tier bound` condition holds (step 6), and
-   the user has the report's path.
+   **Ready when:** overlapping or same-cause candidates are merged and
+   already-covered candidates filtered out (via the deduplication dispatch of
+   [fleet.md](fleet.md) where triggered), every finding carries severity,
+   evidence, and a suggested fix in its description and `finding list` shows
+   each of them — or, where the round has no finding, it records `no findings`
+   (`no new findings` in a later round) — where the user asked up front for a
+   sync, the pull request's comments are reconciled and the `tier bound`
+   condition holds (step 6), and the user has the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
@@ -151,31 +161,46 @@ calls for — a verdict is step 5, a publish or sync request step 6, new changes
    reviewed area, which the user reports or picks up by syncing the PR. A pull
    request target runs `pr sync` first, then [pull-request.md](pull-request.md)
    for what is new, so the round sees what others wrote.
+   `round open --revision --base --note` records it — the note carries the
+   scope, the rule sources where the instruction files changed, the agreed
+   checks the round applies, and any narrowing (the user may narrow a round to
+   some findings or paths; the re-check covers that subset).
    Every round reads the **full changeset** at the new revision — never a
    diff between revisions, because authors amend and force-push and
-   per-commit attribution misleads. `round open --revision --base --note`
-   records it — the note carries the scope, the rule sources where the
-   instruction files changed, the agreed checks the round applies, and any
-   narrowing — then every open finding (⏳ ❓ ✅) and every fixed one, since a
-   fix regresses, is re-checked, and the changeset is searched afresh for what
-   nobody has raised yet. A closed finding (❌ 📌 🔀) is re-checked where
-   the code it points at changed: only changed ground overturns the user's
-   ruling, and a concern that returns with better evidence is a new finding
-   naming the old one, whose state stands until the user rules. Each outcome
-   is an Updates entry carrying `--round <n>` — `finding update`, or
-   `set-state` where the state moves, `fixed` per [States](#states) — and
-   step 4 records what the fresh search and `recheck` raise. Comparing
-   revisions serves one purpose: telling where the code the findings point at
-   changed.
-   The user may narrow a round to some findings or paths; the re-check covers
-   that subset.
+   per-commit attribution misleads. Comparing revisions serves one purpose:
+   telling where the code the findings point at changed. Every open finding
+   (⏳ ❓ ✅) and every 🔧 fixed one, since a fix regresses, is re-checked; a
+   closed finding (❌ 📌 🔀) is re-checked where the code it points at
+   changed: only changed ground overturns the user's ruling, and a concern
+   that returns with better evidence is a new finding naming the old one,
+   whose state stands until the user rules.
+   Execute the round in two ordered phases ([fleet.md](fleet.md)):
+   1. **Verification phase (`recheck`).** First, verify every open finding
+      (⏳ ❓ ✅), every 🔧 fixed finding, and any closed finding (❌ 📌 🔀)
+      whose code changed against the full changeset and codebase — one
+      `recheck` agent up to 15 findings in re-check scope; past 15 findings,
+      shard verification across parallel `recheck-1`, `recheck-2`, … agents
+      (~15–20 findings per agent, each with full codebase access and its own
+      `<report-stem>/round-<n>/recheck-<i>.md` coverage file). Record all
+      outcomes in the database — each an Updates entry carrying `--round <n>`
+      (`finding update`, or `finding set-state` where the state moves, `fixed`
+      per [States](#states)) plus step 4 (`finding add`) for any new finding
+      from a defective fix or returning closed concern.
+   2. **Discovery phase.** Only after the verification phase is recorded in the
+      database, dispatch the round's discovery fleet (`purpose-fit`,
+      `best-practices`, and rule agents, step 3), passing the updated finding
+      list from `finding list` / `finding show` so discovery agents see the
+      post-verification states and descriptions, and record newly discovered
+      findings in step 4.
    **Ready when:** the round stands in the database with its revision, its
-   base, and a note carrying any narrowing; step 3's and step 4's Ready-when
-   hold for the round's scope at the new revision (with a fleet, `recheck` in
-   the index on a family other than the orchestrator's where the orchestrator
-   wrote the fixes); every finding the re-check covers carries a `Round <n>:`
-   entry; and on a pull request target, the pull request's comments are
-   reconciled and the `tier bound` condition holds (step 6).
+   base, and a note carrying any narrowing; the verification phase is recorded
+   in the database before the discovery fleet is dispatched; step 3's and step
+   4's Ready-when hold for the round's scope at the new revision (with a fleet,
+   `recheck` or `recheck-<i>` in the index on a family other than the
+   orchestrator's where the orchestrator wrote the fixes); every finding the
+   re-check covers carries a `Round <n>:` entry; and on a pull request target,
+   the pull request's comments are reconciled and the `tier bound` condition
+   holds (step 6).
 
 Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 

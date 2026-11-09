@@ -20,8 +20,8 @@ the user to create it.
 check annotations. Run it after every push and before every publish.
 `link pending` then lists each top-level comment and check annotation that no
 link names yet; empty output means every one is handled. Read the full pending
-threads and annotations with `report comments --pending` — past a handful of
-pending items, the parallel agents below read them instead — then classify
+threads and annotations with `report comments --pending` — when the fleet
+threshold below is met, the parallel agents read them instead — then classify
 each comment (replies included) and annotation and record it from the
 orchestrator:
 
@@ -40,17 +40,22 @@ concern on the changeset — even one the agent refutes or that collides with a
 rule — goes to a finding (with the counter-evidence recorded there) for the
 user to triage. `link remove <ref>` undoes a link.
 
-Past a handful of pending items, slice the refs across parallel **PR-comment
-agents**, each dispatched with its `model` per [fleet.md](fleet.md). Each brief
-carries:
+Whenever there are more than 10 pending items, when the review already carries
+more than 30 findings, or when `pending items × existing findings > 150`,
+slice the refs across parallel **PR-comment agents** (~10–15 threads/items per
+agent, keeping each thread's refs in one slice), each dispatched with its
+`model` per [fleet.md](fleet.md). Each brief carries:
 
 - the shared brief of [fleet.md](fleet.md);
 - the command
   `node <skill-dir>/pr-comments.mjs report comments --ref <slice> --db <file.sqlite>`,
   run in the reviewed repository;
 - the findings the review carries (listed as in the Later rounds of
-  [fleet.md](fleet.md)), the user's login, and the table and the paragraph
-  after it;
+  [fleet.md](fleet.md) up to 30 findings; when the review exceeds 30 findings,
+  let the agent read existing findings via `finding list` and `finding show`
+  with `--db <file.sqlite>` rather than pasting every finding's full
+  description into every brief), the user's login, and the table and the
+  paragraph after it;
 - the output: a description file per [fleet.md](fleet.md) for each concern no
   finding covers yet;
 - the reply: one classification per comment (replies included) or annotation
@@ -59,7 +64,10 @@ carries:
   finding's reply line per [fleet.md](fleet.md) — for the orchestrator to
   record. Where `<F>` is a new finding of the slice, the agent writes the
   `<ref>` of its file `pr-comments/<ref>.md`, and the orchestrator records the
-  id that `finding add` gives that file.
+  id that `finding add` gives that file. When multiple `PR-comment` slices emit
+  new finding files (`pr-comments/<ref>.md`), run the deduplication pass from
+  [fleet.md](fleet.md) across those candidate files before `finding add` and
+  `link duplicate`.
 
 ## Publish
 
