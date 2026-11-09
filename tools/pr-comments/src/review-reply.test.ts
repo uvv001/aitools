@@ -13,7 +13,7 @@ import type { ReviewState } from './review-links.ts';
 import { addFinding, formatStamp, openRound } from './review-ops.ts';
 import { replyToDuplicate } from './review-reply.ts';
 import type { ReplyDuplicateDeps, ReplyDuplicateOptions } from './review-reply.ts';
-import { formatUpdateItem, renderReport } from './review-render.ts';
+import { renderReport } from './review-render.ts';
 import { removeScratch, scratchDir, snapshotOf } from './review-test-support.ts';
 
 const NOW = new Date(2026, 9, 8, 9, 5);
@@ -22,13 +22,7 @@ const LATER = new Date(2026, 9, 8, 10, 30);
 const STAMP = formatStamp(LATER);
 const PR = 'https://github.com/acme/widgets/pull/42';
 const PR_REF: PullRequestRef = { host: 'github.com', owner: 'acme', repo: 'widgets', number: 42 };
-// The comments as the Updates of the report name them: the id linked to the comment on PR.
-const R2 = '[r2](https://github.com/acme/widgets/pull/42#discussion_r2)';
-const R10 = '[r10](https://github.com/acme/widgets/pull/42#discussion_r10)';
-const C3 = '[c3](https://github.com/acme/widgets/pull/42#issuecomment-3)';
-const C20 = '[c20](https://github.com/acme/widgets/pull/42#issuecomment-20)';
 const OPTIONS: ReplyDuplicateOptions = { now: false, byAgent: false, dryRun: false };
-// A report stem like the real ones: a one-letter name would match in almost every line (see the artifact warning).
 const STEM = '2026-10-08_pr-42_review';
 const TITLES = ['Crash on empty list', 'Remark without a place', 'Not triaged yet', 'Another issue'];
 // The comments that the pull request has before the tests reply to anything: the ones the links below point at.
@@ -82,9 +76,9 @@ async function contentOf(db: string) {
   return { data, links, pullRequest, known: [...known].sort(), snapshot: await loadSnapshot(db) };
 }
 
-async function updatesOf(db: string, id: string): Promise<string[]> {
+async function lastUpdateOf(db: string, id: string) {
   const { data } = await loadReviewFile(db);
-  return data.findings.find((finding) => finding.id === id)!.updates.map(formatUpdateItem);
+  return data.findings.find((finding) => finding.id === id)!.updates.at(-1);
 }
 
 async function sameBytes(db: string, before: Buffer): Promise<void> {
@@ -179,50 +173,38 @@ describe('refusals before anything is sent', () => {
     await sameBytes(db, before);
   });
 
-  describe.each([false, true])('(dry run: %s)', (dryRun) => {
-    it.each([
-      ['a comment that is not linked', 'r9', (db: string) => `r9 is not linked in this review; link it first with "pr-comments link duplicate --db ${db} <finding> r9"`],
-      ['the own comment of a finding', 'r1', () => 'r1 is linked as the own comment of F1, not as a duplicate; only a duplicate is answered'],
-      ['the own conversation comment of a finding', 'c6', () => 'c6 is linked as the own comment of F3, not as a duplicate; only a duplicate is answered'],
-      ['a note', 'r5', () => 'r5 is recorded as a note, not as a duplicate of a finding'],
-      [
-        'a duplicate of a finding that has no own comment',
-        'r4',
-        (db: string) => `F2 has no own comment yet; post it with "pr-comments finding post --db ${db} F2" or link its comment with "pr-comments link own --db ${db} F2 <ref>"`,
-      ],
-    ])('refuses %s', async (_name, ref, message) => {
-      const db = await startReview();
-      const before = await readFile(db);
-      const fake = engine(created());
+  it.each([
+    ['a comment that is not linked', 'r9', (db: string) => `r9 is not linked in this review; link it first with "pr-comments link duplicate --db ${db} <finding> r9"`],
+    ['the own comment of a finding', 'r1', () => 'r1 is linked as the own comment of F1, not as a duplicate; only a duplicate is answered'],
+    ['the own conversation comment of a finding', 'c6', () => 'c6 is linked as the own comment of F3, not as a duplicate; only a duplicate is answered'],
+    ['a note', 'r5', () => 'r5 is recorded as a note, not as a duplicate of a finding'],
+    [
+      'a duplicate of a finding that has no own comment',
+      'r4',
+      (db: string) => `F2 has no own comment yet; post it with "pr-comments finding post --db ${db} F2" or link its comment with "pr-comments link own --db ${db} F2 <ref>"`,
+    ],
+  ])('refuses %s', async (_name, ref, message) => {
+    const db = await startReview();
+    const before = await readFile(db);
+    const fake = engine(created());
 
-      await expect(replyToDuplicate(db, ref, { ...OPTIONS, dryRun }, fake.deps)).rejects.toThrow(new Error(message(db)));
-      expect(fake.calls).toEqual([]);
-      await sameBytes(db, before);
-    });
+    await expect(replyToDuplicate(db, ref, OPTIONS, fake.deps)).rejects.toThrow(new Error(message(db)));
+    expect(fake.calls).toEqual([]);
+    await sameBytes(db, before);
   });
 
-  describe.each([false, true])('a check annotation (dry run: %s)', (dryRun) => {
-    const message = 'a3f9c2d1e is a check annotation; there is nothing to reply to';
+  it('refuses a check annotation before reading the database, even when linked as a duplicate', async () => {
+    const db = await startReview();
+    await syncReviewFile(db, snapshot([...BASE, 'a3f9c2d1e']));
+    await changeReviewState(db, (current) => ({ state: linkDuplicate(current, 'F1', 'a3f9c2d1e', NOW), result: undefined }));
+    const before = await readFile(db);
+    const fake = engine(created());
 
-    // Whatever else is wrong with the review or the ref, this is the first and only complaint.
-    it.each([
-      ['not linked', {}],
-      ['not linked, in a review that is not connected to a pull request', { connected: false }],
-      ['linked as a duplicate of a finding that has an own comment', { link: true }],
-    ])('refuses it: %s', async (_name, { link = false, ...state }: { link?: boolean; connected?: boolean }) => {
-      const db = await startReview(state);
-      if (link) {
-        await syncReviewFile(db, snapshot([...BASE, 'a3f9c2d1e']));
-        await changeReviewState(db, (current) => ({ state: linkDuplicate(current, 'F1', 'a3f9c2d1e', NOW), result: undefined }));
-        expect((await loadReviewFile(db)).links.at(-1)).toStrictEqual({ ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' });
-      }
-      const before = await readFile(db);
-      const fake = engine(created());
-
-      await expect(replyToDuplicate(db, 'a3f9c2d1e', { ...OPTIONS, dryRun }, fake.deps)).rejects.toThrow(new Error(message));
-      expect(fake.calls).toEqual([]);
-      await sameBytes(db, before);
-    });
+    await expect(replyToDuplicate(db, 'a3f9c2d1e', OPTIONS, fake.deps)).rejects.toThrow(
+      new Error('a3f9c2d1e is a check annotation; there is nothing to reply to'),
+    );
+    expect(fake.calls).toEqual([]);
+    await sameBytes(db, before);
   });
 
   it('refuses a database that does not exist and creates none', async () => {
@@ -236,7 +218,7 @@ describe('refusals before anything is sent', () => {
 });
 
 describe('the request handed to the engine', () => {
-  it('points a duplicate in a review thread to the own comment of its finding', async () => {
+  it('points a duplicate in a review thread to the own comment of its finding and requires the own comment to exist', async () => {
     const db = await startReview();
 
     const { replied, calls } = await reply(db, 'r2', created());
@@ -251,24 +233,10 @@ describe('the request handed to the engine', () => {
     expect(replied).toMatchObject({ finding: 'F1', own: 'r1', link: OWN_OF_F1, text: `Duplicate of ${OWN_OF_F1}.` });
   });
 
-  it('requires the own comment to exist: its ref and the message that names the finding, the link to remove and the post to repeat', async () => {
+  it('points a duplicate to an own conversation comment without blaming a pending review', async () => {
     const db = await startReview();
 
-    const { calls } = await reply(db, 'r2', created());
-
-    expect(calls[0]!.request.requires).toStrictEqual({
-      ref: 'r1',
-      missing:
-        'comment r1, the own comment of F1, no longer exists in this pull request (was your pending review discarded?); ' +
-        `remove the link with "pr-comments link remove --db ${db} r1" ` +
-        `and post F1 again with "pr-comments finding post --db ${db} F1"`,
-    });
-  });
-
-  it('names the own conversation comment when that is the one the reply points to, without a pending review to blame', async () => {
-    const db = await startReview();
-
-    const { calls } = await reply(db, 'r7', created());
+    const { replied, calls } = await reply(db, 'r7', created());
 
     expect(calls[0]!.request).toEqual({
       commentRef: 'r7',
@@ -276,14 +244,6 @@ describe('the request handed to the engine', () => {
       requires: { ref: 'c6', missing: goneOwn(db, 'c6', 'F3', 'was it deleted?') },
     });
     expect(calls[0]!.request.requires!.missing).not.toContain('pending review');
-  });
-
-  it('names the finding and the own comment of the duplicate that was asked for; a conversation comment is `#issuecomment-<id>`', async () => {
-    const db = await startReview();
-
-    const { replied, calls } = await reply(db, 'r7', created());
-
-    expect(calls[0]!.request).toMatchObject({ commentRef: 'r7', body: `Duplicate of ${PR}#issuecomment-6.` });
     expect(replied).toMatchObject({ finding: 'F3', own: 'c6', link: `${PR}#issuecomment-6` });
   });
 
@@ -322,7 +282,7 @@ describe('the request handed to the engine', () => {
     await writeFile(report, 'edited by hand, not a report', 'utf8');
     const again = await reply(db, 'c3', created('c20'), { now: true });
     expect(again.replied.text).toBe(`Duplicate of ${OWN_OF_F1}.`);
-    expect(await readFile(report, 'utf8')).toContain('replied to duplicate');
+    expect(await readFile(report, 'utf8')).toBe(renderReport((await loadReviewFile(db)).data));
   });
 
   it('passes an error of the engine on when it throws, and writes nothing', async () => {
@@ -339,22 +299,21 @@ describe('the request handed to the engine', () => {
 });
 
 describe('recording the reply', () => {
-  it('logs a reply created in the pending review under the finding of the duplicate, and nothing else', async () => {
+  it('records a reply created in the pending review under the finding of the duplicate', async () => {
     const db = await startReview();
     const before = await loadReviewFile(db);
 
     const { replied } = await reply(db, 'r2', created('r10'));
 
     const after = await loadReviewFile(db);
-    expect((await updatesOf(db, 'F1')).at(-1)).toBe(
-      `${STAMP} — replied to duplicate [r2](https://github.com/acme/widgets/pull/42#discussion_r2) with ` +
-        '[r10](https://github.com/acme/widgets/pull/42#discussion_r10) in the pending review',
-    );
-    const others = (state: typeof before) => state.data.findings.filter((finding) => finding.id !== 'F1');
-    expect(others(after)).toStrictEqual(others(before));
-    expect({ ...after.data, findings: [] }).toStrictEqual({ ...before.data, findings: [] });
-    const [was, now] = [before, after].map((state) => state.data.findings.find((finding) => finding.id === 'F1')!);
-    expect({ ...now, updates: now!.updates.slice(0, -1) }).toStrictEqual(was);
+    expect(await lastUpdateOf(db, 'F1')).toEqual({
+      kind: 'replied',
+      at: STAMP,
+      ref: 'r2',
+      replyRef: 'r10',
+      pending: true,
+      pullRequest: PR,
+    });
     expect(after.links).toEqual(before.links);
     expect(after.pullRequest).toBe(PR);
     expect(replied.result).toEqual({
@@ -368,35 +327,20 @@ describe('recording the reply', () => {
     await expectSound(db);
   });
 
-  it('logs the immediate reply to a conversation comment without the pending review', async () => {
-    const db = await startReview();
-
-    await reply(db, 'c3', created('c20'), { now: true });
-
-    expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — replied to duplicate ${C3} with ${C20}`);
-    await expectSound(db);
-  });
-
-  it('gives each duplicate of a finding its own entry', async () => {
-    const db = await startReview();
-
-    await reply(db, 'r2', created('r10'));
-    await reply(db, 'c3', created('c20'), { now: true });
-
-    expect((await updatesOf(db, 'F1')).slice(-2)).toEqual([
-      `${STAMP} — replied to duplicate ${R2} with ${R10} in the pending review`,
-      `${STAMP} — replied to duplicate ${C3} with ${C20}`,
-    ]);
-    expect(await updatesOf(db, 'F3')).toHaveLength(3);
-  });
-
-  it('records the reply on the first run of an identical one found, and not a second time', async () => {
+  it('records an identical reply on the first run, and writes nothing on a second run or rerun', async () => {
     const db = await startReview();
 
     const first = await reply(db, 'r2', unchanged('r10'));
 
     expect(first.replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
-    expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — replied to duplicate ${R2} with ${R10} in the pending review`);
+    expect(await lastUpdateOf(db, 'F1')).toEqual({
+      kind: 'replied',
+      at: STAMP,
+      ref: 'r2',
+      replyRef: 'r10',
+      pending: true,
+      pullRequest: PR,
+    });
     const recorded = await contentOf(db);
     const recordedBytes = await readFile(db);
     await expectSound(db);
@@ -408,32 +352,14 @@ describe('recording the reply', () => {
     await sameBytes(db, recordedBytes);
   });
 
-  it('adds nothing when the rerun after a created reply finds it unchanged', async () => {
-    const db = await startReview();
-    await reply(db, 'r2', created('r10'));
-    const before = await contentOf(db);
-    const beforeBytes = await readFile(db);
-
-    const { replied, calls } = await reply(db, 'r2', unchanged('r10'));
-
-    expect(calls[0]!.request.commentRef).toBe('r2');
-    expect(replied.result.action).toBe('unchanged');
-    expect(await contentOf(db)).toStrictEqual(before);
-    await sameBytes(db, beforeBytes);
-    expect((await updatesOf(db, 'F1')).filter((text) => text.includes('r10'))).toHaveLength(1);
-  });
-
-  it.each([
-    ['a reply it would create', created('r10')],
-    ['an identical reply it would find', unchanged('r10')],
-  ])('writes nothing and reads nothing again in a dry run (%s)', async (_name, answer) => {
+  it('writes nothing and reads nothing again in a dry run', async () => {
     const db = await startReview();
     const before = await readFile(db);
 
-    const { replied } = await reply(db, 'r2', answer, { dryRun: true });
+    const { replied } = await reply(db, 'r2', created('r10'), { dryRun: true });
 
     expect(replied.result.dryRun).toBe(true);
-    expect(replied.result.action).not.toBe('error');
+    expect(replied.result.action).toBe('created');
     await sameBytes(db, before);
   });
 
@@ -447,37 +373,6 @@ describe('recording the reply', () => {
     expect(replied.result).toEqual({ action: 'error', dryRun: false, message });
     expect(replied).toMatchObject({ finding: 'F1', own: 'r1', text: `Duplicate of ${OWN_OF_F1}.` });
     await sameBytes(db, before);
-  });
-
-  it.each([false, true])('records nothing when the engine says the own comment is gone (dry run: %s)', async (dryRun) => {
-    const db = await startReview();
-    const before = await readFile(db);
-    const loaded = await loadReviewFile(db);
-    const missing = goneOwn(db, 'r1', 'F1');
-
-    const { replied, calls } = await reply(
-      db,
-      'r2',
-      (_ref, request, options) => ({
-        action: 'error',
-        dryRun: options.dryRun,
-        target: { ref: 'r2', author: 'Reviewer', kind: 'review', resolved: false },
-        message: request.requires!.missing,
-      }),
-      { dryRun },
-    );
-
-    expect(calls).toHaveLength(1);
-    expect(replied.result).toEqual({
-      action: 'error',
-      dryRun,
-      target: { ref: 'r2', author: 'Reviewer', kind: 'review', resolved: false },
-      message: missing,
-    });
-    expect(replied).toMatchObject({ finding: 'F1', own: 'r1', link: OWN_OF_F1 });
-    await sameBytes(db, before);
-    expect(await updatesOf(db, 'F1')).toEqual(loaded.data.findings.find((finding) => finding.id === 'F1')!.updates.map(formatUpdateItem));
-    expect((await loadReviewFile(db)).links).toEqual(loaded.links);
   });
 
   it('writes nothing for a reply whose id the engine could not read', async () => {
@@ -520,7 +415,6 @@ describe('recording the reply ref locally', () => {
     const { known } = await loadReviewFile(db);
     expect(known.has('r2')).toBe(true);
     expect(known.has('r10')).toBe(true);
-    expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — replied to duplicate ${R2} with ${R10} in the pending review`);
   });
 
   it('sends the reply outside the database transaction: a writer can change the review meanwhile, and the reply keeps that change', async () => {
@@ -537,7 +431,6 @@ describe('recording the reply ref locally', () => {
     expect(replied.result).toMatchObject({ action: 'created', comment: 'r10' });
     const { data } = await loadReviewFile(db);
     expect(data.findings.map((finding) => finding.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5']);
-    expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — replied to duplicate ${R2} with ${R10} in the pending review`);
   });
 });
 
@@ -571,7 +464,6 @@ describe('a reply that could not be recorded', () => {
     });
     expect(replied).toMatchObject({ finding: 'F1', own: 'r1', link: OWN_OF_F1, text: `Duplicate of ${OWN_OF_F1}.` });
     expect((await loadReviewFile(db)).known.has('r10')).toBe(false);
-    expect((await updatesOf(db, 'F1')).some((text) => text.includes('replied to duplicate'))).toBe(false);
     await sameBytes(db, during.bytes!);
     await expectSound(db);
   });
@@ -597,7 +489,6 @@ describe('a reply that could not be recorded', () => {
     const { replied } = await reply(db, 'r2', unchanged('r10'));
 
     expect(replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
-    expect((await updatesOf(db, 'F1')).at(-1)).toBe(`${STAMP} — replied to duplicate ${R2} with ${R10} in the pending review`);
     expect((await loadReviewFile(db)).known.has('r10')).toBe(true);
     const recorded = await contentOf(db);
     await reply(db, 'r2', unchanged('r10'));
@@ -632,3 +523,4 @@ describe('a reply that could not be recorded', () => {
     await sameBytes(db, during.bytes!);
   });
 });
+

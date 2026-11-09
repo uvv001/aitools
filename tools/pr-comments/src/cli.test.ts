@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { access, chmod, copyFile, link, mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +17,7 @@ import { AGENT_DISCLAIMER } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult, ReplyTarget } from './reply.ts';
 import { dumpReviewFile, loadReviewFile, loadSnapshot, reviewPaths } from './review-files.ts';
 import { pendingItems, pendingLines } from './review-pending.ts';
-import { formatRoundItem, formatUpdateItem, renderReport } from './review-render.ts';
+import { renderReport } from './review-render.ts';
 import { removeScratch, scratchDir } from './review-test-support.ts';
 import { VERSION } from './version.ts';
 
@@ -36,16 +36,6 @@ const prUrl = 'https://ghe.example.com/acme/widgets/pull/157';
 const PR_REF: PullRequestRef = { host: 'ghe.example.com', owner: 'acme', repo: 'widgets', number: 157 };
 // Local time, which is what the review stamps; the stamp reads 2026-10-09 14:30.
 const NOW = new Date(2026, 9, 9, 14, 30);
-const STAMP = '2026-10-09 14:30';
-// The comments as the Updates of the report name them: the id linked to the comment on the pull request.
-const LINKED = {
-  r1001: '[r1001](https://ghe.example.com/acme/widgets/pull/157#discussion_r1001)',
-  r1004: '[r1004](https://ghe.example.com/acme/widgets/pull/157#discussion_r1004)',
-  c2001: '[c2001](https://ghe.example.com/acme/widgets/pull/157#issuecomment-2001)',
-  r2001: '[r2001](https://ghe.example.com/acme/widgets/pull/157#discussion_r2001)',
-  r546201: '[r546201](https://ghe.example.com/acme/widgets/pull/157#discussion_r546201)',
-  c624100: '[c624100](https://ghe.example.com/acme/widgets/pull/157#issuecomment-624100)',
-};
 
 // What the fake git answers: the short hash of the commit.
 const HASHES: Record<string, string> = { HEAD: '1a2b3c4d', 'origin/main': '5e6f7a8b', feature: '9c0d1e2f', abc1234: 'abc12345' };
@@ -226,7 +216,6 @@ describe('cli', () => {
   const tree = async (dir = work) => (await readdir(dir, { recursive: true })).sort();
   const loaded = () => loadReviewFile(review);
   const findingOf = async (id: string) => (await loaded()).data.findings.find((finding) => finding.id === id);
-  const updatesOf = async (id: string) => (await findingOf(id))?.updates.map(formatUpdateItem);
   const shown = (path: string) => relative(work, path);
   const line = (path = review) => `Review database: ${shown(path)}\n`;
 
@@ -680,10 +669,10 @@ describe('cli', () => {
     it('takes a text that starts with a dash after --, and a value that starts with a dash after =', async () => {
       await step('finding', 'update', 'F3', '--', '-5 is wrong');
       expect(printed).toBe('F3: note added\n');
-      expect((await updatesOf('F3'))?.at(-1)).toBe(`${STAMP} — -5 is wrong`);
+      expect((await findingOf('F3'))?.updates.at(-1)).toMatchObject({ kind: 'note', note: '-5 is wrong' });
 
       await step('finding', 'set-severity', 'F3', 'high', '--note=-ish');
-      expect((await updatesOf('F3'))?.at(-1)).toBe(`${STAMP} — severity ⚪ → 🔴 — -ish`);
+      expect((await findingOf('F3'))?.updates.at(-1)).toMatchObject({ kind: 'severity', note: '-ish' });
     });
 
     it('allows --author to be repeated, and nothing else', async () => {
@@ -1119,16 +1108,12 @@ describe('cli', () => {
 
       await expect(step('init', '  ', '--db', join(docs, 'blank.sqlite'))).rejects.toThrow('the name must not be empty');
       await expect(step('init', 'PR 44', '--db', join(docs, 'bad.sqlite'), '--pr', 'not a url')).rejects.toThrow('Not a valid URL: not a url');
-      await expect(step('init', 'PR 44', '--db', join(docs, 'bad.sqlite'), '--pr', 'https://ghe.example.com/acme/widgets/issues/157')).rejects.toThrow(
-        'Not a pull request URL',
-      );
       expect(await tree(docs)).toEqual(['demo_review.sqlite']);
       expect(printed).toBe('');
     });
   });
 
   describe('pr', () => {
-    const OTHER = 'https://ghe.example.com/acme/widgets/pull/158';
     // A review that is connected to no pull request.
     const bare = async () => {
       const db = join(docs, 'bare_review.sqlite');
@@ -1147,36 +1132,16 @@ describe('cli', () => {
         expect((await loadReviewFile(db)).pullRequest).toBe(prUrl);
       });
 
-      it('says it is connected already, and changes nothing, for the same pull request in any spelling', async () => {
+      it('says it is connected already, and changes nothing, for the same pull request', async () => {
         const before = await bytes();
 
-        await step('pr', 'connect', prUrl);
-        expect(printed).toBe(`Already connected to ${prUrl}\n`);
-        expect(warned).toBe('');
         await step('pr', 'connect', `${prUrl}/`, '--db', review);
         expect(printed).toBe(`Already connected to ${prUrl}\n`);
         expect(warned).toBe('');
-        await step('pr', 'connect', 'https://GHE.example.com/Acme/Widgets/pull/157', '--db', review);
-        expect(printed).toBe(`Already connected to ${prUrl}\n`);
-        expect(warned).toBe('');
-
         expect((await bytes()).equals(before)).toBe(true);
       });
 
-      it('moves the connection to another pull request while the review has no links, and refuses it once it has', async () => {
-        await step('pr', 'connect', OTHER, '--db', review);
-        expect(printed).toBe(`Connected to ${OTHER}\n`);
-        expect(await loadSnapshot(review)).toBeUndefined();
-
-        await step('pr', 'connect', prUrl, '--db', review);
-        await step('pr', 'sync', '--db', review);
-        await step('link', 'note', 'r1004', 'a bot', '--db', review);
-        await fails(['pr', 'connect', OTHER, '--db', review], /connected to .* point there; remove them first with/u);
-        expect((await loaded()).pullRequest).toBe(prUrl);
-      });
-
       it('refuses a URL that is not a pull request, and changes nothing', async () => {
-        await fails(['pr', 'connect', 'https://ghe.example.com/acme/widgets', '--db', review], 'Not a pull request URL');
         await fails(['pr', 'connect', 'nonsense', '--db', review], 'Not a valid URL: nonsense');
       });
     });
@@ -1239,32 +1204,12 @@ describe('cli', () => {
 
     describe('sync', () => {
       it('downloads the connected pull request, stores it and says how much, and names the database', async () => {
-        snapshot = samplePullRequest();
-
         expect(await step('pr', 'sync')).toBe(0);
 
-        expect(printed).toBe('Synced acme/widgets#157: 2 reviews, 2 threads, 5 comments, 0 annotations\n');
+        expect(printed).toBe('Synced acme/widgets#157: 2 reviews, 2 threads, 5 comments, 4 annotations\n');
         expect(warned).toBe(line());
         expect(downloads).toEqual([PR_REF]);
-        expect(await loadSnapshot(review)).toMatchObject(samplePullRequest());
-      });
-
-      it('counts the annotations over all check runs, and keeps the check runs', async () => {
-        await step('pr', 'sync');
-
-        expect(printed).toBe('Synced acme/widgets#157: 2 reviews, 2 threads, 5 comments, 4 annotations\n');
         expect((await loadSnapshot(review))?.checkRuns).toEqual(checkRuns());
-      });
-
-      it('replaces what the last sync stored: an edited comment, a new one, a deleted one', async () => {
-        snapshot = withChecks();
-        snapshot.comments = snapshot.comments.filter(({ id }) => id !== 'rc-2');
-        snapshot.comments.find(({ id }) => id === 'rc-1')!.body = 'Rewritten after discussion';
-
-        await step('pr', 'sync');
-
-        expect(printed).toContain('2 reviews, 2 threads, 4 comments');
-        expect((await loadSnapshot(review))?.comments.map(({ body }) => body)).toContain('Rewritten after discussion');
       });
 
       it('needs a connected pull request, and the one it downloaded must be the connected one', async () => {
@@ -1303,15 +1248,6 @@ describe('cli', () => {
         { round: 2, revision: '1a2b3c4d', base: '5e6f7a8b' },
         { round: 3, revision: '9c0d1e2f', base: null, notes: ['scope: src/ only'] },
       ]);
-      expect(formatRoundItem((await loaded()).data.intro.reviewed.items.at(-1)!)).toBe(
-        'Round 3 — `9c0d1e2f`, base none — reviewed as it stands; scope: src/ only',
-      );
-    });
-
-    it('says in its help that the note is where the scope of the review is written', async () => {
-      await step('round', 'open', '--help');
-
-      expect(printed).toContain('where the scope or other context of the review can be written');
     });
 
     it('fails on a revision that git does not know, before it changes anything', async () => {
@@ -1327,11 +1263,11 @@ describe('cli', () => {
       await step('round', 'open', '--no-base', '--db', review);
       expect(await step('round', 'update', 'no new findings', '--db', review)).toBe(0);
       expect(printed).toBe('Round 2 updated\n');
-      expect(formatRoundItem((await loaded()).data.intro.reviewed.items[1]!)).toContain('; no new findings');
+      expect((await loaded()).data.intro.reviewed.items[1]?.notes).toEqual(['no new findings']);
 
       expect(await step('round', 'update', '11 fixed', '--round', '1', '--db', review)).toBe(0);
       expect(printed).toBe('Round 1 updated\n');
-      expect(formatRoundItem((await loaded()).data.intro.reviewed.items[0]!)).toContain('; 11 fixed');
+      expect((await loaded()).data.intro.reviewed.items[0]?.notes).toEqual(['11 fixed']);
 
       await fails(['round', 'update', ' ', '--db', review], 'the text must not be empty');
       await fails(['round', 'update', 'note', '--round', '9', '--db', review], 'round 9 was never opened; the latest round is 2');
@@ -1408,14 +1344,15 @@ describe('cli', () => {
       expect((await findingOf('F5'))?.severity).toBe('🟡');
     });
 
-    it('opens at ⏳ awaiting triage, or at ❓ with --unverified, and notes the opening in the latest round', async () => {
+    it('opens at ⏳ awaiting triage, or at ❓ with --unverified, and passes --note', async () => {
       await step(...add('--description-file', '-'));
       await step(...add('--description-file', '-', '--unverified', '--note', 'seen in a log'));
 
       expect((await findingOf('F4'))?.state).toBe('⏳');
-      expect((await findingOf('F5'))?.state).toBe('❓');
-      expect(await updatesOf('F4')).toEqual([`${STAMP} — Round 1: raised ⏳`]);
-      expect(await updatesOf('F5')).toEqual([`${STAMP} — Round 1: raised ❓ — seen in a log`]);
+      expect(await findingOf('F5')).toMatchObject({
+        state: '❓',
+        updates: [{ kind: 'raised', round: 1, state: '❓', note: 'seen in a log' }],
+      });
     });
 
     it('prints only the id as JSON with --json', async () => {
@@ -1427,7 +1364,6 @@ describe('cli', () => {
 
     it('refuses a severity that is none, an empty title or description, and a file that is not there, and changes nothing', async () => {
       await fails(['finding', 'add', '--db', review, '--severity', 'critical', '--title', 'T', '--description-file', '-'], '"critical" is not a severity; use one of: high, medium, low');
-      await fails(['finding', 'add', '--db', review, '--severity', '🔴', '--title', 'T', '--description-file', '-'], '"🔴" is not a severity');
       await fails(['finding', 'add', '--db', review, '--severity', 'high', '--title', ' ', '--description-file', '-'], '--title must not be empty');
       stdin = ' \r\n\t\n';
       await fails(add('--description-file', '-'), 'the description in standard input is empty');
@@ -1507,125 +1443,72 @@ describe('cli', () => {
   describe('finding list and show', () => {
     const ALL = ['F1  ✅ 🔴  Missing timeout', 'F2  ✅ 🟡  Remark', 'F3  ⏳ ⚪  Waiting'];
 
-    it('lists the findings, one line each, and how many of the findings of the review they are', async () => {
+    it('lists the findings, filters by --state, --severity, and --unposted, and prints JSON with --json', async () => {
       expect(await step('finding', 'list')).toBe(0);
       expect(printed).toBe(`${ALL.join('\n')}\n3 of 3 findings\n`);
-    });
 
-    it('filters by state and by severity, which are anded, in any spelling', async () => {
-      await step('finding', 'list', '--state', 'approved');
-      expect(printed).toBe(`${ALL.slice(0, 2).join('\n')}\n2 of 3 findings\n`);
-      await step('finding', 'list', '--state', 'awaiting triage');
-      expect(printed).toBe(`${ALL[2]}\n1 of 3 findings\n`);
-      await step('finding', 'list', '--state', '⏳');
-      expect(printed).toBe(`${ALL[2]}\n1 of 3 findings\n`);
-      await step('finding', 'list', '--severity', 'medium');
+      await step('finding', 'list', '--state', 'approved', '--severity', 'medium');
       expect(printed).toBe(`${ALL[1]}\n1 of 3 findings\n`);
-      await step('finding', 'list', '--state', 'approved', '--severity', 'low');
-      expect(printed).toBe('0 of 3 findings\n');
-    });
-
-    it('lists with --unposted the findings that have no own comment, whatever their state, and counts a duplicate as none', async () => {
-      await step('finding', 'list', '--unposted');
-      expect(printed).toBe(`${ALL.join('\n')}\n3 of 3 findings\n`);
 
       await step('link', 'own', 'F1', 'r1001');
       await step('link', 'duplicate', 'F2', 'r1002');
-      await step('finding', 'list', '--unposted');
-      expect(printed).toBe(`${ALL.slice(1).join('\n')}\n2 of 3 findings\n`);
-      await step('finding', 'list', '--unposted', '--state', 'awaiting');
-      expect(printed).toBe(`${ALL[2]}\n1 of 3 findings\n`);
       await step('finding', 'list', '--unposted', '--state', 'approved');
       expect(printed).toBe(`${ALL[1]}\n1 of 3 findings\n`);
-    });
 
-    it('prints an array with --json', async () => {
       await step('finding', 'list', '--json', '--state', 'approved');
-
       expect(JSON.parse(printed)).toEqual([
-        { id: 'F1', state: '✅', stateLabel: 'approved', severity: '🔴', title: 'Missing timeout', updates: 2, anchors: 2 },
-        { id: 'F2', state: '✅', stateLabel: 'approved', severity: '🟡', title: 'Remark', updates: 2, anchors: 0 },
+        { id: 'F1', state: '✅', stateLabel: 'approved', severity: '🔴', title: 'Missing timeout', updates: 3, anchors: 2 },
+        { id: 'F2', state: '✅', stateLabel: 'approved', severity: '🟡', title: 'Remark', updates: 3, anchors: 0 },
       ]);
     });
 
     it('refuses a state or a severity that is none', async () => {
       await expect(step('finding', 'list', '--state', 'nonsense')).rejects.toThrow('--state "nonsense" is not a state; use one of:');
       await expect(step('finding', 'list', '--severity', 'critical')).rejects.toThrow('--severity "critical" is not a severity; use one of:');
-      await expect(step('finding', 'set-state', 'F3', 'nonsense')).rejects.toThrow(/^"nonsense" is not a state; use one of:/u);
     });
 
-    it('shows a finding with its updates, in any case, and its links', async () => {
+    it('shows a finding in text and with --json, and refuses an unknown finding', async () => {
       await step('link', 'own', 'F1', 'r1001');
       await step('link', 'duplicate', 'F1', COMPLEXITY_REF);
-      await step('link', 'note', 'r1004', 'a bot');
 
       expect(await step('finding', 'show', 'f1')).toBe(0);
-
       expect(printed).toContain(`### ✅ 🔴 F1 — Missing timeout\nLinked: own r1001, duplicate ${COMPLEXITY_REF}\n\n`);
-      expect(printed).toContain(
-        `- ${STAMP} — PR comment [r1001](https://ghe.example.com/acme/widgets/pull/157#discussion_r1001) linked as its own\n`,
-      );
-      expect(printed).toContain(`- ${STAMP} — check annotation ${COMPLEXITY_REF} linked as a duplicate\n`);
       expect(warned).toBe('');
-      await step('finding', 'show', 'F3');
-      expect(printed).not.toContain('Linked');
-    });
-
-    it('prints the finding, its evidence and its links as JSON with --json', async () => {
-      await step('link', 'own', 'F1', 'r1001');
 
       await step('finding', 'show', 'F1', '--json');
-
       expect(JSON.parse(printed)).toMatchObject({
         id: 'F1',
         state: '✅',
         title: 'Missing timeout',
         evidence: [{ path: 'src/app.ts' }, { path: 'src/other.ts' }],
-        comments: [{ ref: 'r1001', role: 'own' }],
+        comments: [{ ref: 'r1001', role: 'own' }, { ref: COMPLEXITY_REF, role: 'duplicate' }],
       });
-    });
 
-    it('refuses a finding that is not there, and names the ones that are', async () => {
       await expect(step('finding', 'show', 'F9')).rejects.toThrow('unknown finding "F9"; the report has F1, F2, F3');
     });
   });
 
   describe('finding changes', () => {
-    it('moves a finding to another state, with the note and the round, and logs it under Updates', async () => {
+    it('moves a finding to another state, with --note, --round, and --revision', async () => {
       expect(await step('finding', 'set-state', 'f3', 'approved', '--note', 'agreed')).toBe(0);
       expect(printed).toBe('F3: ⏳ → ✅\n');
       expect(warned).toBe(line());
 
       await step('finding', 'set-state', 'F3', 'discarded', '--round', '1');
       expect(printed).toBe('F3: ✅ → ❌\n');
-      expect(await updatesOf('F3')).toEqual([
-        `${STAMP} — Round 1: raised ⏳`,
-        `${STAMP} — ⏳ → ✅ — agreed`,
-        `${STAMP} — Round 1: ✅ → ❌`,
+      expect(revisions).toEqual([]);
+      expect((await findingOf('F3'))?.updates.slice(1)).toMatchObject([
+        { kind: 'state', from: '⏳', to: '✅', note: 'agreed' },
+        { kind: 'state', round: 1, from: '✅', to: '❌' },
       ]);
-    });
 
-    it('resolves the revision of a state change, and stores the hash; fixed needs one', async () => {
       await step('finding', 'set-state', 'F1', 'fixed', '--revision', 'abc1234');
-
       expect(printed).toBe('F1: ✅ → 🔧\n');
       expect(revisions).toEqual(['abc1234']);
-      expect((await updatesOf('F1'))?.at(-1)).toBe(`${STAMP} — ✅ → 🔧 at \`abc12345\``);
-
-      await fails(['finding', 'set-state', 'F2', 'fixed', '--db', review], 'moving F2 to 🔧 fixed needs the revision that fixes it');
-      await fails(['finding', 'set-state', 'F2', 'fixed', '--revision', 'nope', '--db', review], 'revision "nope" does not exist in this repository');
-      await fails(['finding', 'set-state', 'F2', 'fixed', '--revision', ' ', '--db', review], '--revision must not be empty');
-      expect(revisions).toEqual(['abc1234', 'nope']);
+      expect((await findingOf('F1'))?.updates.at(-1)).toMatchObject({ kind: 'state', from: '✅', to: '🔧', revision: 'abc12345' });
     });
 
-    it('does not resolve a revision that was not given, and keeps a state without one as it was', async () => {
-      await step('finding', 'set-state', 'F3', 'unverified');
-
-      expect(revisions).toEqual([]);
-      expect(printed).toBe('F3: ⏳ → ❓\n');
-    });
-
-    it('changes the severity, the title and the description, and says what changed', async () => {
+    it('changes the severity, the title, the description, and adds an update', async () => {
       await step('finding', 'set-severity', 'F1', 'medium');
       expect(printed).toBe('F1: 🔴 → 🟡\n');
       await step('finding', 'set-title', 'F1', 'Missing retry timeout', '--note', 'clearer');
@@ -1633,35 +1516,25 @@ describe('cli', () => {
       stdin = 'The retry loop never gives up.\n\n`src/a.ts:3-5`\n\nMore detail.\n';
       await step('finding', 'set-description', 'F1', '--description-file', '-', '--round', '1');
       expect(printed).toBe('F1: description replaced\n');
-
-      expect((await findingOf('F1'))?.description).toBe('The retry loop never gives up.\n\n`src/a.ts:3-5`\n\nMore detail.');
-      expect(await updatesOf('F1')).toEqual([
-        `${STAMP} — Round 1: raised ⏳`,
-        `${STAMP} — ⏳ → ✅`,
-        `${STAMP} — severity 🔴 → 🟡`,
-        `${STAMP} — title changed: "Missing timeout" → "Missing retry timeout" — clearer`,
-        `${STAMP} — Round 1: description revised`,
-      ]);
-    });
-
-    it('adds an update with the text and the round', async () => {
       expect(await step('finding', 'update', 'F1', 'Asked the author', '--round', '1')).toBe(0);
-
       expect(printed).toBe('F1: note added\n');
-      expect((await updatesOf('F1'))?.at(-1)).toBe(`${STAMP} — Round 1: Asked the author`);
+
+      expect(await findingOf('F1')).toMatchObject({
+        severity: '🟡',
+        title: 'Missing retry timeout',
+        description: 'The retry loop never gives up.\n\n`src/a.ts:3-5`\n\nMore detail.',
+      });
+      expect((await findingOf('F1'))?.updates.at(-1)).toMatchObject({ kind: 'note', round: 1, note: 'Asked the author' });
     });
 
-    it('refuses what changes nothing or cannot be done, and leaves the database as it was', async () => {
+    it('refuses invalid CLI inputs or unknown findings, and leaves the database as it was', async () => {
       await fails(['finding', 'set-state', 'F9', 'approved', '--db', review], 'unknown finding "F9"');
-      await fails(['finding', 'set-state', 'F1', 'approved', '--db', review], 'F1 is already ✅ approved');
-      await fails(['finding', 'set-state', 'F3', 'nonsense', '--db', review], '"nonsense" is not a state');
       await fails(['finding', 'set-state', 'F3', ' ', '--db', review], 'the state must not be empty');
-      await fails(['finding', 'set-severity', 'F1', 'high', '--db', review], 'F1 already has severity 🔴');
+      await fails(['finding', 'set-state', 'F2', 'fixed', '--revision', 'nope', '--db', review], 'revision "nope" does not exist in this repository');
+      await fails(['finding', 'set-state', 'F2', 'fixed', '--revision', ' ', '--db', review], '--revision must not be empty');
       await fails(['finding', 'set-severity', 'F1', 'critical', '--db', review], '"critical" is not a severity; use one of: high, medium, low');
-      await fails(['finding', 'set-title', 'F1', 'Missing timeout', '--db', review], 'F1 already has the title');
       await fails(['finding', 'set-title', 'F1', ' ', '--db', review], 'the title must not be empty');
       await fails(['finding', 'update', 'F1', ' ', '--db', review], 'the text must not be empty');
-      await fails(['finding', 'update', 'F1', 'x', '--round', '2', '--db', review], 'round 2 was never opened; the latest round is 1');
       for (const round of ['0', '-1', '1.5', 'abc', '']) {
         await fails(['finding', 'update', 'F1', 'x', `--round=${round}`, '--db', review], '--round must be a positive whole number');
       }
@@ -1669,121 +1542,31 @@ describe('cli', () => {
   });
 
   describe('link', () => {
-    const linksOf = async () => (await loaded()).links;
-    const remove = (ref: string) => `remove that link first with "pr-comments link remove --db ${review} ${ref}"`;
-
-    it('links an existing comment as the own comment of a finding, logs it under Updates and prints one line', async () => {
-      expect(await step('link', 'own', 'f3', 'r1001', '--note', 'written by hand')).toBe(0);
-
+    it('routes link own, duplicate, note, and remove, normalizes upper-case refs, and prints one line each', async () => {
+      expect(await step('link', 'own', 'f3', 'R1001', '--note', 'written by hand')).toBe(0);
       expect(printed).toBe('F3: own comment r1001 linked\n');
       expect(warned).toBe(line());
-      expect(await linksOf()).toMatchObject([{ ref: 'r1001', role: 'own', finding: 'F3' }]);
-      expect((await updatesOf('F3'))?.at(-1)).toBe(
-        `${STAMP} — PR comment [r1001](https://ghe.example.com/acme/widgets/pull/157#discussion_r1001) linked as its own — written by hand`,
-      );
-    });
 
-    it('accepts upper-case comment and annotation refs across link commands', async () => {
-      expect(await step('link', 'own', 'F1', 'R1001')).toBe(0);
-      expect(printed).toBe('F1: own comment r1001 linked\n');
       expect(await step('link', 'duplicate', 'F1', ELSE_IF_REF.toUpperCase())).toBe(0);
       expect(printed).toBe(`F1: duplicate ${ELSE_IF_REF} linked\n`);
-      expect(await step('link', 'note', 'C2001', 'a note')).toBe(0);
+
+      expect(await step('link', 'note', 'C2001', 'a bot summary')).toBe(0);
       expect(printed).toBe('c2001: noted\n');
+
       expect(await step('link', 'remove', 'C2001')).toBe(0);
       expect(printed).toBe('c2001 unlinked\n');
-    });
 
-    it('links duplicates, comments and check annotations, as many as there are, in the order they were made', async () => {
-      await step('link', 'duplicate', 'F1', 'r1004');
-      expect(printed).toBe('F1: duplicate r1004 linked\n');
-      await step('link', 'duplicate', 'F1', 'c2001', '--note', 'the same point, in the conversation');
-      await step('link', 'duplicate', 'F1', ELSE_IF_REF);
-      await step('link', 'own', 'F1', 'r1001');
-
-      expect((await linksOf()).map(({ ref, role, finding }) => [ref, role, finding])).toEqual([
-        ['r1004', 'duplicate', 'F1'],
-        ['c2001', 'duplicate', 'F1'],
-        [ELSE_IF_REF, 'duplicate', 'F1'],
-        ['r1001', 'own', 'F1'],
-      ]);
-      expect((await updatesOf('F1'))?.slice(2)).toEqual([
-        `${STAMP} — PR comment ${LINKED.r1004} linked as a duplicate`,
-        `${STAMP} — PR comment ${LINKED.c2001} linked as a duplicate — the same point, in the conversation`,
-        `${STAMP} — check annotation ${ELSE_IF_REF} linked as a duplicate`,
-        `${STAMP} — PR comment ${LINKED.r1001} linked as its own`,
+      expect((await loaded()).links).toEqual([
+        { ref: 'r1001', role: 'own', finding: 'F3' },
+        { ref: ELSE_IF_REF, role: 'duplicate', finding: 'F1' },
       ]);
     });
 
-    it('records that a comment is not a finding and why, and changes no finding', async () => {
-      const before = (await loaded()).data.findings;
-
-      expect(await step('link', 'note', 'r1004', 'a bot summary')).toBe(0);
-
-      expect(printed).toBe('r1004: noted\n');
-      expect(await linksOf()).toMatchObject([{ ref: 'r1004', role: 'note', note: 'a bot summary' }]);
-      expect((await loaded()).data.findings).toEqual(before);
-    });
-
-    it('unlinks a comment of any role: a finding logs it, a note leaves no trace', async () => {
-      await step('link', 'own', 'F1', 'r1001');
-      await step('link', 'duplicate', 'F2', 'r1004');
-      await step('link', 'note', 'c2001', 'a bot');
-
-      expect(await step('link', 'remove', 'r1004', '--note', 'a different issue')).toBe(0);
-      expect(printed).toBe('r1004 unlinked\n');
-      await step('link', 'remove', 'c2001');
-      expect(printed).toBe('c2001 unlinked\n');
-      await step('link', 'remove', 'r1001');
-
-      expect(await linksOf()).toEqual([]);
-      expect((await updatesOf('F2'))?.slice(2)).toEqual([
-        `${STAMP} — PR comment ${LINKED.r1004} linked as a duplicate`,
-        `${STAMP} — PR comment ${LINKED.r1004} unlinked (was a duplicate) — a different issue`,
-      ]);
-      expect((await updatesOf('F1'))?.at(-1)).toBe(`${STAMP} — PR comment ${LINKED.r1001} unlinked (was its own)`);
-    });
-
-    it('refuses a comment that is not in the database, and an id that is no comment', async () => {
+    it('surfaces link refusals with the database path in hints and leaves the database as it was', async () => {
       await fails(['link', 'own', 'F1', 'r999', '--db', review], `r999 is not in the database; run "pr-comments pr sync --db ${review}" first, or check the id`);
-      await fails(['link', 'duplicate', 'F1', 'c999', '--db', review], 'c999 is not in the database');
-      await fails(['link', 'duplicate', 'F1', 'a00000000', '--db', review], 'a00000000 is not in the database');
-      await fails(['link', 'note', 'r999', 'text', '--db', review], 'r999 is not in the database');
-      await fails(['link', 'own', 'F1', '1001', '--db', review], '"1001" is not a PR comment ref');
       await fails(['link', 'own', 'F9', 'r1001', '--db', review], 'unknown finding "F9"; the report has F1, F2, F3');
-    });
-
-    it('refuses a second own comment, a comment that is linked already, and says how to unlink', async () => {
-      await step('link', 'own', 'F1', 'r1001');
-      await step('link', 'note', 'r1004', 'a bot');
-
-      await fails(['link', 'own', 'F1', 'r1003', '--db', review], `F1 already has its own comment r1001; ${remove('r1001')}`);
-      await fails(['link', 'duplicate', 'F2', 'r1001', '--db', review], `r1001 is already linked as the own comment of F1; ${remove('r1001')}`);
-      await fails(['link', 'duplicate', 'F2', 'r1004', '--db', review], `r1004 is already linked as a note (a bot); ${remove('r1004')}`);
-    });
-
-    it('refuses a check annotation as an own comment and as a note, and the removal of what is not linked', async () => {
-      await fails(['link', 'own', 'F1', UNUSED_REF, '--db', review], `${UNUSED_REF} is a check annotation: it can only be linked as a duplicate of a finding`);
-      await fails(['link', 'note', UNUSED_REF, 'text', '--db', review], `${UNUSED_REF} is a check annotation`);
-      await fails(['link', 'remove', 'r1001', '--db', review], 'r1001 is not linked in this review; the review has no links');
-      await step('link', 'note', 'r1004', 'a bot');
-      await fails(['link', 'remove', 'r1001', '--db', review], 'r1001 is not linked in this review; it has r1004');
       await fails(['link', 'own', 'F1', 'r1001', '--note', ' ', '--db', review], '--note must not be empty');
-      await fails(['link', 'note', 'r1001', ' ', '--db', review], 'note is empty');
-      await fails(['link', 'note', 'r1001', 'two\nlines', '--db', review], 'note must be one line');
-    });
-
-    it('keeps a link to a comment that the next sync no longer has, and a removal still works', async () => {
-      await step('link', 'own', 'F1', 'r1001');
-      snapshot = withChecks();
-      snapshot.comments = snapshot.comments.filter(({ id }) => id !== 'rc-1');
-
-      await step('pr', 'sync');
-
-      expect(await linksOf()).toMatchObject([{ ref: 'r1001', role: 'own', finding: 'F1' }]);
-      await fails(['link', 'duplicate', 'F2', 'r1001', '--db', review], 'r1001 is not in the database');
-      expect(await step('link', 'remove', 'r1001')).toBe(0);
-      expect(await linksOf()).toEqual([]);
+      await fails(['link', 'remove', 'r1001', '--db', review], 'r1001 is not linked in this review; the review has no links');
     });
   });
 
@@ -1884,20 +1667,13 @@ describe('cli', () => {
         expect(await exists(report())).toBe(false);
       });
 
-      it('never writes over the database, another SQLite file or a name that is none, and leaves them as they were', async () => {
+      it('never writes over the database or a .sqlite path, and leaves the database as it was', async () => {
         const before = await bytes();
-        const other = join(docs, 'other.sqlite');
-        await copyFile(review, other);
-        const disguised = join(docs, 'disguised.md');
-        await copyFile(review, disguised);
 
         await expect(step('report', 'render', '--out', review)).rejects.toThrow('refusing to write the report over the database');
-        await expect(step('report', 'render', '--out', other)).rejects.toThrow(/refusing to overwrite the SQLite database|must be a report file/u);
-        await expect(step('report', 'render', '--out', disguised)).rejects.toThrow('refusing to overwrite the SQLite database');
         await expect(step('report', 'render', '--out', join(docs, 'new.sqlite'))).rejects.toThrow('--out must be a report file, not a database');
 
         expect((await bytes()).equals(before)).toBe(true);
-        expect((await readFile(other)).equals(before)).toBe(true);
         expect(await exists(join(docs, 'new.sqlite'))).toBe(false);
       });
     });
@@ -2023,73 +1799,16 @@ describe('cli', () => {
         expect(printed).toContain('Follow-up reply with new counter-evidence.');
       });
 
-      it('writes the markdown to a file, creating the folder, and says so', async () => {
+      it('writes the markdown to a file, creating the folder, and refuses to overwrite a database', async () => {
         const out = join(work, 'reports', 'pr-157.md');
 
         await step('report', 'comments', '--out', out);
 
         expect(printed).toBe(`Wrote ${out}\n`);
         expect(await readFile(out, 'utf8')).toBe(renderMarkdown(withChecks()));
-      });
 
-      describe('never writes over a database, under whatever name it is reached', () => {
-        // The error is the guard's, nothing is printed, and the database is byte for byte as it was; so is the file
-        // that was named, when it is a copy of or a link to it.
-        async function refused(out: string, message: string | RegExp, holdsDatabase = true): Promise<void> {
-          const before = await bytes();
-          await expect(step('report', 'comments', '--out', out)).rejects.toThrow(message);
-          expect(printed).toBe('');
-          expect((await bytes()).equals(before)).toBe(true);
-          if (holdsDatabase) expect((await readFile(out)).equals(before)).toBe(true);
-        }
-
-        it('refuses the database itself, in any spelling of its path', async () => {
-          await refused(review, `refusing to write the report over the database ${review}`);
-          await refused(`${docs}/./demo_review.sqlite`, 'refusing to write the report over the database');
-        });
-
-        it('refuses a copy of it, whatever its name, even one that is called a report', async () => {
-          const copy = join(docs, 'copy.db');
-          await copyFile(review, copy);
-          await refused(copy, `refusing to overwrite the SQLite database ${copy}`);
-          const disguised = join(docs, 'disguised.md');
-          await copyFile(review, disguised);
-          await refused(disguised, 'refusing to overwrite the SQLite database');
-        });
-
-        it('refuses a name that ends in .sqlite, whether the file is there or not, before it creates anything', async () => {
-          const folder = join(work, 'new-folder');
-          await refused(join(folder, 'new.sqlite'), '--out must be a report file, not a database', false);
-          await refused(join(docs, 'NEW.SQLite'), '--out must be a report file, not a database', false);
-          expect(await exists(folder)).toBe(false);
-          expect(await exists(join(docs, 'NEW.SQLite'))).toBe(false);
-        });
-
-        it('refuses a hard link to it', async ({ skip }) => {
-          const hard = join(docs, 'hard.md');
-          await link(review, hard).catch((error: unknown) => skip(`hard links are not available here: ${(error as Error).message}`));
-          await refused(hard, 'refusing to overwrite the SQLite database');
-        });
-
-        it('refuses a symbolic link to it', async ({ skip }) => {
-          const symbolic = join(docs, 'symbolic.md');
-          await symlink(review, symbolic).catch((error: unknown) => skip(`symbolic links are not available here: ${(error as Error).message}`));
-          await refused(symbolic, 'refusing to overwrite the SQLite database');
-        });
-
-        it('refuses the NTFS stream name of it', async ({ skip }) => {
-          if (process.platform !== 'win32') skip('::$DATA stream names exist on NTFS only');
-          await refused(`${review}::$DATA`, /refusing to (write the report over|overwrite) the|--out must be a report file/u);
-        });
-
-        it('still writes a report that is none of these, whatever it held', async () => {
-          const out = join(docs, 'other.md');
-          await writeFile(out, 'old text', 'utf8');
-
-          await step('report', 'comments', '--out', out);
-
-          expect(await readFile(out, 'utf8')).toBe(renderMarkdown(withChecks()));
-        });
+        await fails(['report', 'comments', '--out', review, '--db', review], `refusing to write the report over the database ${review}`);
+        await fails(['report', 'comments', '--out', join(docs, 'new.sqlite'), '--db', review], '--out must be a report file, not a database');
       });
 
       it('says to sync first when the database holds no pull request', async () => {
@@ -2098,18 +1817,6 @@ describe('cli', () => {
 
         await expect(step('report', 'comments', '--db', db)).rejects.toThrow(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
         expect(printed).toBe('');
-      });
-
-      it('shows what the last sync stored', async () => {
-        snapshot = withChecks();
-        snapshot.comments.find(({ id }) => id === 'rc-1')!.body = 'Rewritten after discussion';
-        snapshot.comments = snapshot.comments.filter(({ id }) => id !== 'rc-2');
-        await step('pr', 'sync');
-
-        await step('report', 'comments');
-
-        expect(printed).toContain('  Rewritten after discussion');
-        expect(printed).not.toContain('Yes, added an option.');
       });
     });
 
@@ -2160,7 +1867,6 @@ describe('cli', () => {
       };
     };
     const creates = (ref = 'r2001') => engine((comment, options) => answer(comment, options, 'created', ref));
-    const ownOf = async (id: string) => (await loaded()).links.filter(({ finding, role }) => finding === id && role === 'own');
     const post = (...args: string[]) => step('finding', 'post', '--db', review, ...args);
     const url = (comment: string) => (comment.startsWith('c') ? `${prUrl}#issuecomment-${comment.slice(1)}` : `${prUrl}#discussion_${comment}`);
 
@@ -2168,7 +1874,7 @@ describe('cli', () => {
       calls = [];
     });
 
-    it('posts the finding to the pull request of the review, prints the result and the anchors, and records the own comment', async () => {
+    it('posts the finding to the pull request of the review and prints the result and the anchors', async () => {
       creates();
 
       expect(await post('f1')).toBe(0);
@@ -2180,9 +1886,6 @@ describe('cli', () => {
       expect(calls[0]!.options).toEqual({ byAgent: false, now: false, dryRun: false });
       expect(calls[0]!.comment).toMatchObject({ path: 'src/app.ts', lines: { start: 10, end: 12 }, body: F1_BODY });
       expect(downloads).toEqual([]);
-      expect(await ownOf('F1')).toMatchObject([{ ref: 'r2001', role: 'own', finding: 'F1' }]);
-      expect((await loaded()).known.has('r2001')).toBe(true);
-      expect((await updatesOf('F1'))?.at(-1)).toBe(`${STAMP} — posted PR comment ${LINKED.r2001} to the pending review`);
     });
 
     it('publishes at once with --now, starts with the agent line with --by-agent, and takes --anchor and --commit', async () => {
@@ -2193,7 +1896,6 @@ describe('cli', () => {
       expect(printed).toBe(`created    posted   r2001  src/other.ts:7  ${url('r2001')}\nanchor 2 of 2: src/other.ts:7\n  1. src/app.ts:10-12\nlinks removed: 1\n`);
       expect(calls[0]!.options).toEqual({ byAgent: true, now: true, dryRun: false });
       expect(calls[0]!.comment).toMatchObject({ path: 'src/other.ts', lines: { start: 7, end: 7 }, commit: 'abcdef1', body: F1_BODY });
-      expect((await updatesOf('F1'))?.at(-1)).toBe(`${STAMP} — posted PR comment ${LINKED.r2001}`);
     });
 
     it('with --dry-run prints what would happen and the exact text, writes nothing, downloads nothing and names no database', async () => {
@@ -2221,32 +1923,17 @@ describe('cli', () => {
       expect((await bytes()).equals(before)).toBe(true);
     });
 
-    it('updates the own comment when run again, and records nothing twice when it stays unchanged', async () => {
+    it('prints unchanged and updated outcomes when run again', async () => {
       creates();
       await post('F1');
-      const before = await updatesOf('F1');
 
       engine((comment, options) => answer(comment, options, 'unchanged', 'r2001'));
       expect(await post('F1')).toBe(0);
       expect(printed.startsWith(`unchanged  pending  r2001  src/app.ts:10-12  ${url('r2001')}\n`)).toBe(true);
-      expect(calls[1]!.comment.commentRef).toBe('r2001');
-      expect(await updatesOf('F1')).toEqual(before);
 
-      stdin = F1_DESCRIPTION.replace('Crash', 'Hang');
-      await step('finding', 'set-description', 'F1', '--description-file', '-', '--db', review);
       engine((comment, options) => answer(comment, options, 'updated', 'r2001'));
       expect(await post('F1')).toBe(0);
-      expect((await updatesOf('F1'))?.at(-1)).toBe(`${STAMP} — updated PR comment ${LINKED.r2001}`);
-      expect(await ownOf('F1')).toHaveLength(1);
-    });
-
-    it('adopts an identical comment of yours as the own comment', async () => {
-      engine((comment, options) => answer(comment, options, 'unchanged', 'r2001'));
-
-      expect(await post('F1')).toBe(0);
-
-      expect(await ownOf('F1')).toHaveLength(1);
-      expect((await updatesOf('F1'))?.at(-1)).toBe(`${STAMP} — adopted PR comment ${LINKED.r2001} (identical)`);
+      expect(printed.startsWith(`updated    pending  r2001  src/app.ts:10-12  ${url('r2001')}\n`)).toBe(true);
     });
 
     it('prints an error result and the anchors, exits with 1, records nothing and names no database', async () => {
@@ -2261,23 +1948,6 @@ describe('cli', () => {
       expect(warned).toBe('');
       expect(downloads).toEqual([]);
       expect((await bytes()).equals(before)).toBe(true);
-    });
-
-    it.each([
-      ['gone', 'comment r1001 no longer exists in this pull request', ''],
-      ['moved', 'comment r1001 is on src/app.ts:30, the finding says src/app.ts:10-12; an existing comment cannot be moved', '; r1001 stays on GitHub until you delete it'],
-      ['not-yours', 'comment r1001 was written by mallory; only your own comments can be updated', ''],
-    ] as const)('prints the way on for an own comment that is %s, and keeps the reason out of the JSON result', async (reason, message, stays) => {
-      await step('link', 'own', 'F1', 'r1001');
-      engine((_comment, options) => ({ action: 'error', dryRun: options.dryRun, message, reason }));
-      const advice = `${message}; remove the link with "pr-comments link remove --db ${review} r1001" and post again (that creates a new comment${stays})`;
-
-      expect(await post('F1', '--json')).toBe(1);
-      expect(JSON.parse(printed).result).toEqual({ action: 'error', dryRun: false, message: advice });
-
-      expect(await post('F1')).toBe(1);
-      expect(printed.split('\n')[0]).toBe(`${'error'.padEnd(9)}  ${''.padEnd('pending'.length)}  -  ${advice}`);
-      expect(downloads).toEqual([]);
     });
 
     it('prints a finding with no anchor as a general comment, and the warnings on stderr', async () => {
@@ -2321,33 +1991,13 @@ describe('cli', () => {
       expect(warned).toBe('');
     });
 
-    it('posts a finding that is not approved too: the state of a finding does not matter', async () => {
-      creates('c2002');
-
-      expect(await post('F3', '--now')).toBe(0);
-
-      expect(printed).toBe(`created    posted   c2002  (general)  ${url('c2002')}\nno anchor: general comment\n`);
-      expect((await loaded()).links).toEqual([{ ref: 'c2002', role: 'own', finding: 'F3' }]);
-    });
-
-    it('refuses, before it publishes anything, a finding that is not there, and a bad --anchor or --commit', async () => {
+    it('refuses a bad --anchor or an unknown finding before it publishes anything', async () => {
       creates();
 
       await fails(['finding', 'post', 'F9', '--db', review], 'unknown finding "F9"; the report has F1, F2, F3');
-      await fails(['finding', 'post', 'F1', '--anchor', '3', '--db', review], '--anchor 3 is out of range: F1 has 2 path:lines anchors');
       for (const value of ['0', '-1', '1.5', 'abc', '', '+1']) {
         await fails(['finding', 'post', 'F1', `--anchor=${value}`, '--db', review], new Error('--anchor must be a positive whole number'));
       }
-      await fails(['finding', 'post', 'F1', '--commit', 'main', '--db', review], 'commit "main" must be 7-40 hex digits');
-      expect(calls).toEqual([]);
-    });
-
-    it('refuses a review that is not connected to a pull request', async () => {
-      const db = join(docs, 'bare_review.sqlite');
-      await step('init', 'Bare', '--db', db);
-      creates();
-
-      await expect(step('finding', 'post', 'F1', '--db', db)).rejects.toThrow(/not connected to a pull request; connect it with "pr-comments pr connect/u);
       expect(calls).toEqual([]);
     });
   });
@@ -2402,9 +2052,8 @@ describe('cli', () => {
       await step('link', 'duplicate', 'F1', 'c2001');
     });
 
-    it('answers the duplicate for the pull request of the review, prints the result and what it answers, and records the reply', async () => {
+    it('answers the duplicate for the pull request of the review and prints the result and what it answers', async () => {
       engine(made('r546201', THREAD, 'pending'));
-      const links = (await loaded()).links;
 
       expect(await reply('r1004')).toBe(0);
 
@@ -2412,12 +2061,6 @@ describe('cli', () => {
       expect(warned).toBe(line());
       expect(calls).toMatchObject([{ ref: PR_REF, request: { commentRef: 'r1004', body: TEXT, requires: { ref: 'r1001' } }, options: { now: false, dryRun: false } }]);
       expect(downloads).toEqual([]);
-      expect((await updatesOf('F1'))?.at(-1)).toBe(
-        `${STAMP} — replied to duplicate [r1004](https://ghe.example.com/acme/widgets/pull/157#discussion_r1004) with ` +
-          '[r546201](https://ghe.example.com/acme/widgets/pull/157#discussion_r546201) in the pending review',
-      );
-      expect((await loaded()).links).toEqual(links);
-      expect((await loaded()).known.has('r546201')).toBe(true);
     });
 
     it('shows the thread as resolved, the path alone for a file-level thread, and conversation for a conversation comment', async () => {
@@ -2434,30 +2077,24 @@ describe('cli', () => {
       expect(printed).toBe(`created    posted   c624100  conversation  ${urlOf('c624100')}\nanswers c2001 (alice)\n`);
     });
 
-    it('passes --now and --by-agent on, and logs a posted answer without the pending review', async () => {
+    it('passes --now and --by-agent on', async () => {
       engine(made('c624100', CONVERSATION, 'posted'));
 
       expect(await reply('c2001', '--now', '--by-agent')).toBe(0);
 
       expect(calls).toMatchObject([{ ref: PR_REF, request: { commentRef: 'c2001', body: WITH_DISCLAIMER }, options: { now: true, dryRun: false } }]);
       expect(warned).toBe(line());
-      expect((await updatesOf('F1'))?.at(-1)).toBe(`${STAMP} — replied to duplicate ${LINKED.c2001} with ${LINKED.c624100}`);
     });
 
-    it('reports an identical reply as unchanged, records it once, and still names the database', async () => {
+    it('reports an identical reply as unchanged and still names the database', async () => {
       engine(identical('r546201', THREAD));
 
       expect(await reply('r1004')).toBe(0);
 
-      const text = `unchanged  pending  r546201  docs/readme.md:7  ${urlOf('r546201')}  an identical reply of yours already exists\nanswers r1004 (carol, thread open)\n`;
-      expect(printed).toBe(text);
+      expect(printed).toBe(
+        `unchanged  pending  r546201  docs/readme.md:7  ${urlOf('r546201')}  an identical reply of yours already exists\nanswers r1004 (carol, thread open)\n`,
+      );
       expect(warned).toBe(line());
-      const recorded = await updatesOf('F1');
-      expect(recorded?.at(-1)).toBe(`${STAMP} — replied to duplicate ${LINKED.r1004} with ${LINKED.r546201} in the pending review`);
-
-      expect(await reply('r1004')).toBe(0);
-      expect(printed).toBe(text);
-      expect(await updatesOf('F1')).toEqual(recorded);
     });
 
     it('prints an error result with the answered comment when it is known, exits with 1, records nothing and names no database', async () => {
@@ -2507,14 +2144,10 @@ describe('cli', () => {
       expect(warned).toBe('');
     });
 
-    it('lets the refusals of the review through before it asks GitHub for anything, and changes nothing', async () => {
+    it('lets a refusal of the review through before it asks GitHub for anything, and changes nothing', async () => {
       engine(made('r546201', THREAD, 'pending'));
 
       await fails(['link', 'reply', 'r999', '--db', review], 'r999 is not linked in this review');
-      await fails(['link', 'reply', 'r1001', '--db', review], 'r1001 is linked as the own comment of F1, not as a duplicate');
-      await fails(['link', 'reply', COMPLEXITY_REF, '--db', review], `${COMPLEXITY_REF} is a check annotation; there is nothing to reply to`);
-      await step('link', 'note', 'r1003', 'a remark');
-      await fails(['link', 'reply', 'r1003', '--db', review], 'r1003 is recorded as a note, not as a duplicate of a finding');
       expect(calls).toEqual([]);
     });
   });

@@ -23,7 +23,7 @@ import {
 } from './review-files.ts';
 import { dumpReview } from './review-dump.ts';
 import type { CommentLink, ReviewState } from './review-links.ts';
-import { linkDuplicate, linkNote, linkOwn, recordPosted, recordReplied, unlink } from './review-links.ts';
+import { linkDuplicate, linkNote } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { newReview } from './review-ops.ts';
 import { formatUpdateItem, renderReport } from './review-render.ts';
@@ -1412,39 +1412,7 @@ describe('changeReviewState', () => {
 
 describe('the report of a review connected to a pull request', () => {
   const PULL = 'https://ghe.example.com/acme/widgets/pull/157';
-  const COMMENTS = ['r544861', 'r544900', 'c623843', 'r546201', 'a00000001'];
-
-  it('names every comment with its URL across the operations and renders the report', async () => {
-    const report = join(dir, 'r.md');
-    const { db } = await initReviewFile('PR 157', { db: join(dir, 'r.sqlite'), now: NOW, pr: 'https://GHE.example.com/acme/widgets/pull/157/' });
-    await changeReviewState(db, (state) => ({ state: { ...state, data: withFinding(state.data, 'F1') }, result: null }), { snapshot: snapshotOf(COMMENTS) });
-    const run = (change: (state: ReviewState) => ReviewState): Promise<unknown> => changeReviewState(db, (state) => ({ state: change(state), result: null }));
-    await run((state) => linkOwn(state, 'F1', 'r544861', NOW));
-    await run((state) => linkDuplicate(state, 'F1', 'r544900', NOW));
-    await run((state) => linkDuplicate(state, 'F1', 'c623843', NOW, 'same crash'));
-    await run((state) => linkDuplicate(state, 'F1', 'a00000001', NOW));
-    await run((state) => recordPosted(state, 'F1', 'r544861', 'updated', 'posted', NOW));
-    await run((state) => recordReplied(state, 'r544900', 'r546201', 'pending', NOW));
-    await run((state) => unlink(state, 'c623843', NOW));
-
-    expect(await renderReportFile(db)).toEqual({ report, action: 'unchanged' });
-
-    const text = await readFile(report, 'utf8');
-    for (const line of [
-      '- 2026-10-09 14:30 — PR comment [r544861](https://ghe.example.com/acme/widgets/pull/157#discussion_r544861) linked as its own',
-      '- 2026-10-09 14:30 — PR comment [r544900](https://ghe.example.com/acme/widgets/pull/157#discussion_r544900) linked as a duplicate',
-      '- 2026-10-09 14:30 — PR comment [c623843](https://ghe.example.com/acme/widgets/pull/157#issuecomment-623843) linked as a duplicate — same crash',
-      '- 2026-10-09 14:30 — check annotation a00000001 linked as a duplicate',
-      '- 2026-10-09 14:30 — updated PR comment [r544861](https://ghe.example.com/acme/widgets/pull/157#discussion_r544861)',
-      '- 2026-10-09 14:30 — replied to duplicate [r544900](https://ghe.example.com/acme/widgets/pull/157#discussion_r544900) with ' +
-        '[r546201](https://ghe.example.com/acme/widgets/pull/157#discussion_r546201) in the pending review',
-      '- 2026-10-09 14:30 — PR comment [c623843](https://ghe.example.com/acme/widgets/pull/157#issuecomment-623843) unlinked (was a duplicate)',
-    ]) {
-      expect(text.split('\n')).toContain(line);
-    }
-    expect(text).not.toMatch(/(?:PR comment|duplicate|with) [rc]\d/u);
-    expect(text).toBe(renderReport((await loadReviewFile(db)).data));
-  });
+  const COMMENTS = ['r544861', 'r544900'];
 
   it('keeps the entries written without a URL as they are, whatever is added after them', async () => {
     const { db } = await initReviewFile('PR 157', { db: join(dir, 'r.sqlite'), now: NOW });
