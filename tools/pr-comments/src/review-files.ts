@@ -312,6 +312,24 @@ export async function loadReviewFile(dbPath: string): Promise<LoadedReview> {
   }
 }
 
+export interface ConnectedReview extends LoadedReview {
+  pullRequest: string;
+  ref: PullRequestRef;
+  quotedDb: string;
+}
+
+// Loads a review and requires it to be connected to a pull request, returning the parsed PullRequestRef and the
+// shell-quoted database path alongside the loaded review state.
+export async function requireConnectedReview(dbPath: string): Promise<ConnectedReview> {
+  const loaded = await loadReviewFile(dbPath);
+  const quotedDb = quoteCliPath(loaded.paths.db);
+  const { pullRequest } = loaded;
+  if (pullRequest === undefined) {
+    throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
+  }
+  return { ...loaded, pullRequest, ref: parsePullRequestUrl(pullRequest), quotedDb };
+}
+
 // The pull request that the last `pr sync` stored, `undefined` before the first one. Read-only.
 export async function loadSnapshot(dbPath: string): Promise<PullRequestData | undefined> {
   const db = openReviewDb(reviewPaths(dbPath).db, 'readonly');
@@ -500,6 +518,33 @@ export async function mutateReviewFile<T>(
     return { state: { ...current, data: changed.data }, result: changed.result };
   });
   return reportError ? { data: state.data, result, reportError } : { data: state.data, result };
+}
+
+// Records a newly posted comment or reply in the review database after the GitHub write has succeeded, turning any
+// recording failure into an error result with recovery advice.
+export async function recordAfterWrite<R extends { action: string; message?: string }>(
+  dbPath: string,
+  result: R,
+  change: (state: ReviewState) => ReviewState,
+  options: {
+    pullRequest: PullRequestRef;
+    knownRef: string | readonly string[];
+    was: string;
+    advice: string;
+  },
+): Promise<{ result: R; reportError?: Error }> {
+  try {
+    const { reportError } = await changeReviewState(
+      dbPath,
+      (state) => ({ state: change(state), result: undefined }),
+      { pullRequest: options.pullRequest, knownRef: options.knownRef },
+    );
+    return reportError === undefined ? { result } : { result, reportError };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const message = `${options.was}, but it could not be recorded in the review (${reason}); ${options.advice}`;
+    return { result: { ...result, action: 'error', message } as R };
+  }
 }
 
 export interface SyncResult {

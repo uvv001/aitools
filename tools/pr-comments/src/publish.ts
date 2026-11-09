@@ -3,6 +3,17 @@ import { rightHunkRanges } from './diff.ts';
 import type { LineRange } from './diff.ts';
 import type { TokenContext } from './download.ts';
 import { AccessDeniedError, fetchPullRequest } from './github.ts';
+import {
+  addConversationComment,
+  discardEmptyReview,
+  ID_NOT_READ,
+  isPending,
+  messageOf,
+  readViewerAndPullRequest,
+  sameLogin,
+  sameText,
+} from './github-write.ts';
+import type { WrittenComment } from './github-write.ts';
 import type { Comment, PullRequestData, ReviewThread } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { createRestClient, fetchPullFiles } from './rest.ts';
@@ -73,8 +84,6 @@ export interface PublishResult {
   reason?: OwnCommentReason;
 }
 
-const VIEWER_QUERY = 'query { viewer { login } }';
-
 const ADD_THREAD = `
 mutation($input: AddPullRequestReviewThreadInput!) {
   addPullRequestReviewThread(input: $input) {
@@ -87,11 +96,6 @@ mutation($input: AddPullRequestReviewInput!) {
   addPullRequestReview(input: $input) {
     pullRequestReview { id state comments(first: 1) { nodes { id url } } }
   }
-}`;
-
-const ADD_COMMENT = `
-mutation($input: AddCommentInput!) {
-  addComment(input: $input) { commentEdge { node { id url } } }
 }`;
 
 const UPDATE_REVIEW_COMMENT = `
@@ -109,11 +113,6 @@ query($owner: String!, $repo: String!, $expression: String!) {
   repository(owner: $owner, name: $repo) { object(expression: $expression) { ... on Commit { oid } } }
 }`;
 
-const DELETE_REVIEW = `
-mutation($input: DeletePullRequestReviewInput!) {
-  deletePullRequestReview(input: $input) { pullRequestReview { id } }
-}`;
-
 const FULL_SHA = /^[0-9a-f]{40}$/i;
 const REJECTED = 'GitHub rejected the comment (is the anchor still part of the diff?)';
 const PENDING_BLOCKS_NOW =
@@ -127,7 +126,6 @@ const pendingCannotBeNow = (ref: string) =>
   'submit your review in the web UI, or run without --now to update it';
 const MAX_LISTED_RANGES = 8;
 const ADOPTED = 'an identical comment of yours already exists; adopted';
-const ID_NOT_READ = 'created, but its id could not be read from the URL';
 
 interface PublishDeps {
   rest?: RestClient;
@@ -154,19 +152,6 @@ interface Inline {
   body: string;
 }
 
-interface Written {
-  id: string;
-  url: string;
-}
-
-const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-
-const normalize = (body: string) => body.replaceAll('\r\n', '\n').trim();
-
-const sameText = (a: string, b: string) => normalize(a) === normalize(b);
-
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
-
 const formatLines = ({ start, end }: LineRange) => (start === end ? `${start}` : `${start}-${end}`);
 
 function outcome(
@@ -187,7 +172,7 @@ function outcome(
 const failure = (run: Run, comment: PublishComment, message: string) => outcome(run, comment, 'error', { message });
 
 // A dry run has no node to report.
-function created(run: Run, comment: PublishComment, state: 'pending' | 'posted', node?: Written): PublishResult {
+function created(run: Run, comment: PublishComment, state: 'pending' | 'posted', node?: WrittenComment): PublishResult {
   if (!node) return outcome(run, comment, 'created', { state });
   const ref = commentRefFromUrl(node.url);
   const id = ref ? { comment: ref } : { message: ID_NOT_READ };
@@ -200,18 +185,15 @@ async function startRun(
   options: PublishOptions,
   deps: PublishDeps,
 ): Promise<Run> {
-  const { viewer } = await context.client<{ viewer: { login: string } }>(VIEWER_QUERY, {});
-  const data = await (deps.loadPullRequest ?? fetchPullRequest)(context.client, ref);
-  const pending = data.reviews.find((r) => r.state === 'PENDING' && sameLogin(r.author, viewer.login));
-
+  const { viewer, data, pendingReviewId } = await readViewerAndPullRequest(context, ref, deps.loadPullRequest);
   const rest = deps.rest ?? createRestClient(context.host, context.token, context.fetchImpl);
   return {
     context,
     ref,
     options,
     data,
-    viewer: viewer.login,
-    pendingReviewId: pending?.id,
+    viewer,
+    pendingReviewId,
     files: () => (deps.fetchFiles ?? fetchPullFiles)(rest, ref),
     rest,
   };
@@ -301,9 +283,6 @@ function describeAnchor(run: Run, existing: Comment, comment: PublishComment, co
   const lines = describeLines(run, existing, thread, comment);
   return `${lines ? `${thread.path}:${lines}` : thread.path}${commitSuffix}`;
 }
-
-const isPending = (run: Run, comment: Comment) =>
-  run.data.reviews.find((r) => r.id === comment.reviewId)?.state === 'PENDING';
 
 // The first comment of the viewer that already says exactly this at this place.
 async function findIdentical(run: Run, comment: PublishComment, body: string): Promise<{ existing: Comment; ref: string } | undefined> {
@@ -396,10 +375,7 @@ function rightSide(lines: LineRange) {
 async function createGeneral(run: Run, comment: PublishComment, body: string): Promise<PublishResult> {
   if (!run.options.now) throw new Error('a general comment cannot be pending; add --now to post it immediately');
   if (run.options.dryRun) return created(run, comment, 'posted');
-  const data = await run.context.client<{ addComment: { commentEdge: { node: Written } } }>(ADD_COMMENT, {
-    input: { subjectId: run.data.pullRequest.id, body },
-  });
-  return created(run, comment, 'posted', data.addComment.commentEdge.node);
+  return created(run, comment, 'posted', await addConversationComment(run.context, run.data.pullRequest.id, body));
 }
 
 async function createPending(run: Run, { comment, path, lines, body }: Inline): Promise<PublishResult> {
@@ -409,21 +385,11 @@ async function createPending(run: Run, { comment, path, lines, body }: Inline): 
     : { pullRequestId: run.data.pullRequest.id };
   const anchor = lines ? { ...rightSide(lines), subjectType: 'LINE' } : { subjectType: 'FILE' };
   const data = await run.context.client<{
-    addPullRequestReviewThread: { thread: { comments: { nodes: (Written | null)[] } } | null };
+    addPullRequestReviewThread: { thread: { comments: { nodes: (WrittenComment | null)[] } } | null };
   }>(ADD_THREAD, { input: { ...target, path, ...anchor, body } });
   const first = data.addPullRequestReviewThread.thread?.comments.nodes[0];
   if (!first) throw new Error(REJECTED);
   return created(run, comment, 'pending', first);
-}
-
-// The review was created for this one comment, so it is safe to delete when GitHub dropped the comment.
-async function discardEmptyReview(run: Run, reviewId: string): Promise<never> {
-  try {
-    await run.context.client(DELETE_REVIEW, { input: { pullRequestReviewId: reviewId } });
-  } catch (error) {
-    throw new Error(`${REJECTED}; the empty pending review could not be deleted either: ${messageOf(error)}`);
-  }
-  throw new Error(REJECTED);
 }
 
 // Only a newly created review takes a commit for its lines.
@@ -432,7 +398,7 @@ async function createPinned(run: Run, { comment, path, lines, body }: Inline, co
   if (run.pendingReviewId) throw new Error(PENDING_BLOCKS_COMMIT);
   if (run.options.dryRun) return created(run, comment, 'pending');
   const data = await run.context.client<{
-    addPullRequestReview: { pullRequestReview: { id: string; comments: { nodes: (Written | null)[] } } };
+    addPullRequestReview: { pullRequestReview: { id: string; comments: { nodes: (WrittenComment | null)[] } } };
   }>(ADD_REVIEW, {
     input: {
       pullRequestId: run.data.pullRequest.id,
@@ -442,7 +408,7 @@ async function createPinned(run: Run, { comment, path, lines, body }: Inline, co
   });
   const review = data.addPullRequestReview.pullRequestReview;
   const first = review.comments.nodes[0];
-  if (!first) return discardEmptyReview(run, review.id);
+  if (!first) throw new Error(await discardEmptyReview(run.context, review.id, REJECTED));
   return created(run, comment, 'pending', first);
 }
 

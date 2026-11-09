@@ -1,10 +1,9 @@
 import { composeBody } from './publish.ts';
 import type { OwnCommentReason, PublishComment, PublishOptions, PublishResult } from './publish.ts';
-import { parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { extractComment } from './report-extract.ts';
 import type { Anchor } from './report-extract.ts';
-import { changeReviewState, loadReviewFile, quoteCliPath } from './review-files.ts';
+import { recordAfterWrite, requireConnectedReview } from './review-files.ts';
 import { linksOf, recordPosted } from './review-links.ts';
 import type { PostedAction } from './review-links.ts';
 
@@ -43,9 +42,9 @@ export interface PostedFinding {
 }
 
 // The finding is tied to its own comment by a link, so that is where the way on starts.
-function linkAdvice(reason: OwnCommentReason, ref: string, db: string): string {
+function linkAdvice(reason: OwnCommentReason, ref: string, quotedDb: string): string {
   const stays = reason === 'moved' ? `; ${ref} stays on GitHub until you delete it` : '';
-  return `remove the link with "pr-comments link remove --db ${quoteCliPath(db)} ${ref}" and post again (that creates a new comment${stays})`;
+  return `remove the link with "pr-comments link remove --db ${quotedDb} ${ref}" and post again (that creates a new comment${stays})`;
 }
 
 // Publishes the comment of ONE finding of the review database `dbPath`, using the
@@ -56,7 +55,7 @@ function linkAdvice(reason: OwnCommentReason, ref: string, db: string): string {
 //    When the finding has an own comment, that comment is updated (the engine refuses one the user did not write,
 //    one that is gone, and one that is on another place; the `reason` of such a refusal makes the result tell how to
 //    remove the link and post again); otherwise a new one is posted or an identical one of the user is adopted.
-// 3. When the result is not an error, has a `comment` and is not a dry run, `changeReviewState` records the comment
+// 3. When the result is not an error, has a `comment` and is not a dry run, `recordAfterWrite` records the comment
 //    ref in `linkable` (`knownRef`) and records the link with `recordPosted`, in one transaction under the write
 //    lock. When that fails the transaction is rolled back and the result becomes an error that names the ref and
 //    tells how to record it (`link own`).
@@ -68,12 +67,7 @@ export async function postFinding(
   options: PostFindingOptions,
   deps: PostFindingDeps,
 ): Promise<PostedFinding> {
-  const { data, links, pullRequest, paths } = await loadReviewFile(dbPath);
-  const quotedDb = quoteCliPath(paths.db);
-  if (pullRequest === undefined) {
-    throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
-  }
-  const ref = parsePullRequestUrl(pullRequest);
+  const { data, links, ref, paths, quotedDb } = await requireConnectedReview(dbPath);
   const extracted = extractComment(data, findingId, {
     anchor: options.anchor,
     commit: options.commit,
@@ -84,6 +78,14 @@ export async function postFinding(
   const own = linksOf(links, id).find((link) => link.role === 'own');
   const comment = own === undefined ? extracted.comment : { ...extracted.comment, commentRef: own.ref };
   const body = composeBody(comment.body, options.byAgent);
+  const base = {
+    finding: id,
+    anchors: extracted.anchors,
+    chosen: extracted.chosen,
+    warnings: extracted.warnings,
+    unlinked: extracted.unlinked,
+    body,
+  };
 
   const { byAgent, now, dryRun } = options;
   const published = await deps.publish(ref, comment, { byAgent, now, dryRun });
@@ -94,62 +96,24 @@ export async function postFinding(
     const result =
       reason === undefined || ownRef === undefined || plain.message === undefined
         ? plain
-        : { ...plain, message: `${plain.message}; ${linkAdvice(reason, ownRef, paths.db)}` };
-    return {
-      finding: id,
-      result,
-      anchors: extracted.anchors,
-      chosen: extracted.chosen,
-      warnings: extracted.warnings,
-      unlinked: extracted.unlinked,
-      body,
-    };
+        : { ...plain, message: `${plain.message}; ${linkAdvice(reason, ownRef, quotedDb)}` };
+    return { ...base, result };
   }
   const posted = published.comment;
   if (options.dryRun || posted === undefined) {
-    return {
-      finding: id,
-      result: published,
-      anchors: extracted.anchors,
-      chosen: extracted.chosen,
-      warnings: extracted.warnings,
-      unlinked: extracted.unlinked,
-      body,
-    };
+    return { ...base, result: published };
   }
   const action: PostedAction = published.action;
-  const was = action === 'created' ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
-  const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
-  try {
-    const { reportError } = await changeReviewState(
-      dbPath,
-      (state) => ({
-        state: recordPosted(state, id, posted, action, published.state, deps.now()),
-        result: undefined,
-      }),
-      { pullRequest: ref, knownRef: posted },
-    );
-    return {
-      finding: id,
-      result: published,
-      anchors: extracted.anchors,
-      chosen: extracted.chosen,
-      warnings: extracted.warnings,
-      unlinked: extracted.unlinked,
-      body,
-      ...(reportError === undefined ? {} : { reportError }),
-    };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    const message = `${was}, but it could not be recorded in the review (${reason}); record it with ${linkOwnCommand}`;
-    return {
-      finding: id,
-      result: { ...published, action: 'error', message },
-      anchors: extracted.anchors,
-      chosen: extracted.chosen,
-      warnings: extracted.warnings,
-      unlinked: extracted.unlinked,
-      body,
-    };
-  }
+  const recorded = await recordAfterWrite(
+    dbPath,
+    published,
+    (state) => recordPosted(state, id, posted, action, published.state, deps.now()),
+    {
+      pullRequest: ref,
+      knownRef: posted,
+      was: action === 'created' ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`,
+      advice: `record it with "pr-comments link own --db ${quotedDb} ${id} ${posted}"`,
+    },
+  );
+  return { ...base, ...recorded };
 }

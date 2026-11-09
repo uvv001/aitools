@@ -1,7 +1,17 @@
 import { commentRefFromUrl } from './comment-ref.ts';
 import type { TokenContext } from './download.ts';
-import { AccessDeniedError, fetchPullRequest } from './github.ts';
+import { AccessDeniedError } from './github.ts';
 import type { GraphQLClient } from './github.ts';
+import {
+  addConversationComment,
+  discardEmptyReview,
+  ID_NOT_READ,
+  isPending,
+  messageOf,
+  readViewerAndPullRequest,
+  sameLogin,
+  sameText,
+} from './github-write.ts';
 import { threadRange, type Comment, type PullRequestData, type ReviewThread } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
 
@@ -63,8 +73,6 @@ export interface ReplyDeps {
   loadPullRequest?: (client: GraphQLClient, ref: PullRequestRef) => Promise<PullRequestData>;
 }
 
-const VIEWER_QUERY = 'query { viewer { login } }';
-
 const ADD_REVIEW = `
 mutation($input: AddPullRequestReviewInput!) {
   addPullRequestReview(input: $input) { pullRequestReview { id } }
@@ -75,27 +83,17 @@ mutation($input: AddPullRequestReviewThreadReplyInput!) {
   addPullRequestReviewThreadReply(input: $input) { comment { id databaseId url state } }
 }`;
 
-const ADD_COMMENT = `
-mutation($input: AddCommentInput!) {
-  addComment(input: $input) { commentEdge { node { id url } } }
-}`;
-
-const DELETE_REVIEW = `
-mutation($input: DeletePullRequestReviewInput!) {
-  deletePullRequestReview(input: $input) { pullRequestReview { id } }
-}`;
-
 const REJECTED = 'GitHub rejected the reply (is the thread still there?)';
 const NEEDS_NOW =
   'a conversation comment can only be answered with a new conversation comment, which is visible at once; ' +
   'add --now to do that';
 const IDENTICAL = 'an identical reply of yours already exists';
-const ID_NOT_READ = 'created, but its id could not be read from the URL';
 
 interface Run {
   context: TokenContext;
   data: PullRequestData;
   viewer: string;
+  pendingReviewId: string | undefined;
   body: string;
   options: ReplyOptions;
 }
@@ -103,14 +101,6 @@ interface Run {
 interface Written {
   url: string;
 }
-
-const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-
-const normalize = (body: string) => body.replaceAll('\r\n', '\n').trim();
-
-const sameText = (a: string, b: string) => normalize(a) === normalize(b);
-
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 // The place of a review comment from its thread, as the pending list shows it (review-pending.ts): the line, or the
 // original one of an outdated thread; GitHub gives a file-level thread a line but no diff hunk.
@@ -128,12 +118,6 @@ function targetOf(data: PullRequestData, comment: Comment, ref: string): ReplyTa
   const thread = comment.kind === 'review' ? data.threads.find((t) => t.id === comment.threadId) : undefined;
   return { ref, author: comment.author, kind: comment.kind, ...placeOf(data, thread) };
 }
-
-const isPending = (run: Run, comment: Comment) =>
-  run.data.reviews.find((r) => r.id === comment.reviewId)?.state === 'PENDING';
-
-const viewersPendingReview = (run: Run) =>
-  run.data.reviews.find((r) => r.state === 'PENDING' && sameLogin(r.author, run.viewer));
 
 // What a reply is: a later comment of the thread (GitHub flattens a reply to a reply into the thread).
 const isReplyOf = (comment: Comment, threadId: string) =>
@@ -160,20 +144,10 @@ function created(run: Run, target: ReplyTarget, state: 'pending' | 'posted', nod
   return { ...result, ...(comment === undefined ? { message: ID_NOT_READ } : { comment }), url: node.url };
 }
 
-// The review was created by this run for this one reply, so it is safe to delete when the reply failed.
-async function discardEmptyReview(run: Run, reviewId: string, reason: string): Promise<string> {
-  try {
-    await run.context.client(DELETE_REVIEW, { input: { pullRequestReviewId: reviewId } });
-    return reason;
-  } catch (error) {
-    return `${reason}; the empty pending review could not be deleted either: ${messageOf(error)}`;
-  }
-}
-
 // Always into a pending review of the viewer: a reply without one is immediate, and creates its own review.
 async function writeThreadReply(run: Run, threadId: string, target: ReplyTarget): Promise<ReplyResult> {
   const { client } = run.context;
-  let reviewId = viewersPendingReview(run)?.id;
+  let reviewId = run.pendingReviewId;
   let createdReview: string | undefined;
   try {
     if (reviewId === undefined) {
@@ -191,7 +165,7 @@ async function writeThreadReply(run: Run, threadId: string, target: ReplyTarget)
   } catch (error) {
     // Nothing was written, so the next token may try; after the review was created the failure is final.
     if (createdReview === undefined) throw error;
-    throw new Error(await discardEmptyReview(run, createdReview, messageOf(error)));
+    throw new Error(await discardEmptyReview(run.context, createdReview, messageOf(error)));
   }
 }
 
@@ -217,10 +191,7 @@ async function replyInConversation(run: Run, answered: Comment, target: ReplyTar
   if (identical) return unchanged(run, identical, target);
   if (!run.options.now) throw new Error(NEEDS_NOW);
   if (run.options.dryRun) return created(run, target, 'posted');
-  const data = await run.context.client<{ addComment: { commentEdge: { node: Written } } }>(ADD_COMMENT, {
-    input: { subjectId: run.data.pullRequest.id, body: run.body },
-  });
-  return created(run, target, 'posted', data.addComment.commentEdge.node);
+  return created(run, target, 'posted', await addConversationComment(run.context, run.data.pullRequest.id, run.body));
 }
 
 // Replies to ONE comment of the pull request `ref`, for the user the token belongs to:
@@ -268,14 +239,13 @@ export async function replyToComment(
     message,
   });
   try {
-    const { viewer } = await context.client<{ viewer: { login: string } }>(VIEWER_QUERY, {});
-    const data = await (deps.loadPullRequest ?? fetchPullRequest)(context.client, ref);
+    const { viewer, data, pendingReviewId } = await readViewerAndPullRequest(context, ref, deps.loadPullRequest);
     const answered = data.comments.find((c) => commentRefFromUrl(c.url) === request.commentRef);
     if (!answered) return fail(`comment ${request.commentRef} no longer exists in this pull request`);
     target = targetOf(data, answered, request.commentRef);
     const { requires } = request;
     if (requires && !data.comments.some((c) => commentRefFromUrl(c.url) === requires.ref)) return fail(requires.missing);
-    const run: Run = { context, data, viewer: viewer.login, body: request.body, options };
+    const run: Run = { context, data, viewer, pendingReviewId, body: request.body, options };
     return await (answered.kind === 'review'
       ? replyInThread(run, answered, target)
       : replyInConversation(run, answered, target));

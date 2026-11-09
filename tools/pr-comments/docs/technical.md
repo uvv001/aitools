@@ -23,10 +23,10 @@ Node 24.15, TypeScript run directly by Node (type stripping), the built-in `node
 | Area | Files |
 | --- | --- |
 | Command line | `src/cli.ts`: one table of commands, strict arguments, the help texts, one function per command |
-| Review database | `review-store.ts` (schema, open modes, `inTransaction`), `store.ts` (the pull request snapshot, `linkable`), `review-files.ts` (init, render, sync, `changeReviewState`), `review-naming.ts`, `review-dump.ts` |
+| Review database | `review-store.ts` (schema, open modes, `inTransaction`), `store.ts` (the pull request snapshot, `linkable`), `review-files.ts` (init, render, sync, `requireConnectedReview`, `changeReviewState`, `recordAfterWrite`), `review-naming.ts`, `review-dump.ts` |
 | Review model | `review-model.ts`, `review-ops.ts` (pure changes of a review), `review-links.ts` (rules of the links), `review-view.ts` (list and show), `review-pending.ts` (the list of `link pending`) |
 | Report | `review-render.ts` (writes it), `report-dashboard.ts` |
-| GitHub | `github.ts` (GraphQL reads, check runs), `rest.ts`, `publish.ts` (comment engine), `reply.ts` (reply engine), `review-post.ts` and `review-reply.ts` (glue between the engines and the database), `download.ts`, `token.ts`, `token-memo.ts` |
+| GitHub | `github.ts` (GraphQL reads, check runs), `rest.ts`, `github-write.ts` (shared write queries, mutations, and helpers), `publish.ts` (comment engine), `reply.ts` (reply engine), `review-post.ts` and `review-reply.ts` (glue between the engines and the database), `download.ts`, `token.ts`, `token-memo.ts` |
 | Pull request as markdown | `markdown.ts` (`report comments`) |
 | Comment building | `report-extract.ts` (finding to comment), `comment-ref.ts`, `diff.ts` |
 | Git | `git-revision.ts` |
@@ -157,9 +157,9 @@ Consequences:
 
 A comment that was just written on GitHub is not in the stored snapshot yet, and a link may only name a row in `linkable`. Instead of re-downloading the pull request after every write, both commands record the returned comment ref in `linkable` inside the recording transaction:
 
-1. They load the review read-only and check what they can offline (connected pull request, a duplicate that has a finding with an own comment, …).
-2. The engine writes to GitHub (`publish.ts` or `reply.ts`). A dry run stops here.
-3. If the result is not an error and has a comment, `changeReviewState(…, { pullRequest, knownRef })` verifies the review is still connected to `pullRequest`, records `knownRef` in `linkable` with `gone = 0` (`finding post` passes the posted comment ref; `link reply` passes `[ref, replyRef]` so a target ref previously marked `gone = 1` is restored to `gone = 0`), and records the link or reply update in one transaction.
+1. They load the review read-only via `requireConnectedReview` and check what they can offline (connected pull request, a duplicate that has a finding with an own comment, …).
+2. The engine writes to GitHub (`publish.ts` or `reply.ts`, sharing `github-write.ts`). A dry run stops here.
+3. If the result is not an error and has a comment, `recordAfterWrite` calls `changeReviewState(…, { pullRequest, knownRef })`, which verifies the review is still connected to `pullRequest`, records `knownRef` in `linkable` with `gone = 0` (`finding post` passes the posted comment ref; `link reply` passes `[ref, replyRef]` so a target ref previously marked `gone = 1` is restored to `gone = 0`), and records the link or reply update in one transaction.
 
 If step 3 fails, the transaction is rolled back (`linkable` included) and the error says how to record the link by hand (or to run `link reply` again). A rerun finds the comment again and records it.
 

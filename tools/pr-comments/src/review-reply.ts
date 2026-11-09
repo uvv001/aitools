@@ -1,9 +1,8 @@
 import { commentUrl, isAnnotationRef } from './comment-ref.ts';
-import { parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { composeBody } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
-import { changeReviewState, loadReviewFile, quoteCliPath } from './review-files.ts';
+import { recordAfterWrite, requireConnectedReview } from './review-files.ts';
 import { linksOf, recordReplied } from './review-links.ts';
 
 export interface ReplyDuplicateOptions {
@@ -46,7 +45,7 @@ export interface RepliedDuplicate {
 //    `missing` says to remove the link ("link remove") and to post the finding again ("finding post"), with
 //    the real database path as the other hints here. That error is not recorded.
 // 4. Right after the engine returned (outside a dry run) a result that is not an error and has a `comment`:
-//    `changeReviewState` records the target and reply refs in `linkable` (`knownRef: [ref, replyRef]`) and records the
+//    `recordAfterWrite` records the target and reply refs in `linkable` (`knownRef: [ref, replyRef]`) and records the
 //    reply with `recordReplied` of review-links.ts in one transaction under the write lock, which adds no entry when it
 //    exists already, as after an `unchanged` rerun. When recording fails the transaction is rolled back and the result
 //    becomes an error that names the reply and says how it stands (`the reply was posted as r546201, but it could not
@@ -62,11 +61,7 @@ export async function replyToDuplicate(
   deps: ReplyDuplicateDeps,
 ): Promise<RepliedDuplicate> {
   if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation; there is nothing to reply to`);
-  const { links, pullRequest, paths } = await loadReviewFile(dbPath);
-  const quotedDb = quoteCliPath(paths.db);
-  if (pullRequest === undefined) {
-    throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
-  }
+  const { links, pullRequest, ref: pullRequestRef, quotedDb } = await requireConnectedReview(dbPath);
   const linked = links.find((link) => link.ref === ref);
   if (linked === undefined) {
     throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db ${quotedDb} <finding> ${ref}"`);
@@ -93,26 +88,21 @@ export async function replyToDuplicate(
     `remove the link with "pr-comments link remove --db ${quotedDb} ${own.ref}" ` +
     `and post ${finding} again with "pr-comments finding post --db ${quotedDb} ${finding}"`;
   const request = { commentRef: ref, body, requires: { ref: own.ref, missing } };
-  const pullRequestRef = parsePullRequestUrl(pullRequest);
   const result = await deps.reply(pullRequestRef, request, { now: options.now, dryRun: options.dryRun });
   const replied: RepliedDuplicate = { finding, own: own.ref, link, text: body, result };
 
   const replyRef = result.comment;
   if (options.dryRun || result.action === 'error' || replyRef === undefined) return replied;
-  const was = result.action === 'created' ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
-  try {
-    const { reportError } = await changeReviewState(
-      dbPath,
-      (state) => ({
-        state: recordReplied(state, ref, replyRef, result.state, deps.now()),
-        result: undefined,
-      }),
-      { pullRequest: pullRequestRef, knownRef: [ref, replyRef] },
-    );
-    return reportError === undefined ? replied : { ...replied, reportError };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    const message = `${was}, but it could not be recorded in the review (${reason}); run the command again to record it`;
-    return { ...replied, result: { ...result, action: 'error', message } };
-  }
+  const recorded = await recordAfterWrite(
+    dbPath,
+    result,
+    (state) => recordReplied(state, ref, replyRef, result.state, deps.now()),
+    {
+      pullRequest: pullRequestRef,
+      knownRef: [ref, replyRef],
+      was: result.action === 'created' ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`,
+      advice: 'run the command again to record it',
+    },
+  );
+  return { ...replied, ...recorded };
 }
