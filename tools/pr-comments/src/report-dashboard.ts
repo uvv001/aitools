@@ -14,7 +14,7 @@ export function buildDashboard(findings: DashboardFinding[]): string[] {
     const listed = findings.filter((finding) => finding.state === state.marker);
     if (listed.length === 0) continue;
     block.push(`### ${state.marker} ${listed.length} ${state.label}`, '');
-    listed.forEach((finding, index) => block.push(`  ${index + 1}. [${finding.id}](#${finding.anchor})`));
+    listed.forEach((finding, index) => block.push(`  ${index + 1}. [${finding.id}](#${finding.id.toLowerCase()})`));
     block.push('');
   }
   return block;

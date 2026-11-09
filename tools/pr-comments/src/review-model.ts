@@ -22,7 +22,6 @@ export const SEVERITIES = ['🔴', '🟡', '⚪'];
 export interface DashboardFinding {
   id: string;
   state: string;
-  anchor: string;
 }
 
 // One line of **Reviewed**, written per round.

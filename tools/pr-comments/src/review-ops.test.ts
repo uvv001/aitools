@@ -45,7 +45,7 @@ function sound(result: ReviewData, message?: string): ReviewData {
   expect(findingsAt, message).toBeGreaterThan(dashboardAt);
   let after = findingsAt;
   for (const finding of result.findings) {
-    const heading = `\n### ${finding.state} ${finding.severity} ${finding.id} — ${finding.title}\n`;
+    const heading = `\n<a id="${finding.id.toLowerCase()}"></a>\n### ${finding.state} ${finding.severity} ${finding.id} — ${finding.title}\n`;
     const pos = text.indexOf(heading, after);
     expect(pos, message).toBeGreaterThan(after);
     after = pos + 1;
@@ -736,6 +736,7 @@ describe('the text of a review', () => {
     expect(report.slice(report.indexOf('## Findings'))).toStrictEqual([
       '## Findings',
       '',
+      '<a id="f1"></a>',
       '### 🔧 🔴 F1 — Missing timeout',
       '',
       '#### Description',
