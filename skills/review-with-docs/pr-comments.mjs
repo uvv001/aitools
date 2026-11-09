@@ -817,6 +817,47 @@ function rightHunkRanges(patch) {
 	return ranges;
 }
 //#endregion
+//#region src/github-write.ts
+const VIEWER_QUERY = "query { viewer { login } }";
+const ADD_COMMENT = `
+mutation($input: AddCommentInput!) {
+  addComment(input: $input) { commentEdge { node { id url } } }
+}`;
+const DELETE_REVIEW = `
+mutation($input: DeletePullRequestReviewInput!) {
+  deletePullRequestReview(input: $input) { pullRequestReview { id } }
+}`;
+const ID_NOT_READ = "created, but its id could not be read from the URL";
+const sameLogin = (a, b) => a.toLowerCase() === b.toLowerCase();
+const normalize = (body) => body.replaceAll("\r\n", "\n").trim();
+const sameText = (a, b) => normalize(a) === normalize(b);
+const messageOf = (error) => error instanceof Error ? error.message : String(error);
+const isPending = (run, comment) => run.data.reviews.find((r) => r.id === comment.reviewId)?.state === "PENDING";
+async function readViewerAndPullRequest(context, ref, loader = fetchPullRequest) {
+	const { viewer } = await context.client(VIEWER_QUERY, {});
+	const data = await loader(context.client, ref);
+	const pending = data.reviews.find((r) => r.state === "PENDING" && sameLogin(r.author, viewer.login));
+	return {
+		viewer: viewer.login,
+		data,
+		pendingReviewId: pending?.id
+	};
+}
+async function addConversationComment(context, pullRequestId, body) {
+	return (await context.client(ADD_COMMENT, { input: {
+		subjectId: pullRequestId,
+		body
+	} })).addComment.commentEdge.node;
+}
+async function discardEmptyReview(context, reviewId, reason) {
+	try {
+		await context.client(DELETE_REVIEW, { input: { pullRequestReviewId: reviewId } });
+		return reason;
+	} catch (error) {
+		return `${reason}; the empty pending review could not be deleted either: ${messageOf(error)}`;
+	}
+}
+//#endregion
 //#region src/rest.ts
 function restBaseUrl(host) {
 	return host === "github.com" ? "https://api.github.com" : `https://${host}/api/v3`;
@@ -863,7 +904,6 @@ const AGENT_DISCLAIMER = "🤖 *Written by an AI agent.*";
 function composeBody(text, byAgent) {
 	return byAgent ? [AGENT_DISCLAIMER, text].join("\n\n") : text;
 }
-const VIEWER_QUERY$1 = "query { viewer { login } }";
 const ADD_THREAD = `
 mutation($input: AddPullRequestReviewThreadInput!) {
   addPullRequestReviewThread(input: $input) {
@@ -875,10 +915,6 @@ mutation($input: AddPullRequestReviewInput!) {
   addPullRequestReview(input: $input) {
     pullRequestReview { id state comments(first: 1) { nodes { id url } } }
   }
-}`;
-const ADD_COMMENT$1 = `
-mutation($input: AddCommentInput!) {
-  addComment(input: $input) { commentEdge { node { id url } } }
 }`;
 const UPDATE_REVIEW_COMMENT = `
 mutation($input: UpdatePullRequestReviewCommentInput!) {
@@ -892,10 +928,6 @@ const COMMIT_QUERY = `
 query($owner: String!, $repo: String!, $expression: String!) {
   repository(owner: $owner, name: $repo) { object(expression: $expression) { ... on Commit { oid } } }
 }`;
-const DELETE_REVIEW$1 = `
-mutation($input: DeletePullRequestReviewInput!) {
-  deletePullRequestReview(input: $input) { pullRequestReview { id } }
-}`;
 const FULL_SHA = /^[0-9a-f]{40}$/i;
 const REJECTED$1 = "GitHub rejected the comment (is the anchor still part of the diff?)";
 const PENDING_BLOCKS_NOW = "you have a pending review; GitHub cannot publish a single comment while it exists. Submit or discard it in the web UI, or post without --now";
@@ -903,11 +935,6 @@ const PENDING_BLOCKS_COMMIT = "a commit can only be pinned when the pending revi
 const pendingCannotBeNow = (ref) => `comment ${ref} is in your pending review and cannot be published on its own; submit your review in the web UI, or run without --now to update it`;
 const MAX_LISTED_RANGES = 8;
 const ADOPTED = "an identical comment of yours already exists; adopted";
-const ID_NOT_READ$1 = "created, but its id could not be read from the URL";
-const sameLogin$1 = (a, b) => a.toLowerCase() === b.toLowerCase();
-const normalize$1 = (body) => body.replaceAll("\r\n", "\n").trim();
-const sameText$1 = (a, b) => normalize$1(a) === normalize$1(b);
-const messageOf$1 = (error) => error instanceof Error ? error.message : String(error);
 const formatLines = ({ start, end }) => start === end ? `${start}` : `${start}-${end}`;
 function outcome(run, { path, lines }, action, fields = {}) {
 	return {
@@ -923,24 +950,22 @@ function created$1(run, comment, state, node) {
 	if (!node) return outcome(run, comment, "created", { state });
 	const ref = commentRefFromUrl(node.url);
 	return outcome(run, comment, "created", {
-		...ref ? { comment: ref } : { message: ID_NOT_READ$1 },
+		...ref ? { comment: ref } : { message: ID_NOT_READ },
 		state,
 		url: node.url,
 		commentId: node.id
 	});
 }
 async function startRun(context, ref, options, deps) {
-	const { viewer } = await context.client(VIEWER_QUERY$1, {});
-	const data = await (deps.loadPullRequest ?? fetchPullRequest)(context.client, ref);
-	const pending = data.reviews.find((r) => r.state === "PENDING" && sameLogin$1(r.author, viewer.login));
+	const { viewer, data, pendingReviewId } = await readViewerAndPullRequest(context, ref, deps.loadPullRequest);
 	const rest = deps.rest ?? createRestClient(context.host, context.token, context.fetchImpl);
 	return {
 		context,
 		ref,
 		options,
 		data,
-		viewer: viewer.login,
-		pendingReviewId: pending?.id,
+		viewer,
+		pendingReviewId,
 		files: () => (deps.fetchFiles ?? fetchPullFiles)(rest, ref),
 		rest
 	};
@@ -948,7 +973,7 @@ async function startRun(context, ref, options, deps) {
 function findOwn(run, ref) {
 	const found = run.data.comments.find((c) => commentRefFromUrl(c.url) === ref);
 	if (!found) throw new OwnCommentError(`comment ${ref} no longer exists in this pull request`, "gone");
-	if (!sameLogin$1(found.author, run.viewer)) throw new OwnCommentError(`comment ${ref} was written by ${found.author}; only your own comments can be updated`, "not-yours");
+	if (!sameLogin(found.author, run.viewer)) throw new OwnCommentError(`comment ${ref} was written by ${found.author}; only your own comments can be updated`, "not-yours");
 	return found;
 }
 function threadLines(thread) {
@@ -1013,11 +1038,10 @@ function describeAnchor(run, existing, comment, commitSuffix = "") {
 	const lines = describeLines(run, existing, thread, comment);
 	return `${lines ? `${thread.path}:${lines}` : thread.path}${commitSuffix}`;
 }
-const isPending$1 = (run, comment) => run.data.reviews.find((r) => r.id === comment.reviewId)?.state === "PENDING";
 async function findIdentical(run, comment, body) {
 	const candidates = run.data.comments.filter((existing) => {
 		const ref = commentRefFromUrl(existing.url);
-		return Boolean(ref && sameLogin$1(existing.author, run.viewer) && sameText$1(existing.body, body) && sameAnchor(run, existing, comment));
+		return Boolean(ref && sameLogin(existing.author, run.viewer) && sameText(existing.body, body) && sameAnchor(run, existing, comment));
 	});
 	if (candidates.length === 0) return void 0;
 	const pinned = comment.path !== void 0 ? explicitCommit(run, comment) : void 0;
@@ -1041,7 +1065,7 @@ async function updateBody(run, existing, body) {
 function existingFields(run, existing, ref) {
 	return {
 		comment: ref,
-		state: isPending$1(run, existing) ? "pending" : "posted",
+		state: isPending(run, existing) ? "pending" : "posted",
 		url: existing.url,
 		commentId: existing.id
 	};
@@ -1056,9 +1080,9 @@ async function publishExisting(run, comment, existing, ref, body) {
 		const newCommit = samePlace && pinnedOid ? `@${pinnedOid.slice(0, 7)}` : "";
 		throw new OwnCommentError(`comment ${ref} is on ${describeAnchor(run, existing, comment, oldCommit)}, the finding says ${describePlace(comment, newCommit)}; an existing comment cannot be moved`, "moved");
 	}
-	if (run.options.now && isPending$1(run, existing)) throw new Error(pendingCannotBeNow(ref));
+	if (run.options.now && isPending(run, existing)) throw new Error(pendingCannotBeNow(ref));
 	const fields = existingFields(run, existing, ref);
-	if (sameText$1(existing.body, body)) return outcome(run, comment, "unchanged", fields);
+	if (sameText(existing.body, body)) return outcome(run, comment, "unchanged", fields);
 	if (!run.options.dryRun) await updateBody(run, existing, body);
 	return outcome(run, comment, "updated", fields);
 }
@@ -1089,10 +1113,7 @@ function rightSide(lines) {
 async function createGeneral(run, comment, body) {
 	if (!run.options.now) throw new Error("a general comment cannot be pending; add --now to post it immediately");
 	if (run.options.dryRun) return created$1(run, comment, "posted");
-	return created$1(run, comment, "posted", (await run.context.client(ADD_COMMENT$1, { input: {
-		subjectId: run.data.pullRequest.id,
-		body
-	} })).addComment.commentEdge.node);
+	return created$1(run, comment, "posted", await addConversationComment(run.context, run.data.pullRequest.id, body));
 }
 async function createPending(run, { comment, path, lines, body }) {
 	if (run.options.dryRun) return created$1(run, comment, "pending");
@@ -1110,14 +1131,6 @@ async function createPending(run, { comment, path, lines, body }) {
 	if (!first) throw new Error(REJECTED$1);
 	return created$1(run, comment, "pending", first);
 }
-async function discardEmptyReview$1(run, reviewId) {
-	try {
-		await run.context.client(DELETE_REVIEW$1, { input: { pullRequestReviewId: reviewId } });
-	} catch (error) {
-		throw new Error(`${REJECTED$1}; the empty pending review could not be deleted either: ${messageOf$1(error)}`);
-	}
-	throw new Error(REJECTED$1);
-}
 async function createPinned(run, { comment, path, lines, body }, commit) {
 	if (!lines) throw new Error("file-level comments cannot be pinned to a commit");
 	if (run.pendingReviewId) throw new Error(PENDING_BLOCKS_COMMIT);
@@ -1132,7 +1145,7 @@ async function createPinned(run, { comment, path, lines, body }, commit) {
 		}]
 	} })).addPullRequestReview.pullRequestReview;
 	const first = review.comments.nodes[0];
-	if (!first) return discardEmptyReview$1(run, review.id);
+	if (!first) throw new Error(await discardEmptyReview(run.context, review.id, REJECTED$1));
 	return created$1(run, comment, "pending", first);
 }
 function postSingleComment(run, { path, lines, body }, commitId) {
@@ -1194,7 +1207,7 @@ async function settle(run, comment) {
 			message: error.message,
 			reason: error.reason
 		});
-		return failure(run, comment, messageOf$1(error));
+		return failure(run, comment, messageOf(error));
 	}
 }
 async function publishComment(context, ref, comment, options, deps = {}) {
@@ -1202,7 +1215,6 @@ async function publishComment(context, ref, comment, options, deps = {}) {
 }
 //#endregion
 //#region src/reply.ts
-const VIEWER_QUERY = "query { viewer { login } }";
 const ADD_REVIEW = `
 mutation($input: AddPullRequestReviewInput!) {
   addPullRequestReview(input: $input) { pullRequestReview { id } }
@@ -1211,22 +1223,9 @@ const ADD_REPLY = `
 mutation($input: AddPullRequestReviewThreadReplyInput!) {
   addPullRequestReviewThreadReply(input: $input) { comment { id databaseId url state } }
 }`;
-const ADD_COMMENT = `
-mutation($input: AddCommentInput!) {
-  addComment(input: $input) { commentEdge { node { id url } } }
-}`;
-const DELETE_REVIEW = `
-mutation($input: DeletePullRequestReviewInput!) {
-  deletePullRequestReview(input: $input) { pullRequestReview { id } }
-}`;
 const REJECTED = "GitHub rejected the reply (is the thread still there?)";
 const NEEDS_NOW = "a conversation comment can only be answered with a new conversation comment, which is visible at once; add --now to do that";
 const IDENTICAL = "an identical reply of yours already exists";
-const ID_NOT_READ = "created, but its id could not be read from the URL";
-const sameLogin = (a, b) => a.toLowerCase() === b.toLowerCase();
-const normalize = (body) => body.replaceAll("\r\n", "\n").trim();
-const sameText = (a, b) => normalize(a) === normalize(b);
-const messageOf = (error) => error instanceof Error ? error.message : String(error);
 function placeOf(data, thread) {
 	if (!thread) return {};
 	const root = data.comments.filter((c) => c.threadId === thread.id).sort((a, b) => (a.threadPosition ?? 0) - (b.threadPosition ?? 0))[0];
@@ -1247,8 +1246,6 @@ function targetOf(data, comment, ref) {
 		...placeOf(data, thread)
 	};
 }
-const isPending = (run, comment) => run.data.reviews.find((r) => r.id === comment.reviewId)?.state === "PENDING";
-const viewersPendingReview = (run) => run.data.reviews.find((r) => r.state === "PENDING" && sameLogin(r.author, run.viewer));
 const isReplyOf = (comment, threadId) => comment.threadId === threadId && ((comment.threadPosition ?? 0) > 0 || comment.replyToId !== null);
 function unchanged(run, existing, target) {
 	const comment = commentRefFromUrl(existing.url);
@@ -1277,17 +1274,9 @@ function created(run, target, state, node) {
 		url: node.url
 	};
 }
-async function discardEmptyReview(run, reviewId, reason) {
-	try {
-		await run.context.client(DELETE_REVIEW, { input: { pullRequestReviewId: reviewId } });
-		return reason;
-	} catch (error) {
-		return `${reason}; the empty pending review could not be deleted either: ${messageOf(error)}`;
-	}
-}
 async function writeThreadReply(run, threadId, target) {
 	const { client } = run.context;
-	let reviewId = viewersPendingReview(run)?.id;
+	let reviewId = run.pendingReviewId;
 	let createdReview;
 	try {
 		if (reviewId === void 0) reviewId = createdReview = (await client(ADD_REVIEW, { input: { pullRequestId: run.data.pullRequest.id } })).addPullRequestReview.pullRequestReview.id;
@@ -1300,7 +1289,7 @@ async function writeThreadReply(run, threadId, target) {
 		return created(run, target, comment.state === "PENDING" ? "pending" : "posted", comment);
 	} catch (error) {
 		if (createdReview === void 0) throw error;
-		throw new Error(await discardEmptyReview(run, createdReview, messageOf(error)));
+		throw new Error(await discardEmptyReview(run.context, createdReview, messageOf(error)));
 	}
 }
 async function replyInThread(run, answered, target) {
@@ -1322,10 +1311,7 @@ async function replyInConversation(run, answered, target) {
 	if (identical) return unchanged(run, identical, target);
 	if (!run.options.now) throw new Error(NEEDS_NOW);
 	if (run.options.dryRun) return created(run, target, "posted");
-	return created(run, target, "posted", (await run.context.client(ADD_COMMENT, { input: {
-		subjectId: run.data.pullRequest.id,
-		body: run.body
-	} })).addComment.commentEdge.node);
+	return created(run, target, "posted", await addConversationComment(run.context, run.data.pullRequest.id, run.body));
 }
 async function replyToComment(context, ref, request, options, deps = {}) {
 	let target;
@@ -1336,8 +1322,7 @@ async function replyToComment(context, ref, request, options, deps = {}) {
 		message
 	});
 	try {
-		const { viewer } = await context.client(VIEWER_QUERY, {});
-		const data = await (deps.loadPullRequest ?? fetchPullRequest)(context.client, ref);
+		const { viewer, data, pendingReviewId } = await readViewerAndPullRequest(context, ref, deps.loadPullRequest);
 		const answered = data.comments.find((c) => commentRefFromUrl(c.url) === request.commentRef);
 		if (!answered) return fail(`comment ${request.commentRef} no longer exists in this pull request`);
 		target = targetOf(data, answered, request.commentRef);
@@ -1346,7 +1331,8 @@ async function replyToComment(context, ref, request, options, deps = {}) {
 		const run = {
 			context,
 			data,
-			viewer: viewer.login,
+			viewer,
+			pendingReviewId,
 			body: request.body,
 			options
 		};
@@ -3080,6 +3066,18 @@ async function loadReviewFile(dbPath) {
 		db.close();
 	}
 }
+async function requireConnectedReview(dbPath) {
+	const loaded = await loadReviewFile(dbPath);
+	const quotedDb = quoteCliPath(loaded.paths.db);
+	const { pullRequest } = loaded;
+	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
+	return {
+		...loaded,
+		pullRequest,
+		ref: parsePullRequestUrl(pullRequest),
+		quotedDb
+	};
+}
 async function loadSnapshot(dbPath) {
 	const db = openReviewDb(reviewPaths(dbPath).db, "readonly");
 	try {
@@ -3199,6 +3197,29 @@ async function mutateReviewFile(dbPath, mutate) {
 		data: state.data,
 		result
 	};
+}
+async function recordAfterWrite(dbPath, result, change, options) {
+	try {
+		const { reportError } = await changeReviewState(dbPath, (state) => ({
+			state: change(state),
+			result: void 0
+		}), {
+			pullRequest: options.pullRequest,
+			knownRef: options.knownRef
+		});
+		return reportError === void 0 ? { result } : {
+			result,
+			reportError
+		};
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		const message = `${options.was}, but it could not be recorded in the review (${reason}); ${options.advice}`;
+		return { result: {
+			...result,
+			action: "error",
+			message
+		} };
+	}
 }
 async function syncReviewFile(dbPath, data) {
 	const paths = reviewPaths(dbPath);
@@ -3608,15 +3629,11 @@ function extractComment(data, findingId, options = {}) {
 }
 //#endregion
 //#region src/review-post.ts
-function linkAdvice(reason, ref, db) {
-	const stays = reason === "moved" ? `; ${ref} stays on GitHub until you delete it` : "";
-	return `remove the link with "pr-comments link remove --db ${quoteCliPath(db)} ${ref}" and post again (that creates a new comment${stays})`;
+function linkAdvice(reason, ref, quotedDb) {
+	return `remove the link with "pr-comments link remove --db ${quotedDb} ${ref}" and post again (that creates a new comment${reason === "moved" ? `; ${ref} stays on GitHub until you delete it` : ""})`;
 }
 async function postFinding(dbPath, findingId, options, deps) {
-	const { data, links, pullRequest, paths } = await loadReviewFile(dbPath);
-	const quotedDb = quoteCliPath(paths.db);
-	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
-	const ref = parsePullRequestUrl(pullRequest);
+	const { data, links, ref, paths, quotedDb } = await requireConnectedReview(dbPath);
 	const extracted = extractComment(data, findingId, {
 		anchor: options.anchor,
 		commit: options.commit,
@@ -3629,6 +3646,14 @@ async function postFinding(dbPath, findingId, options, deps) {
 		commentRef: own.ref
 	};
 	const body = composeBody(comment.body, options.byAgent);
+	const base = {
+		finding: id,
+		anchors: extracted.anchors,
+		chosen: extracted.chosen,
+		warnings: extracted.warnings,
+		unlinked: extracted.unlinked,
+		body
+	};
 	const { byAgent, now, dryRun } = options;
 	const published = await deps.publish(ref, comment, {
 		byAgent,
@@ -3638,74 +3663,37 @@ async function postFinding(dbPath, findingId, options, deps) {
 	if (published.action === "error") {
 		const { reason, ...plain } = published;
 		const ownRef = comment.commentRef;
+		const result = reason === void 0 || ownRef === void 0 || plain.message === void 0 ? plain : {
+			...plain,
+			message: `${plain.message}; ${linkAdvice(reason, ownRef, quotedDb)}`
+		};
 		return {
-			finding: id,
-			result: reason === void 0 || ownRef === void 0 || plain.message === void 0 ? plain : {
-				...plain,
-				message: `${plain.message}; ${linkAdvice(reason, ownRef, paths.db)}`
-			},
-			anchors: extracted.anchors,
-			chosen: extracted.chosen,
-			warnings: extracted.warnings,
-			unlinked: extracted.unlinked,
-			body
+			...base,
+			result
 		};
 	}
 	const posted = published.comment;
 	if (options.dryRun || posted === void 0) return {
-		finding: id,
-		result: published,
-		anchors: extracted.anchors,
-		chosen: extracted.chosen,
-		warnings: extracted.warnings,
-		unlinked: extracted.unlinked,
-		body
+		...base,
+		result: published
 	};
 	const action = published.action;
-	const was = action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
-	const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
-	try {
-		const { reportError } = await changeReviewState(dbPath, (state) => ({
-			state: recordPosted(state, id, posted, action, published.state, deps.now()),
-			result: void 0
-		}), {
-			pullRequest: ref,
-			knownRef: posted
-		});
-		return {
-			finding: id,
-			result: published,
-			anchors: extracted.anchors,
-			chosen: extracted.chosen,
-			warnings: extracted.warnings,
-			unlinked: extracted.unlinked,
-			body,
-			...reportError === void 0 ? {} : { reportError }
-		};
-	} catch (error) {
-		const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); record it with ${linkOwnCommand}`;
-		return {
-			finding: id,
-			result: {
-				...published,
-				action: "error",
-				message
-			},
-			anchors: extracted.anchors,
-			chosen: extracted.chosen,
-			warnings: extracted.warnings,
-			unlinked: extracted.unlinked,
-			body
-		};
-	}
+	const recorded = await recordAfterWrite(dbPath, published, (state) => recordPosted(state, id, posted, action, published.state, deps.now()), {
+		pullRequest: ref,
+		knownRef: posted,
+		was: action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`,
+		advice: `record it with "pr-comments link own --db ${quotedDb} ${id} ${posted}"`
+	});
+	return {
+		...base,
+		...recorded
+	};
 }
 //#endregion
 //#region src/review-reply.ts
 async function replyToDuplicate(dbPath, ref, options, deps) {
 	if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation; there is nothing to reply to`);
-	const { links, pullRequest, paths } = await loadReviewFile(dbPath);
-	const quotedDb = quoteCliPath(paths.db);
-	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
+	const { links, pullRequest, ref: pullRequestRef, quotedDb } = await requireConnectedReview(dbPath);
 	const linked = links.find((link) => link.ref === ref);
 	if (linked === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db ${quotedDb} <finding> ${ref}"`);
 	if (linked.role === "note") throw new Error(`${ref} is recorded as a note, not as a duplicate of a finding`);
@@ -3725,7 +3713,6 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 			missing
 		}
 	};
-	const pullRequestRef = parsePullRequestUrl(pullRequest);
 	const result = await deps.reply(pullRequestRef, request, {
 		now: options.now,
 		dryRun: options.dryRun
@@ -3739,36 +3726,22 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 	};
 	const replyRef = result.comment;
 	if (options.dryRun || result.action === "error" || replyRef === void 0) return replied;
-	const was = result.action === "created" ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
-	try {
-		const { reportError } = await changeReviewState(dbPath, (state) => ({
-			state: recordReplied(state, ref, replyRef, result.state, deps.now()),
-			result: void 0
-		}), {
-			pullRequest: pullRequestRef,
-			knownRef: [ref, replyRef]
-		});
-		return reportError === void 0 ? replied : {
-			...replied,
-			reportError
-		};
-	} catch (error) {
-		const message = `${was}, but it could not be recorded in the review (${error instanceof Error ? error.message : String(error)}); run the command again to record it`;
-		return {
-			...replied,
-			result: {
-				...result,
-				action: "error",
-				message
-			}
-		};
-	}
+	const recorded = await recordAfterWrite(dbPath, result, (state) => recordReplied(state, ref, replyRef, result.state, deps.now()), {
+		pullRequest: pullRequestRef,
+		knownRef: [ref, replyRef],
+		was: result.action === "created" ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`,
+		advice: "run the command again to record it"
+	});
+	return {
+		...replied,
+		...recorded
+	};
 }
 //#endregion
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+72c6a3a`;
+	return `pr-comments ${VERSION}+fe55976`;
 }
 //#endregion
 //#region src/cli.ts
