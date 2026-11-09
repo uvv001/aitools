@@ -759,10 +759,7 @@ const COMMAND_SPECS = [
 		],
 		example: "c623843 --dry-run"
 	}),
-	spec("report render", "writes the review report", "Writes the markdown report of the review, made from the database, and says whether the file was created, updated or\nleft unchanged. It overwrites the report each time (change the review with the commands, never in the markdown).\nIt writes the report only, never the database, and never over a SQLite file.", {
-		options: [opt("out", "<file.md>", "the report file (default: next to the database, <stem>.md)")],
-		database: "readonly"
-	}),
+	spec("report render", "writes the review report", "Writes the markdown report of the review, made from the database, and says whether the file was created, updated or\nleft unchanged. It overwrites the report each time (change the review with the commands, never in the markdown).\nIt writes the report only, never the database, and never over a SQLite file.", { database: "readonly" }),
 	spec("report comments", "writes the pull request conversation as markdown", "Writes the downloaded pull request (reviews, threads, comments and the Checks section) as markdown, to the\nscreen unless --out is given. Run \"pr-comments pr sync --db <file.sqlite>\" first.", {
 		options: [
 			opt("ref", "<ref>", "only these comments or check annotations (several refs comma-separated); a review comment includes its thread", { repeatable: true }),
@@ -3247,21 +3244,20 @@ async function loadSnapshot(dbPath) {
 		db.close();
 	}
 }
-async function renderReportFile(dbPath, options = {}) {
+async function renderReportFile(dbPath) {
 	const paths = reviewPaths(dbPath);
-	const target = options.out ?? paths.report;
-	refuseDatabase(target, paths.db);
+	refuseDatabase(paths.report, paths.db);
 	const db = openReviewDb(paths.db, "readonly");
 	try {
 		const rendered = renderReport(loadReview(db));
-		const current = await readExisting(target);
+		const current = await readExisting(paths.report);
 		const action = current === rendered ? "unchanged" : current === void 0 ? "created" : "updated";
 		if (action !== "unchanged") {
-			await mkdir(dirname(target), { recursive: true });
-			await writeFile(target, rendered, "utf8");
+			await mkdir(dirname(paths.report), { recursive: true });
+			await writeFile(paths.report, rendered, "utf8");
 		}
 		return {
-			report: target,
+			report: paths.report,
 			action
 		};
 	} finally {
@@ -3915,7 +3911,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+6682d23`;
+	return `pr-comments ${VERSION}+7d7e807`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4319,8 +4315,8 @@ async function replyToLinked({ env, args: [rawRef = ""], values }, db) {
 	if (options.dryRun) env.print(`----- reply text -----\n${text}${text.endsWith("\n") ? "" : "\n"}-----\n`);
 	return result.action === "error" ? 1 : 0;
 }
-async function renderReview({ env, values }, db) {
-	const { report, action } = await renderReportFile(db, { out: values.out });
+async function renderReview({ env }, db) {
+	const { report, action } = await renderReportFile(db);
 	env.print(`${action.padEnd(ACTION_WIDTH)} ${report}\n`);
 	return 0;
 }
