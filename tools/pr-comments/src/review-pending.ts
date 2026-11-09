@@ -175,8 +175,3 @@ export function pendingLines(items: PendingItem[]): string[] {
   const checks = items.filter(({ kind }) => kind === 'check');
   return [...tableLines(comments.map(commentCells)), ...tableLines(checks.map(annotationCells))];
 }
-
-// The JSON for tools: the items themselves, as plain data.
-export function pendingJson(items: PendingItem[]): unknown {
-  return JSON.parse(JSON.stringify(items));
-}

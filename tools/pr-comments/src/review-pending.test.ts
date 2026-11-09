@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CheckAnnotation, CheckRun, Comment, PullRequestData, ReviewThread } from './model.ts';
 import type { CommentLink } from './review-links.ts';
-import { pendingItems, pendingJson, pendingLines } from './review-pending.ts';
+import { pendingItems, pendingLines } from './review-pending.ts';
 
 const PR_URL = 'https://github.com/acme/widgets/pull/173';
 const PATH = 'Server/Orders/Retry.cs';
@@ -534,43 +534,5 @@ describe('pendingLines', () => {
       expect(line).not.toMatch(/[\r\n]/u);
       expect(line).toBe(line.trimEnd());
     }
-  });
-});
-
-describe('pendingJson', () => {
-  it('is an empty array when there is nothing', () => {
-    expect(pendingJson([])).toStrictEqual([]);
-  });
-
-  it('has the field names of the items, without the fields that are absent', () => {
-    const comments = [reviewComment(1, 'bob', 'Root', 't-1', 0), reviewComment(2, 'alice', 'Reply', 't-1', 1), conversation(9, 'carol', 'Hello')];
-    const run = checkRun([annotation('a3f9c2d1')]);
-    const items = pending(comments, [thread('t-1', { line: 8 })], [], [run]);
-    expect(pendingJson(items)).toStrictEqual([
-      { ref: 'c9', author: 'carol', kind: 'issue', replies: 0, createdAt: '2026-10-09T10:00:00Z', excerpt: 'Hello' },
-      {
-        ref: 'r1',
-        author: 'bob',
-        kind: 'review',
-        path: PATH,
-        lines: '8',
-        resolved: false,
-        outdated: false,
-        replies: 1,
-        createdAt: '2026-10-09T10:00:00Z',
-        excerpt: 'Root',
-      },
-      {
-        ref: 'a3f9c2d1',
-        author: SONAR,
-        kind: 'check',
-        path: PATH,
-        lines: '132',
-        level: 'failure',
-        check: 'SonarQube Code Analysis',
-        replies: 0,
-        excerpt: COGNITIVE,
-      },
-    ]);
   });
 });

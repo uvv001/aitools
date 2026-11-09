@@ -5,12 +5,10 @@ import {
   filterFindings,
   findFinding,
   findingLine,
-  listJson,
   listLines,
   parseFilter,
   parseSeverity,
   parseState,
-  showJson,
   showText,
 } from './review-view.ts';
 
@@ -132,19 +130,6 @@ describe('findingLine', () => {
   });
 });
 
-describe('listJson', () => {
-  it('names the state, counts the updates and the path:lines anchors', () => {
-    expect(listJson([F1, F2])).toEqual([
-      { id: 'F1', state: '⏳', stateLabel: 'awaiting triage', severity: '🟡', title: 'Waiting', updates: 0, anchors: 0 },
-      { id: 'F2', state: '✅', stateLabel: 'approved', severity: '🔴', title: 'Missing timeout', updates: 2, anchors: 2 },
-    ]);
-  });
-
-  it('falls back to the marker for a state it does not know', () => {
-    expect(listJson([finding('F3', '?', '🔴', 'x')])[0]?.stateLabel).toBe('?');
-  });
-});
-
 describe('findFinding', () => {
   const data = review([F1, F2]);
 
@@ -242,41 +227,5 @@ describe('showText', () => {
     expect(showText(finding('F3', '⏳', '⚪', 'Bare', ''), [{ ref: 'r1', role: 'own', finding: 'F3' }])).toBe(
       '### ⏳ ⚪ F3 — Bare\nLinked: own r1\n\nUpdates: none\n',
     );
-  });
-});
-
-describe('showJson', () => {
-  it('adds the evidence, snippets included, to the finding', () => {
-    const json = showJson(F2);
-    expect(json).toMatchObject({ id: 'F2', state: '✅', severity: '🔴', title: 'Missing timeout', description: FENCED });
-    expect(json.updates).toEqual([
-      { kind: 'raised', at: '2026-10-05 11:15', round: 1, state: '⏳' },
-      { kind: 'state', at: '2026-10-05 12:00', from: '⏳', to: '✅' },
-    ]);
-    expect(json.evidence).toEqual([
-      { path: 'src/a.ts', start: 3, end: 5, snippet: ['const a = 1;'], fence: 'ts', unclosed: false, line: 1 },
-      { path: 'src/b.ts', start: 10, end: 10, snippet: null, fence: '', unclosed: false, line: 9 },
-    ]);
-  });
-
-  it('has an empty evidence list without anchors', () => {
-    expect(showJson(F1).evidence).toEqual([]);
-  });
-
-  it('has an empty comments list without links', () => {
-    expect(showJson(F1).comments).toEqual([]);
-  });
-
-  it('lists the ref and role of every link, annotations included, in link order, and nothing else of them', () => {
-    const links: CommentLink[] = [
-      { ref: 'r544861', role: 'own', finding: 'F1', note: 'adopted' },
-      { ref: 'c623843', role: 'duplicate', finding: 'F1' },
-      { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' },
-    ];
-    expect(showJson(F1, links).comments).toEqual([
-      { ref: 'r544861', role: 'own' },
-      { ref: 'c623843', role: 'duplicate' },
-      { ref: 'a3f9c2d1e', role: 'duplicate' },
-    ]);
   });
 });

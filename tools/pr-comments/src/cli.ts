@@ -46,10 +46,10 @@ import type { ReviewState } from './review-links.ts';
 import type { Finding, ReviewData } from './review-model.ts';
 import { addFinding, addUpdate, openRound, setDescription, setSeverity, setState, setTitle, updateRound } from './review-ops.ts';
 import type { SeverityName } from './review-ops.ts';
-import { pendingItems, pendingJson, pendingLines } from './review-pending.ts';
+import { pendingItems, pendingLines } from './review-pending.ts';
 import { postFinding } from './review-post.ts';
 import { replyToDuplicate } from './review-reply.ts';
-import { filterFindings, findFinding, listJson, listLines, parseFilter, showJson, showText } from './review-view.ts';
+import { filterFindings, findFinding, listLines, parseFilter, showText } from './review-view.ts';
 import { versionText } from './version.ts';
 
 const ACTION_WIDTH = 'unchanged'.length;
@@ -128,7 +128,6 @@ interface Values {
   'by-agent'?: boolean;
   now?: boolean;
   'dry-run'?: boolean;
-  json?: boolean;
   anchor?: string;
   commit?: string;
   state?: string;
@@ -153,8 +152,6 @@ interface Context {
 
 type Outcome = number | 'unchanged';
 
-const printJson = (env: CliEnvironment, value: unknown) => env.print(`${JSON.stringify(value, null, 2)}\n`);
-
 function parsePositive(name: string, text: string | undefined): number | undefined {
   if (text === undefined) return undefined;
   if (!/^[1-9]\d*$/.test(text) || !Number.isSafeInteger(Number(text))) throw new Error(`--${name} must be a positive whole number`);
@@ -175,23 +172,6 @@ function anchorLines({ anchors, chosen, unlinked }: Posted): string[] {
   });
   if (unlinked > 0) lines.push(`links removed: ${unlinked}`);
   return lines;
-}
-
-function postedJson({ finding, result, anchors, chosen, warnings, unlinked, body }: Posted) {
-  return {
-    finding,
-    result,
-    anchors: anchors.map((anchor, index) => ({
-      index: index + 1,
-      path: anchor.path,
-      lines: rangeText(anchor),
-      line: anchor.line,
-    })),
-    chosen: chosen ? anchors.indexOf(chosen) + 1 : null,
-    warnings,
-    unlinked,
-    body,
-  };
 }
 
 // A value the command cannot do without: absent or blank is an error. Returns it trimmed.
@@ -311,28 +291,24 @@ async function connectReview({ env, args: [url = ''] }: Context, db: string): Pr
   return already ? 'unchanged' : 0;
 }
 
-async function showPullRequest({ env, values }: Context, db: string): Promise<number> {
+async function showPullRequest({ env }: Context, db: string): Promise<number> {
   const { pullRequest } = await loadReviewFile(db);
   if (pullRequest === undefined) {
-    if (values.json) printJson(env, { pullRequest: null });
-    else env.print(`not connected to a pull request; connect it with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"\n`);
+    env.print(`not connected to a pull request; connect it with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"\n`);
     return 0;
   }
   const data = await loadSnapshot(db);
   if (data === undefined) {
-    if (values.json) printJson(env, { pullRequest, synced: false });
-    else env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync --db ${quoteCliPath(db)}"\n`);
+    env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync --db ${quoteCliPath(db)}"\n`);
     return 0;
   }
   const { fetchedAt, headSha } = data.pullRequest;
-  const counts = { reviews: data.reviews.length, threads: data.threads.length, comments: data.comments.length, annotations: countAnnotations(data) };
-  if (values.json) {
-    printJson(env, { pullRequest, synced: true, fetchedAt, headSha, ...counts });
-  } else {
-    const { reviews, threads, comments, annotations } = counts;
-    env.print(`${pullRequest}\nsynced ${fetchedAt}, head ${headSha.slice(0, 8)}\n`);
-    env.print(`${reviews} reviews, ${threads} threads, ${comments} comments, ${annotations} annotations\n`);
-  }
+  const reviews = data.reviews.length;
+  const threads = data.threads.length;
+  const comments = data.comments.length;
+  const annotations = countAnnotations(data);
+  env.print(`${pullRequest}\nsynced ${fetchedAt}, head ${headSha.slice(0, 8)}\n`);
+  env.print(`${reviews} reviews, ${threads} threads, ${comments} comments, ${annotations} annotations\n`);
   return 0;
 }
 
@@ -379,8 +355,7 @@ async function addReviewFinding({ env, values }: Context, db: string): Promise<n
     return { data: changed, result: id };
   });
   warnReportError(env, db, reportError);
-  if (values.json) printJson(env, { id: result });
-  else env.print(`Added ${result}\n`);
+  env.print(`Added ${result}\n`);
   return 0;
 }
 
@@ -388,17 +363,15 @@ async function listFindings({ env, values }: Context, db: string): Promise<numbe
   const filter = parseFilter(values);
   const { data, links } = await loadReviewFile(db);
   const shown = filterFindings(data.findings, filter, links);
-  if (values.json) printJson(env, listJson(shown));
-  else env.print(`${listLines(shown, data.findings.length).join('\n')}\n`);
+  env.print(`${listLines(shown, data.findings.length).join('\n')}\n`);
   return 0;
 }
 
-async function showFinding({ env, args: [id = ''], values }: Context, db: string): Promise<number> {
+async function showFinding({ env, args: [id = ''] }: Context, db: string): Promise<number> {
   const { data, links } = await loadReviewFile(db);
   const finding = findFinding(data, id);
   const own = linksOf(links, finding.id);
-  if (values.json) printJson(env, showJson(finding, own));
-  else env.print(showText(finding, own));
+  env.print(showText(finding, own));
   return 0;
 }
 
@@ -468,24 +441,16 @@ async function postReviewFinding({ env, args: [id = ''], values }: Context, db: 
   const posted = await postFinding(db, id, options, { publish: env.publish, now: env.now });
   warnReportError(env, db, posted.reportError);
   for (const warning of posted.warnings) env.warn(`Warning: ${warning}\n`);
-  if (values.json) {
-    printJson(env, postedJson(posted));
-  } else {
-    env.print(`${formatOutcome(posted.result, options.dryRun)}\n${anchorLines(posted).join('\n')}\n`);
-    if (options.dryRun) env.print(`----- comment text -----\n${posted.body}${posted.body.endsWith('\n') ? '' : '\n'}-----\n`);
-  }
+  env.print(`${formatOutcome(posted.result, options.dryRun)}\n${anchorLines(posted).join('\n')}\n`);
+  if (options.dryRun) env.print(`----- comment text -----\n${posted.body}${posted.body.endsWith('\n') ? '' : '\n'}-----\n`);
   return posted.result.action === 'error' ? 1 : 0;
 }
 
-async function listPending({ env, values }: Context, db: string): Promise<number> {
+async function listPending({ env }: Context, db: string): Promise<number> {
   const { links } = await loadReviewFile(db);
   const items = pendingItems({ links, data: await snapshotOf(db) });
-  if (values.json) {
-    printJson(env, pendingJson(items));
-  } else {
-    const lines = pendingLines(items);
-    if (lines.length > 0) env.print(`${lines.join('\n')}\n`);
-  }
+  const lines = pendingLines(items);
+  if (lines.length > 0) env.print(`${lines.join('\n')}\n`);
   return 0;
 }
 
@@ -554,15 +519,11 @@ async function replyToLinked({ env, args: [rawRef = ''], values }: Context, db: 
   const ref = normalizeCliRef(rawRef);
   const options = { now: values.now ?? false, byAgent: values['by-agent'] ?? false, dryRun: values['dry-run'] ?? false };
   const deps = { reply: env.reply, now: env.now };
-  const { finding, own, link, text, result, reportError } = await replyToDuplicate(db, ref, options, deps);
+  const { text, result, reportError } = await replyToDuplicate(db, ref, options, deps);
   warnReportError(env, db, reportError);
-  if (values.json) {
-    printJson(env, { finding, own, link, text, result });
-  } else {
-    env.print(`${formatOutcome(result, options.dryRun, repliedPlace(result.target))}\n`);
-    if (result.target) env.print(`${answeredLine(result.target)}\n`);
-    if (options.dryRun) env.print(`----- reply text -----\n${text}${text.endsWith('\n') ? '' : '\n'}-----\n`);
-  }
+  env.print(`${formatOutcome(result, options.dryRun, repliedPlace(result.target))}\n`);
+  if (result.target) env.print(`${answeredLine(result.target)}\n`);
+  if (options.dryRun) env.print(`----- reply text -----\n${text}${text.endsWith('\n') ? '' : '\n'}-----\n`);
   return result.action === 'error' ? 1 : 0;
 }
 

@@ -88,7 +88,6 @@ const WORDS = COMMANDS.map(({ words }) => words);
 const GROUPS = ['pr', 'round', 'finding', 'link', 'report'];
 const CREATING = ['init'];
 const READONLY = ['pr show', 'finding list', 'finding show', 'link pending', 'report render', 'report comments', 'report dump'];
-const WITH_JSON = ['pr show', 'finding add', 'finding list', 'finding show', 'finding post', 'link pending', 'link reply'];
 const CHANGING = WORDS.filter((words) => !CREATING.includes(words) && !READONLY.includes(words));
 const DATABASE_COMMANDS = WORDS.filter((words) => !CREATING.includes(words));
 
@@ -294,10 +293,9 @@ describe('cli', () => {
       }
     });
 
-    it('declares --json for the commands whose result a program acts on, and --db for all', () => {
+    it('declares --db for all commands', () => {
       for (const { words, options } of COMMANDS) {
         const names = options.map(({ name }) => name);
-        expect(names.includes('json'), words).toBe(WITH_JSON.includes(words));
         expect(names.includes('db'), words).toBe(true);
       }
     });
@@ -357,13 +355,13 @@ describe('cli', () => {
         'pr-comments round open [--revision <rev>] (--base <rev> | --no-base) [--note <text>] --db <file.sqlite>',
       );
       expect(synopsis(command('finding add'))).toBe(
-        'pr-comments finding add --severity <high|medium|low> --title <text> --description-file <file|-> [--unverified] [--note <text>] [--json] --db <file.sqlite>',
+        'pr-comments finding add --severity <high|medium|low> --title <text> --description-file <file|-> [--unverified] [--note <text>] --db <file.sqlite>',
       );
       expect(synopsis(command('finding set-state'))).toBe(
         'pr-comments finding set-state <finding> <state> [--revision <rev>] [--note <text>] [--round <n>] --db <file.sqlite>',
       );
       expect(synopsis(command('finding post'))).toBe(
-        'pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] [--json] --db <file.sqlite>',
+        'pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] --db <file.sqlite>',
       );
       expect(synopsis(command('report comments'))).toBe(
         'pr-comments report comments [--author <login>]... [--ref <ref>]... [--pending] [--out <file.md>] --db <file.sqlite>',
@@ -458,7 +456,7 @@ describe('cli', () => {
       const before = await tree();
       for (const argv of [
         ['finding', 'list', '--bogus', '--help'],
-        ['finding', 'list', '--json=yes', '-h'],
+        ['finding', 'list', '--unposted=yes', '-h'],
         ['finding', 'show', '--help'],
         ['finding', 'show', 'F1', 'F2', '--help'],
         ['init', '--db', 'report.md', '--help'],
@@ -582,22 +580,18 @@ describe('cli', () => {
       ['a text that starts with a dash and has several words', ['finding', 'update', 'F1', '-5 is wrong'], 'finding update', 'unknown option -5 is wrong'],
       ['a text that starts with -h and has words', ['finding', 'update', 'F1', '-h is wrong'], 'finding update', 'unknown option -h is wrong'],
       ['a text that starts with two dashes', ['finding', 'update', 'F1', '--force'], 'finding update', 'unknown option --force'],
-      ['--json on init', ['init', 'Demo', '--json'], 'init', '--json does not apply to init'],
-      ['--json on a command that has none to say', ['finding', 'update', 'F1', 'x', '--json'], 'finding update', '--json does not apply to finding update'],
-      ['--json on pr connect', ['pr', 'connect', prUrl, '--json'], 'pr connect', '--json does not apply to pr connect'],
       ['--note on a list', ['finding', 'list', '--note', 'x'], 'finding list', '--note does not apply to finding list'],
       ['--state on show', ['finding', 'show', 'F1', '--state', 'approved'], 'finding show', '--state does not apply to finding show'],
       ['--unposted on a change', ['finding', 'set-state', 'F1', 'approved', '--unposted'], 'finding set-state', '--unposted does not apply to finding set-state'],
       ['--revision on update', ['finding', 'update', 'F1', 'x', '--revision', 'HEAD'], 'finding update', '--revision does not apply to finding update'],
       ['--dry-run on a link', ['link', 'own', 'F1', 'r1001', '--dry-run'], 'link own', '--dry-run does not apply to link own'],
       ['--author on report render', ['report', 'render', '--author', 'alice'], 'report render', '--author does not apply to report render'],
-      ['--json on report dump', ['report', 'dump', '--json'], 'report dump', '--json does not apply to report dump'],
       ['--out on pending', ['link', 'pending', '--out', 'x.md'], 'link pending', '--out does not apply to link pending'],
       ['--force, which no command has any more', ['report', 'render', '--force'], 'report render', 'unknown option --force'],
       ['--report, which no command has any more', ['init', 'Demo', '--report', 'r.md'], 'init', 'unknown option --report'],
       ['--pr-db, which no command has any more', ['pr', 'show', '--pr-db', 'x.sqlite'], 'pr show', 'unknown option --pr-db'],
       ['a repeated option', ['finding', 'list', '--state', 'approved', '--state', 'fixed'], 'finding list', '--state was given more than once'],
-      ['a repeated flag', ['finding', 'list', '--json', '--json'], 'finding list', '--json was given more than once'],
+      ['a repeated flag', ['finding', 'list', '--unposted', '--unposted'], 'finding list', '--unposted was given more than once'],
       ['a repeated --db', ['pr', 'sync', '--db', 'a.sqlite', '--db', 'b.sqlite'], 'pr sync', '--db was given more than once'],
       ['a repeated --pr', ['init', 'Demo', '--pr', prUrl, '--pr', prUrl], 'init', '--pr was given more than once'],
       ['a missing --severity', ['finding', 'add', '--title', 'T', '--description-file', '-'], 'finding add', '--severity is required'],
@@ -633,11 +627,11 @@ describe('cli', () => {
       ['a round without its value', ['finding', 'update', 'F1', 'x', '--round'], 'finding update', '--round needs a value'],
       [
         'a value that starts with a dash',
-        ['pr', 'sync', '--db', '--json'],
+        ['pr', 'sync', '--db', '--now'],
         'pr sync',
         '--db needs a value; a value that starts with "-" is written --db=<value>',
       ],
-      ['a flag with a value', ['finding', 'list', '--json=yes'], 'finding list', '--json is a flag and takes no value'],
+      ['a flag with a value', ['finding', 'list', '--unposted=yes'], 'finding list', '--unposted is a flag and takes no value'],
       ['--help with a value', ['finding', 'list', '--help=yes'], 'finding list', '--help is a flag and takes no value'],
     ];
 
@@ -686,11 +680,11 @@ describe('cli', () => {
         [['help', '--bogus'], 'unknown option --bogus'],
         [['help', 'finding', '--bogus'], 'unknown option --bogus'],
         [['help', '-x'], 'unknown option -x'],
-        [['help', '--json'], '--json does not apply to help'],
+        [['help', '--pending'], '--pending does not apply to help'],
         [['help', 'finding', 'list', '--state', 'approved'], '--state does not apply to help'],
         [['help', '--db', 'x.sqlite'], '--db does not apply to help'],
         [['help', '--state'], '--state needs a value'],
-        [['help', '--json=yes'], '--json is a flag and takes no value'],
+        [['help', '--unposted=yes'], '--unposted is a flag and takes no value'],
         [['help', '--help=yes'], '--help is a flag and takes no value'],
       ])('refuses %j like any other command: the problem, the usage line of help and exit code 1', async (argv, problem) => {
         await expect(step(...argv)).rejects.toThrow(ofHelp(problem));
@@ -707,7 +701,7 @@ describe('cli', () => {
       });
 
       it('keeps help --help and help -h valid, and --help wins over what else is wrong', async () => {
-        for (const argv of [['help', '--help'], ['help', '-h'], ['help', '--bogus', '--help'], ['help', 'finding', '--json', '-h']]) {
+        for (const argv of [['help', '--help'], ['help', '-h'], ['help', '--bogus', '--help'], ['help', 'finding', '--unposted', '-h']]) {
           expect(await step(...argv), argv.join(' ')).toBe(0);
           expect(printed).toContain('Usage: pr-comments help [<command>]\n');
         }
@@ -724,8 +718,8 @@ describe('cli', () => {
     it('takes the options before, between and after the words of the command', async () => {
       await step('--db', review, 'finding', 'list', '--severity', 'low');
       expect(printed).toBe('F3  ⏳ ⚪  Waiting\n1 of 3 findings\n');
-      await step('finding', '--json', 'list', '--db', review, '--state', 'awaiting');
-      expect(JSON.parse(printed)).toMatchObject([{ id: 'F3' }]);
+      await step('finding', '--unposted', 'list', '--db', review, '--state', 'awaiting');
+      expect(printed).toBe('F3  ⏳ ⚪  Waiting\n1 of 3 findings\n');
     });
 
     it('answers an unknown command with its name and the way to the commands', async () => {
@@ -919,7 +913,6 @@ describe('cli', () => {
         [['round', 'open', '--revision', 'HEAD', '--base', 'origin/main'], 'Round 2 opened\n'],
         [['round', 'update', 'no findings'], 'Round 2 updated\n'],
         [['finding', 'add', '--severity', 'low', '--title', 'Four', '--description-file', '-'], 'Added F4\n'],
-        [['finding', 'add', '--severity', 'low', '--title', 'Five', '--description-file', '-', '--json'], '{\n  "id": "F5"\n}\n'],
         [['finding', 'set-state', 'F3', 'approved'], 'F3: ⏳ → ✅\n'],
         [['finding', 'set-severity', 'F3', 'high'], 'F3: ⚪ → 🔴\n'],
         [['finding', 'set-title', 'F3', 'Other'], 'F3: retitled\n'],
@@ -1155,8 +1148,6 @@ describe('cli', () => {
 
         expect(printed).toBe(`not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"\n`);
         expect(warned).toBe('');
-        await step('pr', 'show', '--db', db, '--json');
-        expect(JSON.parse(printed)).toEqual({ pullRequest: null });
         expect((await readFile(db)).equals(before)).toBe(true);
       });
 
@@ -1166,8 +1157,6 @@ describe('cli', () => {
 
         expect(await step('pr', 'show', '--db', db)).toBe(0);
         expect(printed).toBe(`${prUrl}\nnot synced yet; run "pr-comments pr sync --db ${db}"\n`);
-        await step('pr', 'show', '--db', db, '--json');
-        expect(JSON.parse(printed)).toEqual({ pullRequest: prUrl, synced: false });
       });
 
       it('quotes a database path with spaces in command hints', async () => {
@@ -1186,18 +1175,6 @@ describe('cli', () => {
       it('prints the pull request, when it was synced, its head and what the database holds of it', async () => {
         expect(await step('pr', 'show')).toBe(0);
         expect(printed).toBe(`${prUrl}\nsynced 2026-01-06T12:00:00Z, head cccccccc\n2 reviews, 2 threads, 5 comments, 4 annotations\n`);
-
-        await step('pr', 'show', '--json');
-        expect(JSON.parse(printed)).toEqual({
-          pullRequest: prUrl,
-          synced: true,
-          fetchedAt: '2026-01-06T12:00:00Z',
-          headSha: 'c'.repeat(40),
-          reviews: 2,
-          threads: 2,
-          comments: 5,
-          annotations: 4,
-        });
         expect(warned).toBe('');
       });
     });
@@ -1355,13 +1332,6 @@ describe('cli', () => {
       });
     });
 
-    it('prints only the id as JSON with --json', async () => {
-      expect(await step(...add('--description-file', '-', '--json'))).toBe(0);
-
-      expect(printed).toBe('{\n  "id": "F4"\n}\n');
-      expect(warned).toBe(line());
-    });
-
     it('refuses a severity that is none, an empty title or description, and a file that is not there, and changes nothing', async () => {
       await fails(['finding', 'add', '--db', review, '--severity', 'critical', '--title', 'T', '--description-file', '-'], '"critical" is not a severity; use one of: high, medium, low');
       await fails(['finding', 'add', '--db', review, '--severity', 'high', '--title', ' ', '--description-file', '-'], '--title must not be empty');
@@ -1443,7 +1413,7 @@ describe('cli', () => {
   describe('finding list and show', () => {
     const ALL = ['F1  ✅ 🔴  Missing timeout', 'F2  ✅ 🟡  Remark', 'F3  ⏳ ⚪  Waiting'];
 
-    it('lists the findings, filters by --state, --severity, and --unposted, and prints JSON with --json', async () => {
+    it('lists the findings and filters by --state, --severity, and --unposted', async () => {
       expect(await step('finding', 'list')).toBe(0);
       expect(printed).toBe(`${ALL.join('\n')}\n3 of 3 findings\n`);
 
@@ -1454,12 +1424,6 @@ describe('cli', () => {
       await step('link', 'duplicate', 'F2', 'r1002');
       await step('finding', 'list', '--unposted', '--state', 'approved');
       expect(printed).toBe(`${ALL[1]}\n1 of 3 findings\n`);
-
-      await step('finding', 'list', '--json', '--state', 'approved');
-      expect(JSON.parse(printed)).toEqual([
-        { id: 'F1', state: '✅', stateLabel: 'approved', severity: '🔴', title: 'Missing timeout', updates: 3, anchors: 2 },
-        { id: 'F2', state: '✅', stateLabel: 'approved', severity: '🟡', title: 'Remark', updates: 3, anchors: 0 },
-      ]);
     });
 
     it('refuses a state or a severity that is none', async () => {
@@ -1467,22 +1431,13 @@ describe('cli', () => {
       await expect(step('finding', 'list', '--severity', 'critical')).rejects.toThrow('--severity "critical" is not a severity; use one of:');
     });
 
-    it('shows a finding in text and with --json, and refuses an unknown finding', async () => {
+    it('shows a finding in text, and refuses an unknown finding', async () => {
       await step('link', 'own', 'F1', 'r1001');
       await step('link', 'duplicate', 'F1', COMPLEXITY_REF);
 
       expect(await step('finding', 'show', 'f1')).toBe(0);
       expect(printed).toContain(`### ✅ 🔴 F1 — Missing timeout\nLinked: own r1001, duplicate ${COMPLEXITY_REF}\n\n`);
       expect(warned).toBe('');
-
-      await step('finding', 'show', 'F1', '--json');
-      expect(JSON.parse(printed)).toMatchObject({
-        id: 'F1',
-        state: '✅',
-        title: 'Missing timeout',
-        evidence: [{ path: 'src/app.ts' }, { path: 'src/other.ts' }],
-        comments: [{ ref: 'r1001', role: 'own' }, { ref: COMPLEXITY_REF, role: 'duplicate' }],
-      });
 
       await expect(step('finding', 'show', 'F9')).rejects.toThrow('unknown finding "F9"; the report has F1, F2, F3');
     });
@@ -1604,25 +1559,11 @@ describe('cli', () => {
       expect(warned).toBe('');
     });
 
-    it('prints the items as a JSON array with --json, and [] when there are none', async () => {
-      await step('link', 'pending', '--json');
-      const items = JSON.parse(printed) as { ref: string; kind: string }[];
-      expect(items.map(({ ref }) => ref).sort()).toEqual([...REFS].sort());
-      expect(items.find(({ ref }) => ref === 'c2001')).toMatchObject({ kind: 'issue', author: 'alice' });
-      expect(items.find(({ ref }) => ref === COMPLEXITY_REF)).toMatchObject({ kind: 'check', path: 'src/retry.ts' });
-
-      for (const ref of ['r1001', 'r1004', 'c2001']) await step('link', 'note', ref, 'x');
-      for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'F1', ref);
-      await step('link', 'pending', '--json');
-      expect(printed).toBe('[]\n');
-    });
-
     it('says to sync first when the database holds no pull request, with exit 1', async () => {
       const db = join(docs, 'bare_review.sqlite');
       await step('init', 'Bare', '--db', db, '--pr', prUrl);
 
       await expect(step('link', 'pending', '--db', db)).rejects.toThrow(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
-      await expect(step('link', 'pending', '--db', db, '--json')).rejects.toThrow('no pull request data in the database');
       expect(printed).toBe('');
     });
   });
@@ -1959,38 +1900,6 @@ describe('cli', () => {
       expect(warned).toBe(`${GENERAL_WARNING}${line()}`);
     });
 
-    it('prints only the result as JSON with --json, keeping the warnings on stderr, and exits with 1 for an error result', async () => {
-      creates();
-
-      expect(await post('F1', '--json')).toBe(0);
-
-      const result = { action: 'created', dryRun: false, comment: 'r2001', url: url('r2001'), state: 'pending', path: 'src/app.ts', lines: '10-12' };
-      const { data } = await loaded();
-      const descriptionLine = (needle: string) => data.findings[0]!.description.split('\n').findIndex((text) => text.includes(needle)) + 1;
-      expect(JSON.parse(printed)).toEqual({
-        finding: 'F1',
-        result,
-        anchors: [
-          { index: 1, path: 'src/app.ts', lines: '10-12', line: descriptionLine('`src/app.ts:10-12`') },
-          { index: 2, path: 'src/other.ts', lines: '7', line: descriptionLine('`src/other.ts:7`') },
-        ],
-        chosen: 1,
-        warnings: [],
-        unlinked: 1,
-        body: F1_BODY,
-      });
-
-      creates('c2002');
-      await post('F2', '--json', '--now');
-      expect(JSON.parse(printed)).toMatchObject({ finding: 'F2', anchors: [], chosen: null, warnings: [GENERAL_WARNING.slice('Warning: '.length, -1)] });
-      expect(warned).toBe(`${GENERAL_WARNING}${line()}`);
-
-      engine((_comment, options) => ({ action: 'error', dryRun: options.dryRun, message: 'rejected by GitHub' }));
-      expect(await post('F1', '--json')).toBe(1);
-      expect(JSON.parse(printed)).toMatchObject({ finding: 'F1', result: { action: 'error', message: 'rejected by GitHub' } });
-      expect(warned).toBe('');
-    });
-
     it('refuses a bad --anchor or an unknown finding before it publishes anything', async () => {
       creates();
 
@@ -2127,21 +2036,6 @@ describe('cli', () => {
       expect(warned).toBe('');
       expect(downloads).toEqual([]);
       expect((await bytes()).equals(before)).toBe(true);
-    });
-
-    it('prints the object of the reply as JSON with --json, and exits with 1 for an error result', async () => {
-      engine(made('r546201', THREAD, 'pending'));
-
-      expect(await reply('r1004', '--json', '--by-agent')).toBe(0);
-
-      const result = { action: 'created', dryRun: false, state: 'pending', comment: 'r546201', url: urlOf('r546201'), target: THREAD };
-      expect(printed).toBe(`${JSON.stringify({ finding: 'F1', own: 'r1001', link: OWN_LINK, text: WITH_DISCLAIMER, result }, null, 2)}\n`);
-      expect(warned).toBe(line());
-
-      engine(refused('GitHub rejected the reply', THREAD));
-      expect(await reply('r1004', '--json')).toBe(1);
-      expect(JSON.parse(printed)).toMatchObject({ finding: 'F1', own: 'r1001', result: { action: 'error', message: 'GitHub rejected the reply' } });
-      expect(warned).toBe('');
     });
 
     it('lets a refusal of the review through before it asks GitHub for anything, and changes nothing', async () => {

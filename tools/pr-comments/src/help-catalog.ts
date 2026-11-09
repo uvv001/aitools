@@ -75,7 +75,6 @@ const opt = (name: string, value: string, description: string, extra?: { repeata
 });
 const reqOpt = (name: string, value: string, description: string): OptionSpec => ({ name, value, description, required: true });
 
-const jsonOption = (what: string): OptionSpec => flag('json', `print ${what} as JSON`);
 const noteOption = (what = 'why'): OptionSpec => opt('note', '<text>', what);
 const roundOption = opt('round', '<n>', 'write "Round <n>: " at the start of the Updates entry (a round that was opened)');
 const descriptionFileOption = (what: string): OptionSpec =>
@@ -165,7 +164,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
     'pr show',
     'shows the connected pull request and when it was synced',
     'Prints the connected pull request and, when it was downloaded, when, its head commit and how much of it the database holds.',
-    { options: [jsonOption('the status')], database: 'readonly' },
+    { database: 'readonly' },
   ),
   spec(
     'pr sync',
@@ -210,7 +209,6 @@ export const COMMAND_SPECS: CommandSpec[] = [
         descriptionFileOption('the description'),
         flag('unverified', 'open the finding as unverified instead of awaiting triage'),
         noteOption('a note for the opening update'),
-        flag('json', 'print {"id": "F7"} instead of "Added F7"'),
       ],
       example: '--severity high --title "Missing timeout" --description-file description.md',
     },
@@ -224,7 +222,6 @@ export const COMMAND_SPECS: CommandSpec[] = [
         opt('state', '<state>', 'only findings in this state: awaiting, unverified, approved, fixed, discarded, deferred or improvement'),
         opt('severity', '<severity>', 'only findings of this severity: high, medium or low'),
         flag('unposted', 'only findings that have no comment of their own on the pull request yet'),
-        jsonOption('the findings as an array'),
       ],
       database: 'readonly',
       example: '--state approved --unposted',
@@ -234,7 +231,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
     'finding show',
     'shows one finding with its updates',
     'Prints the finding, the comments linked to it (such as "Linked: own r544861, duplicate r544900"), the description and its Updates.',
-    { args: [FINDING], options: [jsonOption('the finding, its evidence and its links')], database: 'readonly', example: 'F7' },
+    { args: [FINDING], database: 'readonly', example: 'F7' },
   ),
   spec(
     'finding set-state',
@@ -282,7 +279,6 @@ export const COMMAND_SPECS: CommandSpec[] = [
         opt('anchor', '<n>', 'use the n-th path:lines anchor of the description (default: 1)'),
         opt('commit', '<sha>', 'pin the comment to this commit, 7-40 hex digits (default: the head of the pull request)'),
         ...postOptions,
-        jsonOption('the result, the anchors and the text'),
       ],
       notes: [
         'The comment is `<severity> **<id> — <title>**` and the description (e.g. `🔴 **F7 — Missing timeout**`). Only the description goes to GitHub, never the Updates; relative links pointing into the review are replaced by their text.',
@@ -300,7 +296,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
       'state or level, and an excerpt. Nothing is printed when everything is processed (use "report comments" to inspect thread replies,\n' +
       'edited comments, and submitted review bodies). Replies are not listed; their thread is the root comment.\n' +
       'It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.',
-    { options: [jsonOption('the items as an array ([] when there are none)')], database: 'readonly' },
+    { database: 'readonly' },
   ),
   spec(
     'link own',
@@ -335,7 +331,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
       'A conversation comment can only be answered at once, so it needs --now. The thread is never resolved by the tool.',
     {
       args: [arg('<ref>', 'the comment that is linked as a duplicate: r544830 or c623843')],
-      options: [...postOptions, jsonOption('the result and the text')],
+      options: postOptions,
       notes: [
         'A reply in a review thread always goes into your pending review; `--now` has no effect on it.',
         'A conversation comment (`c…`) has no thread and is answered with a new conversation comment visible at once, so it needs `--now`.',

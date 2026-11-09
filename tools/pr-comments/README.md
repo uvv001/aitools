@@ -231,11 +231,9 @@ pr-comments pr connect https://github.com/acme/widgets/pull/42 --db review.sqlit
 **`pr show`**: shows the connected pull request and when it was synced. Prints the connected pull request and, when it was downloaded, when, its head commit and how much of it the database holds.
 
 ```
-pr-comments pr show [--json] --db <file.sqlite>
+pr-comments pr show --db <file.sqlite>
 pr-comments pr show --db review.sqlite
 ```
-
-- `--json`: print the status as JSON.
 
 **`pr sync`**: downloads the connected pull request into the database. Downloads the comments, reviews, threads and check annotations of the connected pull request from GitHub and stores them in the database, replacing what the last sync stored. A comment that a link points at is kept, marked as gone, when GitHub no longer has it. Needs a token.
 
@@ -273,7 +271,7 @@ pr-comments round update "no findings" --db review.sqlite
 **`finding add`**: adds a finding. Adds a finding, opened by the update "Round `<n>`: raised" of the latest round, so a round must be open.
 
 ```
-pr-comments finding add --severity <high|medium|low> --title <text> --description-file <file|-> [--unverified] [--note <text>] [--json] --db <file.sqlite>
+pr-comments finding add --severity <high|medium|low> --title <text> --description-file <file|-> [--unverified] [--note <text>] --db <file.sqlite>
 pr-comments finding add --severity high --title "Missing timeout" --description-file description.md --db review.sqlite
 ```
 
@@ -282,29 +280,26 @@ pr-comments finding add --severity high --title "Missing timeout" --description-
 - `--description-file <file|->`: the description, read from a UTF-8 file or from standard input (-).
 - `--unverified`: open the finding as unverified instead of awaiting triage.
 - `--note <text>`: a note for the opening update.
-- `--json`: print {"id": "F7"} instead of "Added F7"
 
 **`finding list`**: lists the findings. Lists the findings of the review, one line each, and how many of them there are. The criteria are anded.
 
 ```
-pr-comments finding list [--state <state>] [--severity <severity>] [--unposted] [--json] --db <file.sqlite>
+pr-comments finding list [--state <state>] [--severity <severity>] [--unposted] --db <file.sqlite>
 pr-comments finding list --state approved --unposted --db review.sqlite
 ```
 
 - `--state <state>`: only findings in this state: awaiting, unverified, approved, fixed, discarded, deferred or improvement.
 - `--severity <severity>`: only findings of this severity: high, medium or low.
 - `--unposted`: only findings that have no comment of their own on the pull request yet.
-- `--json`: print the findings as an array as JSON.
 
 **`finding show`**: shows one finding with its updates. Prints the finding, the comments linked to it (such as "Linked: own r544861, duplicate r544900"), the description and its Updates.
 
 ```
-pr-comments finding show <finding> [--json] --db <file.sqlite>
+pr-comments finding show <finding> --db <file.sqlite>
 pr-comments finding show F7 --db review.sqlite
 ```
 
 - `<finding>`: the finding, such as F7 (any case).
-- `--json`: print the finding, its evidence and its links as JSON.
 
 **`finding set-state`**: moves a finding to another state. Moves the finding to another state (any state except the one it is already in). A change is logged under the Updates of the finding, with the time. The state fixed needs the revision that fixes it. A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the short hash (at least 8 characters) of the commit.
 
@@ -369,7 +364,7 @@ pr-comments finding update F7 "Asked the author" --round 1 --db review.sqlite
 **`finding post`**: publishes the comment of a finding. Publishes the comment of one finding, in any state, to the connected pull request (to your pending review unless --now) and links it to the finding as its own comment. Run again, it updates that comment. Without --dry-run the returned comment ref and link are recorded in the database; run "pr-comments pr sync --db `<file.sqlite>`" to refresh the full pull request snapshot. Needs a token with write permission.
 
 ```
-pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] [--json] --db <file.sqlite>
+pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] --db <file.sqlite>
 pr-comments finding post F7 --dry-run --db review.sqlite
 ```
 
@@ -379,7 +374,6 @@ pr-comments finding post F7 --dry-run --db review.sqlite
 - `--by-agent`: start the comment with a line saying an agent wrote it.
 - `--now`: publish immediately instead of adding to your pending review.
 - `--dry-run`: check everything and say what would happen, without writing anything.
-- `--json`: print the result, the anchors and the text as JSON.
 - The comment is `<severity> **<id> — <title>**` and the description (e.g. `🔴 **F7 — Missing timeout**`). Only the description goes to GitHub, never the Updates; relative links pointing into the review are replaced by their text.
 - The place is the first `` `path:lines` `` anchor of the description (`--anchor <n>` picks another; a whole-file finding uses `path:1` when line 1 is in the diff).
 - `--now` publishes at once (not possible while you have a pending review); `--commit <sha>` pins the comment when no pending review exists yet.
@@ -392,11 +386,9 @@ A link ties a comment or a check annotation of the pull request to the review. I
 **`link pending`**: lists the comments and check annotations not linked yet. Prints one line per top-level comment or check annotation of the synced pull request that no link names: ref, author or app, place, state or level, and an excerpt. Nothing is printed when everything is processed (use "report comments" to inspect thread replies, edited comments, and submitted review bodies). Replies are not listed; their thread is the root comment. It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.
 
 ```
-pr-comments link pending [--json] --db <file.sqlite>
+pr-comments link pending --db <file.sqlite>
 pr-comments link pending --db review.sqlite
 ```
-
-- `--json`: print the items as an array ([] when there are none) as JSON.
 
 **`link own`**: links a comment as the own comment of a finding. Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.
 
@@ -443,7 +435,7 @@ pr-comments link remove r544861 --db review.sqlite
 **`link reply`**: answers a duplicate with "Duplicate of `<link>`." Answers a comment that is linked as a duplicate of a finding with "Duplicate of `<link to the own comment of the finding>`." in your pending review, and records the returned reply ref and update in the database (run "pr-comments pr sync --db `<file.sqlite>`" to refresh the full pull request snapshot). The finding must have an own comment. Needs a token with write permission. A conversation comment can only be answered at once, so it needs --now. The thread is never resolved by the tool.
 
 ```
-pr-comments link reply <ref> [--by-agent] [--now] [--dry-run] [--json] --db <file.sqlite>
+pr-comments link reply <ref> [--by-agent] [--now] [--dry-run] --db <file.sqlite>
 pr-comments link reply c623843 --dry-run --db review.sqlite
 ```
 
@@ -451,7 +443,6 @@ pr-comments link reply c623843 --dry-run --db review.sqlite
 - `--by-agent`: start the comment with a line saying an agent wrote it.
 - `--now`: publish immediately instead of adding to your pending review.
 - `--dry-run`: check everything and say what would happen, without writing anything.
-- `--json`: print the result and the text as JSON.
 - A reply in a review thread always goes into your pending review; `--now` has no effect on it.
 - A conversation comment (`c…`) has no thread and is answered with a new conversation comment visible at once, so it needs `--now`.
 - The output says whether the thread is open or resolved, as information only. A rerun does not reply twice. The exit code is 1 when the result is an error.
@@ -550,14 +541,14 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 - `init` uses `--db` to name the file it creates, defaulting to `.ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` at the git root.
 - Several commands at once are safe: they wait for each other, up to 10 seconds. The read commands (`finding list`, `finding show`, `link pending`, `pr show`, and the `report` commands) open the file read-only and change nothing in it.
 
-### Strict arguments, help, `--json`
+### Strict arguments and help
 
 - An unknown option, an option that the command does not take, an option given twice, a missing or an extra argument: each is an error with one line that says what is wrong, and that command's usage. Never the whole help.
 
   ```
   pr-comments finding list --bogus
   unknown option --bogus
-  Usage: pr-comments finding list [--state <state>] [--severity <severity>] [--unposted] [--json] --db <file.sqlite>
+  Usage: pr-comments finding list [--state <state>] [--severity <severity>] [--unposted] --db <file.sqlite>
   Run "pr-comments finding list --help" for details.
   ```
 
@@ -565,7 +556,6 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 - A text that starts with `-` is written after `--` (put options such as `--db` before `--`).
 - `--help` works on every command and group. It prints to stdout and exits with 0.
 - Errors exit with 1. Pending work in `link pending` is not an error.
-- `--json` exists only where a program must act on the result: `finding add`, `finding list`, `finding show`, `finding post`, `link reply`, `link pending`, `pr show`. Anywhere else it is an error.
 - Text, from a file or an argument, must not contain control characters other than tab and newline.
 
 ## Git

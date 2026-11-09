@@ -1,5 +1,4 @@
 import type { PublishComment } from './publish.ts';
-import { ANCHOR, closesFence, openingFence } from './review-evidence.ts';
 import type { Finding, ReviewData } from './review-model.ts';
 import { findFinding } from './review-view.ts';
 
@@ -31,6 +30,9 @@ export interface Extracted {
   unlinked: number;
 }
 
+export const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
+const OPENING = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const CLOSING = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
 const REFERENCE_LINK = /\[[^\]]+\]\[[^\]]*\]/;
 const REFERENCE_DEFINITION = /^\s{0,3}\[[^\]]+\]:\s*\S/;
@@ -89,6 +91,20 @@ function commentLines(id: string, anchor: Anchor): { start: number; end: number 
     throw cannotExtract(id, `lines "${rangeText(anchor)}" must start at 1 or later and not run backwards`);
   }
   return { start, end };
+}
+
+// A backtick fence takes no backtick in its info string, so a line like "```x```" is prose.
+export function openingFence(line: string): { marker: string; info: string } | undefined {
+  const match = OPENING.exec(line);
+  if (!match) return undefined;
+  const [, marker = '', rest = ''] = match;
+  return marker.startsWith('`') && rest.includes('`') ? undefined : { marker, info: rest.trim() };
+}
+
+// A closing fence carries no info string: "```ts" inside a "```" fence is content.
+export function closesFence(line: string, marker: string): boolean {
+  const closing = CLOSING.exec(line)?.[1];
+  return closing !== undefined && closing.startsWith(marker[0] ?? '') && closing.length >= marker.length;
 }
 
 function fenceMask(lines: string[]): boolean[] {

@@ -1,10 +1,9 @@
-import { extractEvidence } from './review-evidence.ts';
 import type { CommentLink } from './review-links.ts';
 import { SEVERITIES, STATES } from './review-model.ts';
 import type { Finding, ReviewData, UpdateItem } from './review-model.ts';
 import { formatUpdateItem } from './review-render.ts';
 
-// What the report commands print about a review, as text or as JSON-ready objects. Nothing here reads a file.
+// What the report commands print about a review. Nothing here reads a file.
 
 const SEVERITY_NAMES = ['high', 'medium', 'low'];
 
@@ -19,8 +18,6 @@ export interface FindingFilter {
 const normalise = (text: string) => text.trim().replace(/\s+/gu, ' ').toLowerCase();
 
 const firstWord = (label: string) => label.split(' ')[0] ?? label;
-
-const stateLabel = (marker: string) => STATES.find((state) => state.marker === marker)?.label ?? marker;
 
 // The marker for a marker, a label (`awaiting triage`) or the first word of a label (`awaiting`).
 export function parseState(text: string, prefix = ''): string {
@@ -75,18 +72,6 @@ export function listLines(shown: Finding[], total: number): string[] {
   return [...lines, `${shown.length} of ${total} findings`];
 }
 
-export function listJson(shown: Finding[]) {
-  return shown.map(({ id, state, severity, title, description, updates }) => ({
-    id,
-    state,
-    stateLabel: stateLabel(state),
-    severity,
-    title,
-    updates: updates.length,
-    anchors: extractEvidence(description).length,
-  }));
-}
-
 // Case-insensitive; the message names the ids there are.
 export function findFinding(data: ReviewData, id: string): Finding {
   const wanted = id.trim().toLowerCase();
@@ -112,11 +97,4 @@ export function showText({ id, state, severity, title, description, updates }: F
   const history = updates.length === 0 ? ['Updates: none'] : ['Updates:', ...updates.flatMap(updateLines)];
   const linked = links.length === 0 ? [] : [`Linked: ${links.map(({ role, ref }) => `${role} ${ref}`).join(', ')}`];
   return `${[`### ${state} ${severity} ${id} — ${title}`, ...linked, '', ...body, ...history].join('\n')}\n`;
-}
-
-// The finding as stored, its path:lines evidence (`snippet` is null where no code fence follows the anchor) and the
-// refs of its links, PR comments and check annotations, under the key `comments`.
-export function showJson(finding: Finding, links: CommentLink[] = []) {
-  const evidence = extractEvidence(finding.description).map((item) => ({ ...item, snippet: item.snippet ?? null }));
-  return { ...finding, evidence, comments: links.map(({ ref, role }) => ({ ref, role })) };
 }
