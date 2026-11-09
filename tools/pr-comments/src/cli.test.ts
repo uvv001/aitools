@@ -361,7 +361,7 @@ describe('cli', () => {
 
     it('writes the usage line of a command from its table entry', () => {
       expect(synopsis(command('init'))).toBe(
-        'pr-comments init <name> [--pr <url>] [--report <file.md>] [--db <file.sqlite>]',
+        'pr-comments init <name> [--pr <url>] [--db <file.sqlite>]',
       );
       expect(synopsis(command('round open'))).toBe(
         'pr-comments round open [--revision <rev>] (--base <rev> | --no-base) [--note <text>] --db <file.sqlite>',
@@ -447,9 +447,9 @@ describe('cli', () => {
     it('says the default of init in the words of what it does: a slug of the name', async () => {
       await step('init', '--help');
 
-      expect(printed).toContain('(default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)');
+      expect(printed).toContain('(default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.sqlite at the git root)');
       expect(printed).toContain('the title of the report (a slug of it names the files by default)');
-      expect(printed).toContain('--report and --db may both be given only if they agree');
+      expect(printed).not.toContain('--report');
       for (const { words, args, options, summary, description } of COMMANDS) {
         const texts = [summary, description, ...args.map(({ description: text }) => text), ...options.map(({ description: text }) => text)];
         expect(texts.some((text) => text.includes('<name>_review')), words).toBe(false);
@@ -553,6 +553,7 @@ describe('cli', () => {
       ['--json on report dump', ['report', 'dump', '--json'], 'report dump', '--json does not apply to report dump'],
       ['--out on pending', ['link', 'pending', '--out', 'x.md'], 'link pending', '--out does not apply to link pending'],
       ['--force, which no command has any more', ['report', 'render', '--force'], 'report render', 'unknown option --force'],
+      ['--report, which no command has any more', ['init', 'Demo', '--report', 'r.md'], 'init', 'unknown option --report'],
       ['--pr-db, which no command has any more', ['pr', 'show', '--pr-db', 'x.sqlite'], 'pr show', 'unknown option --pr-db'],
       ['a repeated option', ['finding', 'list', '--state', 'approved', '--state', 'fixed'], 'finding list', '--state was given more than once'],
       ['a repeated flag', ['finding', 'list', '--json', '--json'], 'finding list', '--json was given more than once'],
@@ -999,20 +1000,15 @@ describe('cli', () => {
   describe('init', () => {
     const created = (path: string) => `Created ${shown(path)}\nReport: ${shown(reviewPaths(path).report)}\n`;
 
-    it('creates the database and report, next to the report or where --db says, and names no database on stderr', async () => {
-      const report = join(docs, 'chain_review.md');
-
-      expect(await step('init', 'PR 42', '--report', report)).toBe(0);
-
-      expect(printed).toBe(created(join(docs, 'chain_review.sqlite')));
-      expect(warned).toBe('');
-      expect(await tree(docs)).toEqual(['chain_review.md', 'chain_review.sqlite', 'demo_review.sqlite']);
-      expect((await loadReviewFile(join(docs, 'chain_review.sqlite'))).data).toMatchObject({ target: 'PR 42', findings: [] });
-
+    it('creates the database and report where --db says, and names no database on stderr', async () => {
       const named = join(docs, 'named.sqlite');
-      await step('init', 'PR 43', '--db', named);
+
+      expect(await step('init', 'PR 43', '--db', named)).toBe(0);
+
       expect(printed).toBe(created(named));
-      expect((await loadReviewFile(named)).data.target).toBe('PR 43');
+      expect(warned).toBe('');
+      expect(await tree(docs)).toEqual(['demo_review.sqlite', 'named.md', 'named.sqlite']);
+      expect((await loadReviewFile(named)).data).toMatchObject({ target: 'PR 43', findings: [] });
     });
 
     it('warns on stderr and keeps the created database when the initial report file cannot be written', async () => {
@@ -1027,37 +1023,15 @@ describe('cli', () => {
       expect((await loadReviewFile(readonlyDb)).data.target).toBe('PR 42');
     });
 
-    it('normalizes an upper-case --report .MD extension to .md so init and later mutations write the same report file', async () => {
-      const upperReport = join(docs, 'upper_review.MD');
-      const lowerReport = join(docs, 'upper_review.md');
-      const upperDb = join(docs, 'upper_review.sqlite');
-
-      expect(await step('init', 'PR 42', '--report', upperReport)).toBe(0);
-      expect(printed).toBe(`Created ${shown(upperDb)}\nReport: ${shown(lowerReport)}\n`);
-
-      expect(await step('round', 'open', '--no-base', '--note', 'updated round', '--db', upperDb)).toBe(0);
-      expect(await readFile(lowerReport, 'utf8')).toContain('updated round');
-    });
-
     it('refuses an existing report file without overwriting it or creating a database', async () => {
       const existingMd = join(docs, 'notes_review.md');
       await writeFile(existingMd, 'my important notes\n', 'utf8');
 
-      await expect(step('init', 'PR 42', '--report', existingMd)).rejects.toThrow(
+      await expect(step('init', 'PR 42', '--db', join(docs, 'notes_review.sqlite'))).rejects.toThrow(
         `${existingMd} already exists; init will not overwrite an existing report file`,
       );
       expect(await readFile(existingMd, 'utf8')).toBe('my important notes\n');
       expect(await exists(join(docs, 'notes_review.sqlite'))).toBe(false);
-    });
-
-    it('takes the database for --report as well as the report', async () => {
-      const named = join(docs, 'chain_review.sqlite');
-
-      await step('init', 'PR 42', '--report', named);
-
-      expect(printed.split('\n')[0]).toBe(`Created ${shown(named)}`);
-      expect((await loadReviewFile(named)).data.target).toBe('PR 42');
-      await expect(step('init', 'PR 42', '--report', join(docs, 'other.txt'))).rejects.toThrow('must be a report (.md) or a review database (.sqlite)');
     });
 
     it('connects the review to the pull request with --pr and prints the canonical URL', async () => {
@@ -1069,7 +1043,7 @@ describe('cli', () => {
       expect((await loadReviewFile(named)).pullRequest).toBe(prUrl);
     });
 
-    it('creates .ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite at the git root without --report, shown relative to the working directory', async () => {
+    it('creates .ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite at the git root without --db, shown relative to the working directory', async () => {
       const repo = join(work, 'repo');
       await mkdir(join(repo, '.git', 'refs'), { recursive: true });
       await mkdir(join(repo, '.git', 'objects'), { recursive: true });
@@ -1083,39 +1057,6 @@ describe('cli', () => {
       const belowReport = relative(repo, reviewPaths(db).report);
       expect(printed).toBe(`Created ${below}\nReport: ${belowReport}\n`);
       expect(await exists(db)).toBe(true);
-    });
-
-    it('refuses --report and --db that name different files, and accepts them when they agree', async () => {
-      const before = await tree(docs);
-      const different = (report: string, db: string) =>
-        new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
-
-      for (const [report, db] of [
-        [join(docs, 'a.md'), join(docs, 'b.sqlite')],
-        [join(docs, 'other', 'b.md'), join(docs, 'b.sqlite')],
-        [join(docs, 'b.sqlite'), join(docs, 'c.sqlite')],
-      ] as const) {
-        await expect(step('init', 'X', '--report', report, '--db', db)).rejects.toThrow(different(report, db));
-        await expect(step('init', 'X', '--db', db, '--report', report)).rejects.toThrow(different(report, db));
-      }
-      expect(printed).toBe('');
-      expect(await tree(docs)).toEqual(before);
-
-      await step('init', 'X', '--report', join(docs, 'c.md'), '--db', join(docs, 'c.sqlite'));
-      await step('init', 'X', '--report', join(docs, 'd.sqlite'), '--db', join(docs, 'd.sqlite'));
-      await step('init', 'X', '--report', `${docs}/./e.md`, '--db', join(docs, 'e.sqlite'));
-      await step('init', 'X', '--report', relative(process.cwd(), join(docs, 'f.md')), '--db', join(docs, 'f.sqlite'));
-      expect(await tree(docs)).toEqual([...before, 'c.md', 'c.sqlite', 'd.md', 'd.sqlite', 'e.md', 'e.sqlite', 'f.md', 'f.sqlite'].sort());
-    });
-
-    it('compares the names the way the paths are derived: without regard to case where the file system has none', async () => {
-      const argv = ['init', 'X', '--report', join(docs, 'G.MD'), '--db', join(docs, 'g.sqlite')];
-      if (process.platform === 'win32') {
-        expect(await step(...argv)).toBe(0);
-        expect(await exists(join(docs, 'g.sqlite'))).toBe(true);
-      } else {
-        await expect(step(...argv)).rejects.toThrow('name different files');
-      }
     });
 
     it('refuses an existing database and leaves it alone, a blank name, and a pull request URL that is none', async () => {

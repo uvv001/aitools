@@ -246,7 +246,7 @@ describe('bundle', () => {
     const description = join(elsewhere, 'description.md');
     await writeFile(description, 'Text.\n', 'utf8');
 
-    const init = await bundled(['init', 'Demo', '--report', report, '--pr', prUrl], elsewhere);
+    const init = await bundled(['init', 'Demo', '--db', db, '--pr', prUrl], elsewhere);
     expect(init.stdout).toBe(
       `Created review.sqlite\nPull request: ${prUrl}\nReport: review.md\n`,
     );

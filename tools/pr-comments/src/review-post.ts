@@ -48,7 +48,7 @@ function linkAdvice(reason: OwnCommentReason, ref: string, db: string): string {
   return `remove the link with "pr-comments link remove --db ${quoteCliPath(db)} ${ref}" and post again (that creates a new comment${stays})`;
 }
 
-// Publishes the comment of ONE finding of the review database `arg` (a report or a database path), using the
+// Publishes the comment of ONE finding of the review database `dbPath`, using the
 // database only (never the report file):
 // 1. The review must be connected to a pull request. The state of the finding does not matter.
 // 2. The comment is built as `extractComment` builds it from the finding in the database (title line,
@@ -63,12 +63,12 @@ function linkAdvice(reason: OwnCommentReason, ref: string, db: string): string {
 // Nothing is written in a dry run, or when the result is an error. The rerun of a post finds its comment `unchanged`
 // and records nothing twice.
 export async function postFinding(
-  arg: string,
+  dbPath: string,
   findingId: string,
   options: PostFindingOptions,
   deps: PostFindingDeps,
 ): Promise<PostedFinding> {
-  const { data, links, pullRequest, paths } = await loadReviewFile(arg);
+  const { data, links, pullRequest, paths } = await loadReviewFile(dbPath);
   const quotedDb = quoteCliPath(paths.db);
   if (pullRequest === undefined) {
     throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
@@ -122,7 +122,7 @@ export async function postFinding(
   const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
   try {
     const { reportError } = await changeReviewState(
-      arg,
+      dbPath,
       (state) => ({
         state: recordPosted(state, id, posted, action, published.state, deps.now()),
         result: undefined,

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, sep } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { defaultReportPath, findRepoRoot, reviewSlug } from './review-naming.ts';
+import { defaultDatabaseName, defaultDatabasePath, findRepoRoot, reviewSlug } from './review-naming.ts';
 
 describe('reviewSlug', () => {
   it.each([
@@ -73,7 +73,7 @@ describe('reviewSlug', () => {
   });
 });
 
-describe('findRepoRoot and defaultReportPath', () => {
+describe('findRepoRoot, defaultDatabaseName and defaultDatabasePath', () => {
   const roots: string[] = [];
 
   function scratch(): string {
@@ -148,50 +148,54 @@ describe('findRepoRoot and defaultReportPath', () => {
     });
   });
 
-  describe('defaultReportPath', () => {
+  describe('defaultDatabaseName and defaultDatabasePath', () => {
     const now = new Date(2026, 9, 8, 9, 5);
 
-    it('is .ai/review-with-docs/<date>_<slug>_review.md at the root of the repository, from any folder below it', () => {
+    it('formats <date>_<slug>_review.sqlite from the local date of `now`', () => {
+      expect(defaultDatabaseName('PR 173 — members section', now)).toBe('2026-10-08_pr-173-members-section_review.sqlite');
+    });
+
+    it('is .ai/review-with-docs/<date>_<slug>_review.sqlite at the root of the repository, from any folder below it', () => {
       const repo = folder(scratch(), 'repo');
       folder(repo, '.git');
-      const expected = join(repo, '.ai', 'review-with-docs', '2026-10-08_pr-173-members-section_review.md');
-      expect(defaultReportPath('PR 173 — members section', now, repo)).toBe(expected);
-      expect(defaultReportPath('PR 173 — members section', now, folder(repo, 'src', 'deep'))).toBe(expected);
+      const expected = join(repo, '.ai', 'review-with-docs', '2026-10-08_pr-173-members-section_review.sqlite');
+      expect(defaultDatabasePath('PR 173 — members section', now, repo)).toBe(expected);
+      expect(defaultDatabasePath('PR 173 — members section', now, folder(repo, 'src', 'deep'))).toBe(expected);
     });
 
     it('is absolute and written with the separators of the platform', () => {
       const repo = folder(scratch(), 'repo');
       folder(repo, '.git');
-      const path = defaultReportPath('Review', now, join(repo, 'a', '..'));
+      const path = defaultDatabasePath('Review', now, join(repo, 'a', '..'));
       expect(isAbsolute(path)).toBe(true);
-      expect(path.split(sep)).toEqual([...repo.split(sep), '.ai', 'review-with-docs', '2026-10-08_review_review.md']);
+      expect(path.split(sep)).toEqual([...repo.split(sep), '.ai', 'review-with-docs', '2026-10-08_review_review.sqlite']);
     });
 
     it('uses the root of a worktree', () => {
       const tree = folder(scratch(), 'tree');
       writeFileSync(join(tree, '.git'), 'gitdir: /somewhere/else\n');
-      expect(defaultReportPath('x', now, folder(tree, 'src'))).toBe(join(tree, '.ai', 'review-with-docs', '2026-10-08_x_review.md'));
+      expect(defaultDatabasePath('x', now, folder(tree, 'src'))).toBe(join(tree, '.ai', 'review-with-docs', '2026-10-08_x_review.sqlite'));
     });
 
     it('writes the local date of `now`, zero-padded', () => {
       const repo = folder(scratch(), 'repo');
       folder(repo, '.git');
-      const name = (date: Date): string => defaultReportPath('x', date, repo).slice(join(repo, '.ai', 'review-with-docs').length + 1);
-      expect(name(new Date(2026, 0, 5, 23, 59, 59, 999))).toBe('2026-01-05_x_review.md');
-      expect(name(new Date(2026, 11, 31, 0, 0, 0, 0))).toBe('2026-12-31_x_review.md');
-      expect(name(new Date(2026, 1, 9, 12))).toBe('2026-02-09_x_review.md');
+      const name = (date: Date): string => defaultDatabasePath('x', date, repo).slice(join(repo, '.ai', 'review-with-docs').length + 1);
+      expect(name(new Date(2026, 0, 5, 23, 59, 59, 999))).toBe('2026-01-05_x_review.sqlite');
+      expect(name(new Date(2026, 11, 31, 0, 0, 0, 0))).toBe('2026-12-31_x_review.sqlite');
+      expect(name(new Date(2026, 1, 9, 12))).toBe('2026-02-09_x_review.sqlite');
     });
 
     it('refuses a name that makes no slug', () => {
       const repo = folder(scratch(), 'repo');
       folder(repo, '.git');
-      expect(() => defaultReportPath('///', now, repo)).toThrow(new Error('the name has nothing a file name can be made of'));
+      expect(() => defaultDatabasePath('///', now, repo)).toThrow(new Error('the name has nothing a file name can be made of'));
     });
 
     it.skipIf(insideRepository)('is under the current folder outside a repository', () => {
       const plain = folder(scratch(), 'plain');
-      expect(defaultReportPath('Café', now, plain)).toBe(join(plain, '.ai', 'review-with-docs', '2026-10-08_cafe_review.md'));
-      expect(defaultReportPath('Café', now, join(plain, 'nested', '..'))).toBe(join(plain, '.ai', 'review-with-docs', '2026-10-08_cafe_review.md'));
+      expect(defaultDatabasePath('Café', now, plain)).toBe(join(plain, '.ai', 'review-with-docs', '2026-10-08_cafe_review.sqlite'));
+      expect(defaultDatabasePath('Café', now, join(plain, 'nested', '..'))).toBe(join(plain, '.ai', 'review-with-docs', '2026-10-08_cafe_review.sqlite'));
     });
   });
 });

@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { formatStamp } from './review-ops.ts';
 
 // Where a new review lives in the working tree when the user does not say: `.ai/review-with-docs/` at the root of the
-// git repository, named `yyyy-mm-dd_<slug>_review.md` from the clock; the database sits beside it.
+// git repository, named `yyyy-mm-dd_<slug>_review.sqlite` from the clock; the report sits beside it.
 export const REVIEW_FOLDER = join('.ai', 'review-with-docs');
 
 const MAX_SLUG_LENGTH = 60;
@@ -42,8 +42,13 @@ export function findRepoRoot(from: string): string | undefined {
   return folder;
 }
 
-// `<repo root or cwd>/.ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.md` as an absolute path; the date is the local date of `now`.
-export function defaultReportPath(name: string, now: Date, cwd: string): string {
+// `<yyyy-mm-dd>_<slug>_review.sqlite`; the date is the local date of `now`.
+export function defaultDatabaseName(name: string, now: Date): string {
   const date = formatStamp(now).slice(0, 10);
-  return join(findRepoRoot(cwd) ?? resolve(cwd), REVIEW_FOLDER, `${date}_${reviewSlug(name)}_review.md`);
+  return `${date}_${reviewSlug(name)}_review.sqlite`;
+}
+
+// `<repo root or cwd>/.ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` as an absolute path; the date is the local date of `now`.
+export function defaultDatabasePath(name: string, now: Date, cwd: string): string {
+  return join(findRepoRoot(cwd) ?? resolve(cwd), REVIEW_FOLDER, defaultDatabaseName(name, now));
 }

@@ -57,7 +57,7 @@ Pull request: https://github.com/acme/widgets/pull/42
 Report: .ai/review-with-docs/2026-10-29_pr-42-tenant-registry_review.md
 ```
 
-Both the database and the report are created, and every change updates the report after the database change commits (if writing the report file fails afterwards, the database change stays saved, the command exits `0`, and `stderr` prints `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"`). Without `--report` or `--db`, the files go to `.ai/review-with-docs/<yyyy-mm-dd>_<name as a slug>_review.{md,sqlite}` at the git root; whenever `init` places a review under `.ai/review-with-docs/` (subfolders included), it checks with `git check-ignore`, adds `/.ai/review-with-docs/` to `.git/info/exclude` when not already ignored (while `.ai/` itself can remain versioned), and fails if a `.gitignore` rule still exposes the folder. Pass `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` when storing the review in a session folder. Every subsequent command takes `--db <file.sqlite>` (`$DB` below). If the pull request does not exist yet, leave out `--pr`, and connect it later:
+Both the database and the report are created, and every change updates the report after the database change commits (if writing the report file fails afterwards, the database change stays saved, the command exits `0`, and `stderr` prints `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"`). Without `--db`, the files go to `.ai/review-with-docs/<yyyy-mm-dd>_<name as a slug>_review.{sqlite,md}` at the git root; whenever `init` places a review under `.ai/review-with-docs/` (subfolders included), it checks with `git check-ignore`, adds `/.ai/review-with-docs/` to `.git/info/exclude` when not already ignored (while `.ai/` itself can remain versioned), and fails if a `.gitignore` rule still exposes the folder. Pass `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` when storing the review in a session folder. Every subsequent command takes `--db <file.sqlite>` (`$DB` below). If the pull request does not exist yet, leave out `--pr`, and connect it later:
 
 ```
 pr-comments pr connect https://github.com/acme/widgets/pull/42 --db $DB
@@ -208,12 +208,11 @@ Every command also has `pr-comments <command> --help` (or `pr-comments help <com
 **`init`**: creates the review database. It never replaces an existing database or report file.
 
 ```
-pr-comments init <name> [--pr <url>] [--report <file.md>] [--db <file.sqlite>]
+pr-comments init <name> [--pr <url>] [--db <file.sqlite>]
 pr-comments init "PR 42 tenant registry" --pr https://github.com/acme/widgets/pull/42
 ```
 
 - `--pr <url>` connects the review to a pull request.
-- `--report <file.md>` names the report. The database is created next to it, with the same name and `.sqlite`. A `.sqlite` path works too.
 - `--db <file.sqlite>` puts the database somewhere else (and the report next to it).
 
 ### The pull request
@@ -466,7 +465,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 - Every command except `init` works on an existing review database. A missing file is an error, and nothing is created.
 - `--db <file.sqlite>` is required on every command except `init`. The name must end in `.sqlite`.
 - A command that changes the database prints `Review database: <path>` on stderr after it succeeded, so you can see which review it changed. A dry run does not, and neither does `pr connect` to the pull request the review is already connected to.
-- `init` uses `--db` (or `--report`) to name the file it creates, defaulting to `.ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` at the git root.
+- `init` uses `--db` to name the file it creates, defaulting to `.ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` at the git root.
 - Several commands at once are safe: they wait for each other, up to 10 seconds. The read commands (`finding list`, `finding show`, `link pending`, `pr show`, and the `report` commands) open the file read-only and change nothing in it.
 
 ### Strict arguments, help, `--json`
@@ -489,7 +488,7 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 
 ## Git
 
-By default `init` puts reviews in `.ai/review-with-docs/` (excluded via `.git/info/exclude`, while `.ai/` itself can be versioned), so they stay out of Git commits; pass `--db` to keep one elsewhere, for example in a session folder. When `--report` or `--db` places a review in a tracked folder instead, commit the database next to the report.
+By default `init` puts reviews in `.ai/review-with-docs/` (excluded via `.git/info/exclude`, while `.ai/` itself can be versioned), so they stay out of Git commits; pass `--db` to keep one elsewhere, for example in a session folder. When `--db` places a review in a tracked folder instead, commit the database next to the report.
 
 The database is a binary file, so `git diff` cannot show what changed in it. `report dump` turns it into text. Tell git to use it:
 

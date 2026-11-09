@@ -56,13 +56,13 @@ export interface RepliedDuplicate {
 // is not done by this tool. A check annotation ("a3f9c2d1e") is refused first of all, without reading the database:
 // it is not a comment, and there is nothing to reply to.
 export async function replyToDuplicate(
-  arg: string,
+  dbPath: string,
   ref: string,
   options: ReplyDuplicateOptions,
   deps: ReplyDuplicateDeps,
 ): Promise<RepliedDuplicate> {
   if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation; there is nothing to reply to`);
-  const { links, pullRequest, paths } = await loadReviewFile(arg);
+  const { links, pullRequest, paths } = await loadReviewFile(dbPath);
   const quotedDb = quoteCliPath(paths.db);
   if (pullRequest === undefined) {
     throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
@@ -102,7 +102,7 @@ export async function replyToDuplicate(
   const was = result.action === 'created' ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
   try {
     const { reportError } = await changeReviewState(
-      arg,
+      dbPath,
       (state) => ({
         state: recordReplied(state, ref, replyRef, result.state, deps.now()),
         result: undefined,

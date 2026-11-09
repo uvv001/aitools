@@ -108,7 +108,6 @@ function formatOutcome(result: PublishResult, dryRun: boolean, place?: string): 
 
 interface Values {
   db?: string;
-  report?: string;
   pr?: string;
   out?: string;
   author?: string[];
@@ -278,7 +277,6 @@ async function snapshotOf(db: string): Promise<PullRequestData> {
 async function initReview({ env, args: [name = ''], values }: Context): Promise<number> {
   const title = need('the name', name);
   const { db, report, reportError } = await initReviewFile(title, {
-    report: values.report,
     db: values.db,
     pr: values.pr,
     now: env.now(),
@@ -689,14 +687,12 @@ function def(
 export const COMMANDS: Command[] = [
   def('init', 'creates the review database',
     'Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.\n' +
-      'It never replaces an existing database or report file. The report (markdown) is written next to the database and updated on every change.\n' +
-      'The report is always next to the database with the same name, so --report and --db may both be given only if they agree.',
+      'It never replaces an existing database or report file. The report (markdown) is written next to the database (<stem>.md) and updated on every change.',
     initReview, {
       args: [arg('<name>', 'what is under review; the title of the report (a slug of it names the files by default)')],
       options: [
         opt('pr', '<url>', 'connect the review to this pull request'),
-        opt('report', '<file.md>', 'the report (.md) or the database (.sqlite) to create (default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)'),
-        opt('db', '<file.sqlite>', 'the database to create (default: next to the report)'),
+        opt('db', '<file.sqlite>', 'the database (.sqlite) to create (default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.sqlite at the git root)'),
       ],
       database: 'none',
       example: '"PR 42 tenant registry" --pr https://github.com/acme/widgets/pull/42',

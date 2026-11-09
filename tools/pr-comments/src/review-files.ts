@@ -12,7 +12,7 @@ import { dumpReview } from './review-dump.ts';
 import { DB_HINT_PLACEHOLDER } from './review-links.ts';
 import type { ReviewState } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
-import { defaultReportPath, findRepoRoot, REVIEW_FOLDER } from './review-naming.ts';
+import { defaultDatabasePath, findRepoRoot, REVIEW_FOLDER } from './review-naming.ts';
 import { newReview } from './review-ops.ts';
 import { renderReport } from './review-render.ts';
 import { getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
@@ -93,14 +93,14 @@ export function quoteCliPath(path: string, platform: NodeJS.Platform = process.p
   return `'${escaped}'`;
 }
 
-// Accepts the report (`…_review.md`) or the database (`….sqlite`) and derives the other one next to it. The
-// extension is matched without regard to case; the derived path always has the lower-case one.
-export function reviewPaths(arg: string): ReviewPaths {
-  const extension = extname(arg);
-  const stem = arg.slice(0, arg.length - extension.length);
-  if (extension.toLowerCase() === '.md') return { report: arg, db: `${stem}.sqlite` };
-  if (extension.toLowerCase() === '.sqlite') return { db: arg, report: `${stem}.md` };
-  throw new Error(`${arg} must be a report (.md) or a review database (.sqlite)`);
+// Takes the review database (`….sqlite`, matched without regard to case) and derives the report (`<stem>.md`) next to it.
+export function reviewPaths(dbPath: string): ReviewPaths {
+  const extension = extname(dbPath);
+  if (extension.toLowerCase() !== '.sqlite') {
+    throw new Error(`${dbPath} must be a review database (.sqlite)`);
+  }
+  const stem = dbPath.slice(0, dbPath.length - extension.length);
+  return { db: dbPath, report: `${stem}.md` };
 }
 
 // Makes the finished file appear under its final name without replacing a file that is there; false when one is.
@@ -147,28 +147,14 @@ const existingDatabase = (dbPath: string): Error =>
   new Error(
     `${dbPath} already exists; the database is the source of truth and must not be overwritten. ` +
       'If you really want to start this review again, delete the database deliberately first. ' +
-      'To start another review, choose another name or location with --db or --report.',
+      'To start another review, choose another name or location with --db.',
   );
 
 const existingReport = (reportPath: string): Error =>
   new Error(
     `${reportPath} already exists; init will not overwrite an existing report file. ` +
-      'Choose another name or location with --db or --report, or remove the file first.',
+      'Choose another name or location with --db, or remove the file first.',
   );
-
-// The database of a review is a `.sqlite` file, which is what lets a command tell it from the report.
-function mustBeDatabase(dbPath: string | undefined): void {
-  if (dbPath !== undefined && extname(dbPath).toLowerCase() !== '.sqlite') {
-    throw new Error(`--db must be a file ending in .sqlite: ${dbPath}`);
-  }
-}
-
-// The report is always next to the database with the same name, so naming both is fine only when they agree.
-function reportMatchesDatabase(report: string | undefined, db: string | undefined): void {
-  if (report === undefined || db === undefined) return;
-  if (samePath(reviewPaths(reviewPaths(report).report).db, reviewPaths(reviewPaths(db).report).db)) return;
-  throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
-}
 
 export interface InitResult {
   db: string;
@@ -276,33 +262,25 @@ export async function ensureAiGitExcluded(repoRoot: string, targetPaths: string[
 }
 
 // Creates the database of a new review named `name` (the title of its report): no rounds or findings. It
-// lives at `options.report` (a report or a database path) or, without one, at the default place of a review of that
-// name (`.ai/review-with-docs/` of the repository of `cwd`); `options.db` names another file, which must end in
-// `.sqlite`. `options.pr` connects it to a pull request, validated before anything is created and stored in the same
-// file. The report is rendered and written next to the database. Refuses an existing database, and publishes the new
-// one atomically.
+// lives at `options.db` (which must end in `.sqlite`) or, without one, at the default place of a review of that
+// name (`.ai/review-with-docs/` of the repository of `cwd`). `options.pr` connects it to a pull request, validated
+// before anything is created and stored in the same file. The report is rendered and written next to the database.
+// Refuses an existing database or report file, and publishes the new database atomically.
 export async function initReviewFile(
   name: string,
-  options: { report?: string; db?: string; pr?: string; now?: Date; cwd?: string } = {},
+  options: { db?: string; pr?: string; now?: Date; cwd?: string } = {},
 ): Promise<InitResult> {
-  mustBeDatabase(options.db);
-  reportMatchesDatabase(options.report, options.db);
   const cwd = options.cwd ?? process.cwd();
   const now = options.now ?? new Date();
   const data = newReview(name);
   const pullRequest = options.pr === undefined ? undefined : formatPullRequestUrl(parsePullRequestUrl(options.pr));
-  const paths = reviewPaths(options.report ?? defaultReportPath(data.target, now, cwd));
-  const dbPath = options.db ?? paths.db;
+  const dbPath = options.db ?? defaultDatabasePath(data.target, now, cwd);
+  const { report: reportTarget } = reviewPaths(dbPath);
   const targetDir = dirname(resolve(cwd, dbPath));
 
   if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
-  const reportTarget = reviewPaths(dbPath).report;
   await refuseDatabase(reportTarget, dbPath);
   if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
-  if (options.report !== undefined && options.report !== reportTarget && !samePath(options.report, dbPath)) {
-    await refuseDatabase(options.report, dbPath);
-    if (await existsOrSymlink(options.report)) throw existingReport(options.report);
-  }
   const rendered = renderReport(data);
 
   const repoRoot = findRepoRoot(targetDir);
@@ -342,8 +320,8 @@ function loadState(db: DatabaseSync): ReviewState {
 }
 
 // Reads the whole review through a read-only connection: nothing is written, not even by accident.
-export async function loadReviewFile(arg: string): Promise<LoadedReview> {
-  const paths = reviewPaths(arg);
+export async function loadReviewFile(dbPath: string): Promise<LoadedReview> {
+  const paths = reviewPaths(dbPath);
   const db = openReviewDb(paths.db, 'readonly');
   try {
     return { ...loadState(db), paths };
@@ -353,8 +331,8 @@ export async function loadReviewFile(arg: string): Promise<LoadedReview> {
 }
 
 // The pull request that the last `pr sync` stored, `undefined` before the first one. Read-only.
-export async function loadSnapshot(arg: string): Promise<PullRequestData | undefined> {
-  const db = openReviewDb(reviewPaths(arg).db, 'readonly');
+export async function loadSnapshot(dbPath: string): Promise<PullRequestData | undefined> {
+  const db = openReviewDb(reviewPaths(dbPath).db, 'readonly');
   try {
     return inTransaction(db, () => loadPullRequest(db));
   } finally {
@@ -370,9 +348,9 @@ export interface RenderResult {
 
 // Writes the derived report, with LF line breaks and no BOM, to `out` or next to the database. The
 // database is only read. An existing file is overwritten whatever it holds, except a database: `out` may be neither
-// the database of `arg` nor any other SQLite file, nor named `.sqlite`.
-export async function renderReportFile(arg: string, options: { out?: string } = {}): Promise<RenderResult> {
-  const paths = reviewPaths(arg);
+// `dbPath` nor any other SQLite file, nor named `.sqlite`.
+export async function renderReportFile(dbPath: string, options: { out?: string } = {}): Promise<RenderResult> {
+  const paths = reviewPaths(dbPath);
   const target = options.out ?? paths.report;
   await refuseDatabase(target, paths.db);
   const db = openReviewDb(paths.db, 'readonly');
@@ -390,9 +368,9 @@ export async function renderReportFile(arg: string, options: { out?: string } = 
   }
 }
 
-// The deterministic text dump of the database of `arg`.
-export async function dumpReviewFile(arg: string): Promise<string> {
-  const { data, links, pullRequest } = await loadReviewFile(arg);
+// The deterministic text dump of the database `dbPath`.
+export async function dumpReviewFile(dbPath: string): Promise<string> {
+  const { data, links, pullRequest } = await loadReviewFile(dbPath);
   return dumpReview(data, { pullRequest, links });
 }
 
@@ -448,7 +426,7 @@ function assertFreshSnapshot(db: DatabaseSync, dbPath: string, snapshot: PullReq
 // the busy timeout) instead of working on stale data. When the review changes, the report is rendered and written
 // after the transaction commits.
 export async function changeReviewState<T>(
-  arg: string,
+  dbPath: string,
   change: (state: ReviewState) => StateChange<T> | Promise<StateChange<T>>,
   options: {
     snapshot?: PullRequestData;
@@ -456,7 +434,7 @@ export async function changeReviewState<T>(
     knownRef?: string | readonly string[];
   } = {},
 ): Promise<StateChange<T>> {
-  const paths = reviewPaths(arg);
+  const paths = reviewPaths(dbPath);
   const db = openReviewDb(paths.db, 'existing');
   let rendered: string | undefined;
   try {
@@ -533,10 +511,10 @@ export interface Mutation<T> {
 
 // `changeReviewState` for a change of the review alone: the links and the pull request are carried along as they are.
 export async function mutateReviewFile<T>(
-  arg: string,
+  dbPath: string,
   mutate: (data: ReviewData) => Mutation<T> | Promise<Mutation<T>>,
 ): Promise<Mutation<T>> {
-  const { state, result, reportError } = await changeReviewState(arg, async (current) => {
+  const { state, result, reportError } = await changeReviewState(dbPath, async (current) => {
     const changed = await mutate(current.data);
     return { state: { ...current, data: changed.data }, result: changed.result };
   });
@@ -555,8 +533,8 @@ export interface SyncResult {
 // Stores a downloaded pull request in the database, in one transaction under the write lock. The review must be
 // connected to a pull request, and it must be this one (host, owner and repository compared without regard to case).
 // The links stay as they are: what they point at is kept, as gone, when the pull request no longer has it.
-export async function syncReviewFile(arg: string, data: PullRequestData): Promise<SyncResult> {
-  const paths = reviewPaths(arg);
+export async function syncReviewFile(dbPath: string, data: PullRequestData): Promise<SyncResult> {
+  const paths = reviewPaths(dbPath);
   const db = openReviewDb(paths.db, 'existing');
   try {
     inTransaction(

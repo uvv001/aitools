@@ -94,12 +94,13 @@ afterEach(() => {
   removeScratch(dir);
 });
 
+const dbPath = (): string => join(dir, `${STEM}.sqlite`);
 const reportPath = (): string => join(dir, `${STEM}.md`);
 
 // The database of a review of PR 42 with the findings of SEEDS, which has synced the comments of BASE; returns the
 // database path. A review that is not connected has no pull request to sync.
 async function startReview({ connected = true } = {}): Promise<string> {
-  const { db } = await initReviewFile('PR 42', { report: reportPath(), now: NOW, pr: connected ? PR : undefined });
+  const { db } = await initReviewFile('PR 42', { db: dbPath(), now: NOW, pr: connected ? PR : undefined });
   await mutateReviewFile(db, (data) => {
     let next = openRound(data, { revision: 'abc1234', base: 'def5678' });
     for (const { approved, ...seed } of SEEDS) {
@@ -200,12 +201,11 @@ async function post(db: string, id: string, reply: Reply, options: Partial<PostF
 
 describe('refusals before anything is published', () => {
   it('refuses a review that is not connected to a pull request, naming the database', async () => {
-    const report = reportPath();
     const db = await startReview({ connected: false });
     const before = await readFile(db);
     const fake = engine(created());
 
-    await expect(postFinding(report, 'F1', OPTIONS, fake.deps)).rejects.toThrow(
+    await expect(postFinding(db, 'F1', OPTIONS, fake.deps)).rejects.toThrow(
       new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"`),
     );
     expect(fake.calls).toEqual([]);

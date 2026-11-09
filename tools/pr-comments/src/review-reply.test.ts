@@ -54,12 +54,13 @@ afterEach(() => {
   removeScratch(dir);
 });
 
+const dbPath = (): string => join(dir, `${STEM}.sqlite`);
 const reportPath = (): string => join(dir, `${STEM}.md`);
 
 // The database of a review of PR 42 with four findings, which has synced the comments of BASE, and the links above;
 // returns the database path. A review that is not connected has no pull request to sync, and so no links.
 async function startReview({ connected = true } = {}): Promise<string> {
-  const { db } = await initReviewFile('PR 42', { report: reportPath(), now: NOW, pr: connected ? PR : undefined });
+  const { db } = await initReviewFile('PR 42', { db: dbPath(), now: NOW, pr: connected ? PR : undefined });
   await mutateReviewFile(db, (data) => {
     let next = openRound(data, { revision: 'abc1234', base: 'def5678' });
     for (const title of TITLES) next = addFinding(next, { severity: 'medium', title, description: 'Described.' }, NOW).data;
@@ -167,12 +168,11 @@ const goneOwn = (db: string, own: string, finding: string, why = 'was your pendi
 
 describe('refusals before anything is sent', () => {
   it('refuses a review that is not connected to a pull request, naming the database', async () => {
-    const report = reportPath();
     const db = await startReview({ connected: false });
     const before = await readFile(db);
     const fake = engine(created());
 
-    await expect(replyToDuplicate(report, 'r2', OPTIONS, fake.deps)).rejects.toThrow(
+    await expect(replyToDuplicate(db, 'r2', OPTIONS, fake.deps)).rejects.toThrow(
       new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"`),
     );
     expect(fake.calls).toEqual([]);
