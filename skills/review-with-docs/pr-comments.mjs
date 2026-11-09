@@ -572,7 +572,6 @@ const reqOpt = (name, value, description) => ({
 	description,
 	required: true
 });
-const jsonOption = (what) => flag("json", `print ${what} as JSON`);
 const noteOption = (what = "why") => opt("note", "<text>", what);
 const roundOption = opt("round", "<n>", "write \"Round <n>: \" at the start of the Updates entry (a round that was opened)");
 const descriptionFileOption = (what) => reqOpt("description-file", "<file|->", `${what}, read from a UTF-8 file or from standard input (-)`);
@@ -641,10 +640,7 @@ const COMMAND_SPECS = [
 		args: [arg("<url>", "the URL of the pull request")],
 		example: "https://github.com/acme/widgets/pull/42"
 	}),
-	spec("pr show", "shows the connected pull request and when it was synced", "Prints the connected pull request and, when it was downloaded, when, its head commit and how much of it the database holds.", {
-		options: [jsonOption("the status")],
-		database: "readonly"
-	}),
+	spec("pr show", "shows the connected pull request and when it was synced", "Prints the connected pull request and, when it was downloaded, when, its head commit and how much of it the database holds.", { database: "readonly" }),
 	spec("pr sync", "downloads the connected pull request into the database", "Downloads the comments, reviews, threads and check annotations of the connected pull request from GitHub and stores\nthem in the database, replacing what the last sync stored. A comment that a link points at is kept, marked as gone,\nwhen GitHub no longer has it. Needs a token."),
 	spec("round open", "opens a round (the revision reviewed and its base)", `Records a new round under Reviewed: the revision that is reviewed and the base it is compared with.\n${REVISIONS}`, {
 		options: [
@@ -667,8 +663,7 @@ const COMMAND_SPECS = [
 			reqOpt("title", "<text>", "the title, one line"),
 			descriptionFileOption("the description"),
 			flag("unverified", "open the finding as unverified instead of awaiting triage"),
-			noteOption("a note for the opening update"),
-			flag("json", "print {\"id\": \"F7\"} instead of \"Added F7\"")
+			noteOption("a note for the opening update")
 		],
 		example: "--severity high --title \"Missing timeout\" --description-file description.md"
 	}),
@@ -676,15 +671,13 @@ const COMMAND_SPECS = [
 		options: [
 			opt("state", "<state>", "only findings in this state: awaiting, unverified, approved, fixed, discarded, deferred or improvement"),
 			opt("severity", "<severity>", "only findings of this severity: high, medium or low"),
-			flag("unposted", "only findings that have no comment of their own on the pull request yet"),
-			jsonOption("the findings as an array")
+			flag("unposted", "only findings that have no comment of their own on the pull request yet")
 		],
 		database: "readonly",
 		example: "--state approved --unposted"
 	}),
 	spec("finding show", "shows one finding with its updates", "Prints the finding, the comments linked to it (such as \"Linked: own r544861, duplicate r544900\"), the description and its Updates.", {
 		args: [FINDING],
-		options: [jsonOption("the finding, its evidence and its links")],
 		database: "readonly",
 		example: "F7"
 	}),
@@ -726,8 +719,7 @@ const COMMAND_SPECS = [
 		options: [
 			opt("anchor", "<n>", "use the n-th path:lines anchor of the description (default: 1)"),
 			opt("commit", "<sha>", "pin the comment to this commit, 7-40 hex digits (default: the head of the pull request)"),
-			...postOptions,
-			jsonOption("the result, the anchors and the text")
+			...postOptions
 		],
 		notes: [
 			"The comment is `<severity> **<id> — <title>**` and the description (e.g. `🔴 **F7 — Missing timeout**`). Only the description goes to GitHub, never the Updates; relative links pointing into the review are replaced by their text.",
@@ -737,10 +729,7 @@ const COMMAND_SPECS = [
 		],
 		example: "F7 --dry-run"
 	}),
-	spec("link pending", "lists the comments and check annotations not linked yet", "Prints one line per top-level comment or check annotation of the synced pull request that no link names: ref, author or app, place,\nstate or level, and an excerpt. Nothing is printed when everything is processed (use \"report comments\" to inspect thread replies,\nedited comments, and submitted review bodies). Replies are not listed; their thread is the root comment.\nIt exits with 0 whenever it ran: pending work is not a failure. Before the first \"pr sync\" it exits with 1.", {
-		options: [jsonOption("the items as an array ([] when there are none)")],
-		database: "readonly"
-	}),
+	spec("link pending", "lists the comments and check annotations not linked yet", "Prints one line per top-level comment or check annotation of the synced pull request that no link names: ref, author or app, place,\nstate or level, and an excerpt. Nothing is printed when everything is processed (use \"report comments\" to inspect thread replies,\nedited comments, and submitted review bodies). Replies are not listed; their thread is the root comment.\nIt exits with 0 whenever it ran: pending work is not a failure. Before the first \"pr sync\" it exits with 1.", { database: "readonly" }),
 	spec("link own", "links a comment as the own comment of a finding", "Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.", {
 		args: [FINDING, COMMENT_ONLY_REF],
 		options: [noteOption()],
@@ -762,7 +751,7 @@ const COMMAND_SPECS = [
 	}),
 	spec("link reply", "answers a duplicate with \"Duplicate of <link>.\"", "Answers a comment that is linked as a duplicate of a finding with \"Duplicate of <link to the own comment of the finding>.\"\nin your pending review, and records the returned reply ref and update in the database (run \"pr-comments pr sync --db <file.sqlite>\"\nto refresh the full pull request snapshot). The finding must have an own comment. Needs a token with write permission.\nA conversation comment can only be answered at once, so it needs --now. The thread is never resolved by the tool.", {
 		args: [arg("<ref>", "the comment that is linked as a duplicate: r544830 or c623843")],
-		options: [...postOptions, jsonOption("the result and the text")],
+		options: postOptions,
 		notes: [
 			"A reply in a review thread always goes into your pending review; `--now` has no effect on it.",
 			"A conversation comment (`c…`) has no thread and is answered with a new conversation comment visible at once, so it needs `--now`.",
@@ -1896,99 +1885,6 @@ function dumpReview$1(data, extra = {}) {
 	return `${lines.join("\n")}\n`;
 }
 //#endregion
-//#region src/review-evidence.ts
-const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
-const OPENING = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-const CLOSING = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
-function splitLines$1(text) {
-	const lines = text.split(/\r?\n/);
-	if (lines.at(-1) === "") lines.pop();
-	return lines;
-}
-function parseAnchor(line) {
-	const match = ANCHOR.exec(line);
-	if (!match) return void 0;
-	const [, path = "", from = "", to] = match;
-	const start = Number(from);
-	return {
-		path,
-		start,
-		end: to === void 0 ? start : Number(to)
-	};
-}
-function openingFence(line) {
-	const match = OPENING.exec(line);
-	if (!match) return void 0;
-	const [, marker = "", rest = ""] = match;
-	return marker.startsWith("`") && rest.includes("`") ? void 0 : {
-		marker,
-		info: rest.trim()
-	};
-}
-function closesFence(line, marker) {
-	const closing = CLOSING.exec(line)?.[1];
-	return closing !== void 0 && closing.startsWith(marker[0] ?? "") && closing.length >= marker.length;
-}
-function readFence(lines, open, marker) {
-	const close = lines.findIndex((line, index) => index > open && closesFence(line, marker));
-	if (close < 0) return {
-		snippet: lines.slice(open + 1),
-		unclosed: true,
-		next: lines.length
-	};
-	return {
-		snippet: lines.slice(open + 1, close),
-		unclosed: false,
-		next: close + 1
-	};
-}
-function nextFenceBeforeAnchor(lines, from) {
-	for (let scan = from; scan < lines.length; scan += 1) {
-		const line = lines[scan] ?? "";
-		if (parseAnchor(line)) return void 0;
-		const opening = openingFence(line);
-		if (opening) return {
-			at: scan,
-			opening
-		};
-	}
-}
-function extractEvidence(description) {
-	const lines = splitLines$1(description);
-	const found = [];
-	let index = 0;
-	while (index < lines.length) {
-		const anchor = parseAnchor(lines[index] ?? "");
-		if (!anchor) {
-			const opening = openingFence(lines[index] ?? "");
-			index = opening ? readFence(lines, index, opening.marker).next : index + 1;
-			continue;
-		}
-		const nextFence = nextFenceBeforeAnchor(lines, index + 1);
-		if (!nextFence) {
-			found.push({
-				...anchor,
-				snippet: void 0,
-				fence: "",
-				unclosed: false,
-				line: index + 1
-			});
-			index += 1;
-			continue;
-		}
-		const fence = readFence(lines, nextFence.at, nextFence.opening.marker);
-		found.push({
-			...anchor,
-			snippet: fence.snippet,
-			fence: nextFence.opening.info,
-			unclosed: fence.unclosed,
-			line: index + 1
-		});
-		index = fence.next;
-	}
-	return found;
-}
-//#endregion
 //#region src/review-view.ts
 const SEVERITY_NAMES$1 = [
 	"high",
@@ -1997,7 +1893,6 @@ const SEVERITY_NAMES$1 = [
 ];
 const normalise = (text) => text.trim().replace(/\s+/gu, " ").toLowerCase();
 const firstWord = (label) => label.split(" ")[0] ?? label;
-const stateLabel = (marker) => STATES.find((state) => state.marker === marker)?.label ?? marker;
 function parseState(text, prefix = "") {
 	const wanted = normalise(text);
 	const found = STATES.find((state) => [
@@ -2038,17 +1933,6 @@ function listLines(shown, total) {
 	const width = Math.max(0, ...shown.map(({ id }) => id.length));
 	return [...shown.map((finding) => findingLine(finding, width)), `${shown.length} of ${total} findings`];
 }
-function listJson(shown) {
-	return shown.map(({ id, state, severity, title, description, updates }) => ({
-		id,
-		state,
-		stateLabel: stateLabel(state),
-		severity,
-		title,
-		updates: updates.length,
-		anchors: extractEvidence(description).length
-	}));
-}
 function findFinding(data, id) {
 	const wanted = id.trim().toLowerCase();
 	const found = data.findings.find((finding) => finding.id.toLowerCase() === wanted);
@@ -2074,20 +1958,6 @@ function showText({ id, state, severity, title, description, updates }, links = 
 		...body,
 		...history
 	].join("\n")}\n`;
-}
-function showJson(finding, links = []) {
-	const evidence = extractEvidence(finding.description).map((item) => ({
-		...item,
-		snippet: item.snippet ?? null
-	}));
-	return {
-		...finding,
-		evidence,
-		comments: links.map(({ ref, role }) => ({
-			ref,
-			role
-		}))
-	};
 }
 //#endregion
 //#region src/review-ops.ts
@@ -3664,11 +3534,11 @@ function pendingLines(items) {
 	const checks = items.filter(({ kind }) => kind === "check");
 	return [...tableLines(comments.map(commentCells)), ...tableLines(checks.map(annotationCells))];
 }
-function pendingJson(items) {
-	return JSON.parse(JSON.stringify(items));
-}
 //#endregion
 //#region src/report-extract.ts
+const ANCHOR = /^\s*`([^\s`]+(?: +[^\s`]+)*):(\d+)(?:-(\d+))?`\s*$/;
+const OPENING = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const CLOSING = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const SCHEME = /^[a-z][a-z0-9+.-]+:/i;
 const REFERENCE_LINK = /\[[^\]]+\]\[[^\]]*\]/;
 const REFERENCE_DEFINITION = /^\s{0,3}\[[^\]]+\]:\s*\S/;
@@ -3696,6 +3566,19 @@ function commentLines(id, anchor) {
 		start,
 		end
 	};
+}
+function openingFence(line) {
+	const match = OPENING.exec(line);
+	if (!match) return void 0;
+	const [, marker = "", rest = ""] = match;
+	return marker.startsWith("`") && rest.includes("`") ? void 0 : {
+		marker,
+		info: rest.trim()
+	};
+}
+function closesFence(line, marker) {
+	const closing = CLOSING.exec(line)?.[1];
+	return closing !== void 0 && closing.startsWith(marker[0] ?? "") && closing.length >= marker.length;
 }
 function fenceMask(lines) {
 	let open;
@@ -4047,7 +3930,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+6b0fd0a`;
+	return `pr-comments ${VERSION}+49182a1`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4095,7 +3978,6 @@ function formatOutcome(result, dryRun, place) {
 	}
 	return columns.join("  ").trimEnd();
 }
-const printJson = (env, value) => env.print(`${JSON.stringify(value, null, 2)}\n`);
 function parsePositive(name, text) {
 	if (text === void 0) return void 0;
 	if (!/^[1-9]\d*$/.test(text) || !Number.isSafeInteger(Number(text))) throw new Error(`--${name} must be a positive whole number`);
@@ -4110,22 +3992,6 @@ function anchorLines({ anchors, chosen, unlinked }) {
 	});
 	if (unlinked > 0) lines.push(`links removed: ${unlinked}`);
 	return lines;
-}
-function postedJson({ finding, result, anchors, chosen, warnings, unlinked, body }) {
-	return {
-		finding,
-		result,
-		anchors: anchors.map((anchor, index) => ({
-			index: index + 1,
-			path: anchor.path,
-			lines: rangeText(anchor),
-			line: anchor.line
-		})),
-		chosen: chosen ? anchors.indexOf(chosen) + 1 : null,
-		warnings,
-		unlinked,
-		body
-	};
 }
 function need(what, value) {
 	if (value === void 0) throw new Error(`${what} is required`);
@@ -4219,41 +4085,24 @@ async function connectReview({ env, args: [url = ""] }, db) {
 	env.print(`${already ? "Already connected to" : "Connected to"} ${state.pullRequest}\n`);
 	return already ? "unchanged" : 0;
 }
-async function showPullRequest({ env, values }, db) {
+async function showPullRequest({ env }, db) {
 	const { pullRequest } = await loadReviewFile(db);
 	if (pullRequest === void 0) {
-		if (values.json) printJson(env, { pullRequest: null });
-		else env.print(`not connected to a pull request; connect it with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"\n`);
+		env.print(`not connected to a pull request; connect it with "pr-comments pr connect --db ${quoteCliPath(db)} <url>"\n`);
 		return 0;
 	}
 	const data = await loadSnapshot(db);
 	if (data === void 0) {
-		if (values.json) printJson(env, {
-			pullRequest,
-			synced: false
-		});
-		else env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync --db ${quoteCliPath(db)}"\n`);
+		env.print(`${pullRequest}\nnot synced yet; run "pr-comments pr sync --db ${quoteCliPath(db)}"\n`);
 		return 0;
 	}
 	const { fetchedAt, headSha } = data.pullRequest;
-	const counts = {
-		reviews: data.reviews.length,
-		threads: data.threads.length,
-		comments: data.comments.length,
-		annotations: countAnnotations(data)
-	};
-	if (values.json) printJson(env, {
-		pullRequest,
-		synced: true,
-		fetchedAt,
-		headSha,
-		...counts
-	});
-	else {
-		const { reviews, threads, comments, annotations } = counts;
-		env.print(`${pullRequest}\nsynced ${fetchedAt}, head ${headSha.slice(0, 8)}\n`);
-		env.print(`${reviews} reviews, ${threads} threads, ${comments} comments, ${annotations} annotations\n`);
-	}
+	const reviews = data.reviews.length;
+	const threads = data.threads.length;
+	const comments = data.comments.length;
+	const annotations = countAnnotations(data);
+	env.print(`${pullRequest}\nsynced ${fetchedAt}, head ${headSha.slice(0, 8)}\n`);
+	env.print(`${reviews} reviews, ${threads} threads, ${comments} comments, ${annotations} annotations\n`);
 	return 0;
 }
 async function syncPullRequest({ env }, db) {
@@ -4303,24 +4152,21 @@ async function addReviewFinding({ env, values }, db) {
 		};
 	});
 	warnReportError(env, db, reportError);
-	if (values.json) printJson(env, { id: result });
-	else env.print(`Added ${result}\n`);
+	env.print(`Added ${result}\n`);
 	return 0;
 }
 async function listFindings({ env, values }, db) {
 	const filter = parseFilter(values);
 	const { data, links } = await loadReviewFile(db);
 	const shown = filterFindings(data.findings, filter, links);
-	if (values.json) printJson(env, listJson(shown));
-	else env.print(`${listLines(shown, data.findings.length).join("\n")}\n`);
+	env.print(`${listLines(shown, data.findings.length).join("\n")}\n`);
 	return 0;
 }
-async function showFinding({ env, args: [id = ""], values }, db) {
+async function showFinding({ env, args: [id = ""] }, db) {
 	const { data, links } = await loadReviewFile(db);
 	const finding = findFinding(data, id);
 	const own = linksOf(links, finding.id);
-	if (values.json) printJson(env, showJson(finding, own));
-	else env.print(showText(finding, own));
+	env.print(showText(finding, own));
 	return 0;
 }
 const changeOf = (values) => ({
@@ -4399,24 +4245,17 @@ async function postReviewFinding({ env, args: [id = ""], values }, db) {
 	});
 	warnReportError(env, db, posted.reportError);
 	for (const warning of posted.warnings) env.warn(`Warning: ${warning}\n`);
-	if (values.json) printJson(env, postedJson(posted));
-	else {
-		env.print(`${formatOutcome(posted.result, options.dryRun)}\n${anchorLines(posted).join("\n")}\n`);
-		if (options.dryRun) env.print(`----- comment text -----\n${posted.body}${posted.body.endsWith("\n") ? "" : "\n"}-----\n`);
-	}
+	env.print(`${formatOutcome(posted.result, options.dryRun)}\n${anchorLines(posted).join("\n")}\n`);
+	if (options.dryRun) env.print(`----- comment text -----\n${posted.body}${posted.body.endsWith("\n") ? "" : "\n"}-----\n`);
 	return posted.result.action === "error" ? 1 : 0;
 }
-async function listPending({ env, values }, db) {
+async function listPending({ env }, db) {
 	const { links } = await loadReviewFile(db);
-	const items = pendingItems({
+	const lines = pendingLines(pendingItems({
 		links,
 		data: await snapshotOf(db)
-	});
-	if (values.json) printJson(env, pendingJson(items));
-	else {
-		const lines = pendingLines(items);
-		if (lines.length > 0) env.print(`${lines.join("\n")}\n`);
-	}
+	}));
+	if (lines.length > 0) env.print(`${lines.join("\n")}\n`);
 	return 0;
 }
 async function changeLinks(env, db, change) {
@@ -4485,23 +4324,14 @@ async function replyToLinked({ env, args: [rawRef = ""], values }, db) {
 		byAgent: values["by-agent"] ?? false,
 		dryRun: values["dry-run"] ?? false
 	};
-	const { finding, own, link, text, result, reportError } = await replyToDuplicate(db, ref, options, {
+	const { text, result, reportError } = await replyToDuplicate(db, ref, options, {
 		reply: env.reply,
 		now: env.now
 	});
 	warnReportError(env, db, reportError);
-	if (values.json) printJson(env, {
-		finding,
-		own,
-		link,
-		text,
-		result
-	});
-	else {
-		env.print(`${formatOutcome(result, options.dryRun, repliedPlace(result.target))}\n`);
-		if (result.target) env.print(`${answeredLine(result.target)}\n`);
-		if (options.dryRun) env.print(`----- reply text -----\n${text}${text.endsWith("\n") ? "" : "\n"}-----\n`);
-	}
+	env.print(`${formatOutcome(result, options.dryRun, repliedPlace(result.target))}\n`);
+	if (result.target) env.print(`${answeredLine(result.target)}\n`);
+	if (options.dryRun) env.print(`----- reply text -----\n${text}${text.endsWith("\n") ? "" : "\n"}-----\n`);
 	return result.action === "error" ? 1 : 0;
 }
 async function renderReview({ env, values }, db) {
