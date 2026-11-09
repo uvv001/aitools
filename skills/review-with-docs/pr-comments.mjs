@@ -769,8 +769,7 @@ const COMMAND_SPECS = [
 		notes: ["With `--ref` or `--pending`, review bodies are not shown. An unknown `--ref` gives a warning, and a malformed ref is an error.", "On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16."],
 		database: "readonly",
 		example: "--pending --out pr-42.md"
-	}),
-	spec("report dump", "prints the review as text, for git diffs", "Prints the review as text: the findings, the rounds, the links and the pull request URL, not the downloaded comments.\nAs a git textconv: git config diff.review.textconv \"pr-comments report dump --db\"", { database: "readonly" })
+	})
 ];
 const HELP = {
 	words: "help",
@@ -1782,14 +1781,14 @@ function formatUpdateItem(item) {
 }
 const bullet = (text) => `- ${text}`;
 const heading = ({ state, severity, id, title }) => `${state} ${severity} ${id} — ${title}`;
-function entryLines$1(entry) {
+function entryLines(entry) {
 	return [
 		"**Reviewed**",
 		...entry.items.length > 0 ? ["", ...entry.items.map((item) => bullet(formatRoundItem(item)))] : [],
 		""
 	];
 }
-function findingLines$1(finding) {
+function findingLines(finding) {
 	const { description, updates } = finding;
 	return [
 		`<a id="${finding.id.toLowerCase()}"></a>`,
@@ -1808,63 +1807,11 @@ function renderReport(data) {
 		"",
 		"## Intro",
 		"",
-		...entryLines$1(data.intro.reviewed),
+		...entryLines(data.intro.reviewed),
 		...buildDashboard(data.findings),
 		"## Findings",
-		...data.findings.flatMap((finding) => ["", ...findingLines$1(finding)])
+		...data.findings.flatMap((finding) => ["", ...findingLines(finding)])
 	].join("\n")}\n`;
-}
-//#endregion
-//#region src/review-dump.ts
-const ITEM_FIELDS = [
-	"round",
-	"revision",
-	"base"
-];
-const UPDATE_FIELDS = [
-	"at",
-	"round",
-	"kind"
-];
-const LINK_FIELDS = [
-	"role",
-	"finding",
-	"note"
-];
-const field = (key, value) => `${key}=${JSON.stringify(value)}`;
-const quoted$1 = (text) => text.split("\n").map((line) => line === "" ? "|" : `| ${line}`);
-function fields(item, keys) {
-	const values = item;
-	return keys.filter((key) => values[key] !== void 0).map((key) => ` ${field(key, values[key])}`).join("");
-}
-function entryLines(entry) {
-	return [
-		"",
-		"intro reviewed",
-		...entry.items.flatMap((item, at) => [`item ${at + 1}${fields(item, ITEM_FIELDS)}`, ...quoted$1(formatRoundItem(item))])
-	];
-}
-function findingLines({ id, state, severity, title, description, updates }) {
-	const entries = updates.flatMap((update, at) => [`update ${at + 1}${fields(update, UPDATE_FIELDS)}`, ...quoted$1(formatUpdateItem(update))]);
-	return [
-		"",
-		`finding ${id} | ${state} | ${severity} | ${title}`,
-		"description",
-		...quoted$1(description),
-		...entries
-	];
-}
-const linkLine = (link) => `link ${link.ref}${LINK_FIELDS.filter((key) => link[key] !== void 0).map((key) => ` ${field(key, link[key])}`).join("")}`;
-function dumpReview$1(data, extra = {}) {
-	const lines = [
-		"review-db v1",
-		field("target", data.target),
-		...entryLines(data.intro.reviewed),
-		...data.findings.flatMap(findingLines)
-	];
-	if (extra.pullRequest !== void 0) lines.push("", field("pull_request", extra.pullRequest));
-	if (extra.links !== void 0 && extra.links.length > 0) lines.push("", ...extra.links.map(linkLine));
-	return `${lines.join("\n")}\n`;
 }
 //#endregion
 //#region src/review-view.ts
@@ -3264,13 +3211,6 @@ async function renderReportFile(dbPath) {
 		db.close();
 	}
 }
-async function dumpReviewFile(dbPath) {
-	const { data, links, pullRequest } = await loadReviewFile(dbPath);
-	return dumpReview$1(data, {
-		pullRequest,
-		links
-	});
-}
 const samePullRequest = (a, b) => a.number === b.number && a.host.toLowerCase() === b.host.toLowerCase() && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase();
 function assertConnectedPullRequest(db, dbPath, expected) {
 	const connected = getMeta(db, PULL_REQUEST);
@@ -3911,7 +3851,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+7d7e807`;
+	return `pr-comments ${VERSION}+e3ea022`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4346,10 +4286,6 @@ async function renderComments({ env, values }, db) {
 	} else env.print(markdown);
 	return 0;
 }
-async function dumpReview({ env }, db) {
-	env.print(await dumpReviewFile(db));
-	return 0;
-}
 const HANDLERS = {
 	init: initReview,
 	"pr connect": connectReview,
@@ -4373,8 +4309,7 @@ const HANDLERS = {
 	"link remove": unlinkComment,
 	"link reply": replyToLinked,
 	"report render": renderReview,
-	"report comments": renderComments,
-	"report dump": dumpReview
+	"report comments": renderComments
 };
 const COMMANDS = COMMAND_SPECS.map((spec) => ({
 	...spec,
