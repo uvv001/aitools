@@ -38,8 +38,7 @@ export type CommandWords =
   | 'link remove'
   | 'link reply'
   | 'report render'
-  | 'report comments'
-  | 'report dump';
+  | 'report comments';
 
 export interface CommandSpec {
   words: CommandWords;
@@ -366,13 +365,6 @@ export const COMMAND_SPECS: CommandSpec[] = [
       database: 'readonly',
       example: '--pending --out pr-42.md',
     },
-  ),
-  spec(
-    'report dump',
-    'prints the review as text, for git diffs',
-    'Prints the review as text: the findings, the rounds, the links and the pull request URL, not the downloaded comments.\n' +
-      'As a git textconv: git config diff.review.textconv "pr-comments report dump --db"',
-    { database: 'readonly' },
   ),
 ];
 

@@ -1,16 +1,13 @@
-import { execFile, spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, linkSync, readdirSync, symlinkSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { samplePullRequest } from './fixtures.ts';
 import {
   changeReviewState,
-  dumpReviewFile,
   initReviewFile,
   loadReviewFile,
   loadSnapshot,
@@ -21,13 +18,12 @@ import {
   reviewPaths,
   syncReviewFile,
 } from './review-files.ts';
-import { dumpReview } from './review-dump.ts';
 import type { CommentLink, ReviewState } from './review-links.ts';
 import { linkDuplicate, linkNote } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { newReview } from './review-ops.ts';
 import { formatUpdateItem, renderReport } from './review-render.ts';
-import { REVIEW_SCHEMA_VERSION, getMeta, loadReview, openReviewDb, saveReview, setMeta } from './review-store.ts';
+import { REVIEW_SCHEMA_VERSION, getMeta, openReviewDb, setMeta } from './review-store.ts';
 import { removeScratch, sampleReport, sampleReview as sampleReviewData, scratchDir, snapshotOf } from './review-test-support.ts';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -136,13 +132,11 @@ describe('loadReviewFile', () => {
     await expect(loadReviewFile(db)).rejects.toThrow(message);
     await expect(loadSnapshot(db)).rejects.toThrow(message);
     await expect(renderReportFile(db)).rejects.toThrow(message);
-    await expect(dumpReviewFile(db)).rejects.toThrow(message);
     expect(listing()).toEqual(['r.md']);
 
     const other = join(dir, 'other.sqlite');
     await expect(loadReviewFile(other)).rejects.toThrow(new Error(`${other} does not exist`));
     await expect(loadSnapshot(other)).rejects.toThrow(new Error(`${other} does not exist`));
-    await expect(dumpReviewFile(other)).rejects.toThrow(new Error(`${other} does not exist`));
     expect(listing()).toEqual(['r.md']);
   });
 
@@ -164,7 +158,6 @@ describe('loadReviewFile', () => {
     const OPENERS: [string, (path: string) => Promise<unknown>][] = [
       ['loadReviewFile', loadReviewFile],
       ['loadSnapshot', loadSnapshot],
-      ['dumpReviewFile', dumpReviewFile],
       ['renderReportFile', renderReportFile],
       ['changeReviewState', (path) => changeReviewState(path, (state) => ({ state, result: null }))],
       ['syncReviewFile', (path) => syncReviewFile(path, snapshotOf([]))],
@@ -375,43 +368,6 @@ describe('renderReportFile and line endings', () => {
     expect(await renderReportFile(db)).toEqual({ report, action: 'updated' });
     expect(await readFile(report, 'utf8')).toBe(sampleReport());
     expect(await renderReportFile(db)).toEqual({ report, action: 'unchanged' });
-  });
-});
-
-describe('dumpReviewFile', () => {
-  it('dumps the database', async () => {
-    const db = await sampleReview();
-    const dump = await dumpReviewFile(db);
-    expect(dump).toBe(dumpReview(sampleReviewData()));
-    expect(dump.startsWith('review-db v1\n')).toBe(true);
-  });
-
-  it('lists the pull request and the links, and nothing of the downloaded pull request', async () => {
-    const data = samplePullRequest();
-    const url = 'https://ghe.example.com/acme/widgets/pull/157';
-    const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: url });
-    await syncReviewFile(db, data);
-    const linked = await changeReviewState(db, (state) => ({
-      state: { ...state, data: withFinding(state.data, 'F1'), links: [own('r1001', 'F1'), { ref: 'c2001', role: 'note', note: 'thanks' }] },
-      result: null,
-    }));
-
-    const dump = await dumpReviewFile(db);
-
-    expect(dump).toBe(dumpReview(linked.state.data, { pullRequest: url, links: linked.state.links }));
-    expect(dump).toContain(`pull_request="${url}"`);
-    expect(dump).toContain('link r1001 role="own" finding="F1"');
-    for (const text of [data.pullRequest.title, ...data.comments.map((comment) => comment.body), 'linkable', 'pr_comments', 'gone']) {
-      expect(dump).not.toContain(text);
-    }
-  });
-
-  it('only reads the database: the same bytes, nothing else in the folder', async () => {
-    const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW });
-    const before = await readFile(db);
-    await dumpReviewFile(db);
-    expect((await readFile(db)).equals(before)).toBe(true);
-    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 });
 
@@ -1335,25 +1291,6 @@ describe('loadReviewFile with links', () => {
     expect(loaded.links).toHaveLength(2);
     expect(meta(db, 'pull_request')).toBe(PULL_REQUEST);
   });
-
-  it('dumps the pull request and the links after the review, and only the review without them', async () => {
-    const plain = await initReviewFile('PR 42', { db: join(dir, 'plain.sqlite'), now: NOW });
-    expect(await dumpReviewFile(plain.db)).toBe(dumpReview(newReview('PR 42')));
-
-    const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: PULL_REQUEST });
-    expect(await dumpReviewFile(db)).toBe(dumpReview(newReview('PR 42'), { pullRequest: PULL_REQUEST }));
-    const state = await changeReviewState(
-      db,
-      (current) => ({
-        state: { ...current, data: withFinding(current.data, 'F1'), links: [own('r1', 'F1'), { ref: 'c2', role: 'note', note: 'why' }] },
-        result: null,
-      }),
-      { snapshot: snapshotOf(['r1', 'c2']) },
-    );
-    const dump = await dumpReviewFile(db);
-    expect(dump).toBe(dumpReview(state.state.data, { pullRequest: PULL_REQUEST, links: state.state.links }));
-    expect(dump.endsWith('\npull_request="https://github.com/owner/repo/pull/42"\n\nlink r1 role="own" finding="F1"\nlink c2 role="note" note="why"\n')).toBe(true);
-  });
 });
 
 
@@ -1565,7 +1502,6 @@ describe('the functions that only read', () => {
   const READERS: [string, (path: string) => Promise<unknown>][] = [
     ['loadReviewFile', (path) => loadReviewFile(path)],
     ['loadSnapshot', (path) => loadSnapshot(path)],
-    ['dumpReviewFile', (path) => dumpReviewFile(path)],
     ['renderReportFile', (path) => renderReportFile(path)],
   ];
 
@@ -1583,53 +1519,6 @@ describe('the functions that only read', () => {
     await expect(read(missing)).rejects.toThrow(new Error(`${missing} does not exist`));
     expect(existsSync(missing)).toBe(false);
   });
-});
-
-const execFileAsync = promisify(execFile);
-const hasGit = spawnSync('git', ['--version']).status === 0;
-// git runs the textconv through a shell, which wants forward slashes.
-const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url)).replaceAll('\\', '/');
-
-describe.skipIf(!hasGit)('the textconv recipe of the README', () => {
-  const git = async (...args: string[]): Promise<string> => {
-    const config = ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false'];
-    return (await execFileAsync('git', ['-C', dir, ...config, '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', ...args])).stdout;
-  };
-
-  async function changeF1(path: string): Promise<void> {
-    const db = openReviewDb(path, 'existing');
-    try {
-      const data = loadReview(db);
-      const findings = data.findings.map((finding) => (finding.id === 'F1' ? { ...finding, state: '🔧' } : finding));
-      saveReview(db, { ...data, findings });
-    } finally {
-      db.close();
-    }
-  }
-
-  it('shows a change of a finding in git diff as the lines of its header in the dump', async () => {
-    try {
-      await git('init', '-q');
-      await write('.gitattributes', '*_review.sqlite diff=review\n');
-      await git('config', 'diff.review.textconv', `node "${CLI}" report dump --db`);
-      const db = await sampleReview('demo_review.sqlite');
-      await git('add', '-A');
-      await git('commit', '-q', '-m', 'review');
-      await changeF1(db);
-
-      const diff = await git('diff', '--no-color');
-      const changed = diff.split(/\r?\n/u).filter((line) => /^(-(?!--)|\+(?!\+\+))/u.test(line));
-      expect(changed).toEqual([
-        '-finding F1 | ✅ | 🔴 | Unguarded `resource.value()` crashes UsersPage',
-        '+finding F1 | 🔧 | 🔴 | Unguarded `resource.value()` crashes UsersPage',
-      ]);
-      expect(diff).not.toContain('Binary files');
-    } finally {
-      // The objects of git are read-only, which `removeScratch` cannot delete on Windows, and the folder of a fresh
-      // repository can stay busy for a moment; `rm` with retries copes with both.
-      await rm(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
-    }
-  }, 60_000);
 });
 
 // A lock only collides between connections that live at the same time, so these tests use real processes. The writer

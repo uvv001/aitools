@@ -15,7 +15,7 @@ import type { PullRequestRef } from './pr-url.ts';
 import type { PublishComment, PublishOptions, PublishResult } from './publish.ts';
 import { AGENT_DISCLAIMER } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult, ReplyTarget } from './reply.ts';
-import { dumpReviewFile, loadReviewFile, loadSnapshot, reviewPaths } from './review-files.ts';
+import { loadReviewFile, loadSnapshot, reviewPaths } from './review-files.ts';
 import { pendingItems, pendingLines } from './review-pending.ts';
 import { renderReport } from './review-render.ts';
 import { removeScratch, scratchDir } from './review-test-support.ts';
@@ -87,7 +87,7 @@ const [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF] = checkRuns()
 const WORDS = COMMANDS.map(({ words }) => words);
 const GROUPS = ['pr', 'round', 'finding', 'link', 'report'];
 const CREATING = ['init'];
-const READONLY = ['pr show', 'finding list', 'finding show', 'link pending', 'report render', 'report comments', 'report dump'];
+const READONLY = ['pr show', 'finding list', 'finding show', 'link pending', 'report render', 'report comments'];
 const CHANGING = WORDS.filter((words) => !CREATING.includes(words) && !READONLY.includes(words));
 const DATABASE_COMMANDS = WORDS.filter((words) => !CREATING.includes(words));
 
@@ -253,7 +253,6 @@ describe('cli', () => {
       'link reply': ['link', 'reply', 'r1002', '--dry-run'],
       'report render': ['report', 'render'],
       'report comments': ['report', 'comments'],
-      'report dump': ['report', 'dump'],
     })[words]!;
 
   describe('the command table', () => {
@@ -282,7 +281,6 @@ describe('cli', () => {
         'link reply',
         'report render',
         'report comments',
-        'report dump',
       ]);
     });
 
@@ -331,7 +329,6 @@ describe('cli', () => {
         'link reply --db',
         'report render --db',
         'report comments --db',
-        'report dump --db',
       ]);
       expect(COMMANDS.filter(({ oneOf }) => oneOf).map(({ words, oneOf }) => [words, oneOf])).toEqual([['round open', ['base', 'no-base']]]);
     });
@@ -622,7 +619,6 @@ describe('cli', () => {
       ['an extra argument to link pending', ['link', 'pending', 'r1001'], 'link pending', 'unexpected argument "r1001"'],
       ['an extra argument to link remove', ['link', 'remove', 'r1001', 'r1002'], 'link remove', 'unexpected argument "r1002"'],
       ['an extra argument to report render', ['report', 'render', 'x.md'], 'report render', 'unexpected argument "x.md"'],
-      ['an extra argument to report dump', ['report', 'dump', 'x'], 'report dump', 'unexpected argument "x"'],
       ['an option without its value', ['finding', 'list', '--state'], 'finding list', '--state needs a value'],
       ['a round without its value', ['finding', 'update', 'F1', 'x', '--round'], 'finding update', '--round needs a value'],
       [
@@ -755,6 +751,7 @@ describe('cli', () => {
       [['report', 'pr'], 'report pr', 'report'],
       [['report', 'init', 'Demo'], 'report init', 'report'],
       [['report', 'import', 'a.md'], 'report import', 'report'],
+      [['report', 'dump'], 'report dump', 'report'],
       [['import', 'a.md'], 'import', undefined],
       [['finding', 'retitle', 'F1', 'x'], 'finding retitle', 'finding'],
       [['finding', 'note', 'F1', 'x'], 'finding note', 'finding'],
@@ -1714,16 +1711,6 @@ describe('cli', () => {
         await expect(step('report', 'comments', '--db', db)).rejects.toThrow(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
         expect(printed).toBe('');
       });
-    });
-
-    it('dumps the review as text, for git diffs', async () => {
-      await step('link', 'own', 'F1', 'r1001');
-
-      expect(await step('report', 'dump')).toBe(0);
-
-      expect(printed).toBe(await dumpReviewFile(review));
-      expect(printed).toContain('r1001');
-      expect(warned).toBe('');
     });
   });
 

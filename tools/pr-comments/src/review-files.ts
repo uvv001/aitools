@@ -7,7 +7,6 @@ import { isDeepStrictEqual, promisify } from 'node:util';
 import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
 import type { PullRequestRef } from './pr-url.ts';
-import { dumpReview } from './review-dump.ts';
 import { DB_HINT_PLACEHOLDER } from './review-links.ts';
 import type { ReviewState } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
@@ -365,12 +364,6 @@ export async function renderReportFile(dbPath: string): Promise<RenderResult> {
   } finally {
     db.close();
   }
-}
-
-// The deterministic text dump of the database `dbPath`.
-export async function dumpReviewFile(dbPath: string): Promise<string> {
-  const { data, links, pullRequest } = await loadReviewFile(dbPath);
-  return dumpReview(data, { pullRequest, links });
 }
 
 export interface StateChange<T> {

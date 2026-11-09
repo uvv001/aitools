@@ -469,13 +469,6 @@ pr-comments report comments --pending --out pr-42.md --db review.sqlite
 - With `--ref` or `--pending`, review bodies are not shown. An unknown `--ref` gives a warning, and a malformed ref is an error.
 - On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.
 
-**`report dump`**: prints the review as text, for git diffs. Prints the review as text: the findings, the rounds, the links and the pull request URL, not the downloaded comments. As a git textconv: git config diff.review.textconv "pr-comments report dump --db"
-
-```
-pr-comments report dump --db <file.sqlite>
-pr-comments report dump --db review.sqlite
-```
-
 ### Help and version
 
 **`help`**: prints the help of a command or of a group. Prints the overview of the commands; or the commands of a group, such as "finding"; or the help of one command. "pr-comments `<command>` --help" prints the same.
@@ -557,24 +550,8 @@ The GitHub web UI cannot search a comment by id, so the Updates of the report sh
 
 ## Git
 
-By default `init` puts reviews in `.ai/review-with-docs/` (excluded via `.git/info/exclude`, while `.ai/` itself can be versioned), so they stay out of Git commits; pass `--db` to keep one elsewhere, for example in a session folder. When `--db` places a review in a tracked folder instead, commit the database next to the report.
+By default `init` puts reviews in `.ai/review-with-docs/` (excluded via `.git/info/exclude`, while `.ai/` itself can be versioned), so they stay out of Git commits; pass `--db` to keep one elsewhere, for example in a session folder.
 
-The database is a binary file, so `git diff` cannot show what changed in it. `report dump` turns it into text. Tell git to use it:
-
-```
-# .gitattributes
-*_review.sqlite diff=review
-```
-
-```
-# once per clone
-git config diff.review.textconv "pr-comments report dump --db"
-```
-
-`git diff`, `git log -p` and `git show` then show the dump of the old and the new database. Git adds the path of a temporary copy as the last argument, so the command that runs is `pr-comments report dump --db <copy>`.
-
-- One writer at a time. A binary file cannot be merged. After a conflict, take one side (`git checkout --theirs <file>` or `--ours`) and redo the other changes with the commands.
-- The repository that holds tracked databases must not git-ignore `*.sqlite`.
 - The database is one file. A `-journal` file exists only while a command writes.
 
 ## Development

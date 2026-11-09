@@ -30,7 +30,6 @@ import type { ReplyOptions, ReplyRequest, ReplyResult, ReplyTarget } from './rep
 import type { Anchor } from './report-extract.ts';
 import {
   changeReviewState,
-  dumpReviewFile,
   initReviewFile,
   loadReviewFile,
   loadSnapshot,
@@ -563,11 +562,6 @@ async function renderComments({ env, values }: Context, db: string): Promise<num
   return 0;
 }
 
-async function dumpReview({ env }: Context, db: string): Promise<number> {
-  env.print(await dumpReviewFile(db));
-  return 0;
-}
-
 export type { ArgSpec, OptionSpec };
 export { synopsis };
 
@@ -599,7 +593,6 @@ const HANDLERS: Record<CommandWords, Command['run']> = {
   'link reply': replyToLinked,
   'report render': renderReview,
   'report comments': renderComments,
-  'report dump': dumpReview,
 };
 
 export const COMMANDS: Command[] = COMMAND_SPECS.map((spec) => ({ ...spec, run: HANDLERS[spec.words] }));

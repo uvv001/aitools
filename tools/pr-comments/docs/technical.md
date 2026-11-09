@@ -51,7 +51,7 @@ The architecture separates pure domain logic from I/O:
 | `updates` | Ordered, structured finding history (`kind`, timestamp `at`, optional `round`, state/severity/title transitions, `revision`, comment `ref`/`reply_ref`, `role`, `action`, `pending`, `pull_request`, `note`) |
 | `meta` | Key-value metadata (such as the canonical `pull_request` URL) |
 
-Rounds and finding updates are stored as structured columns in `intro_items` and `updates`, never as pre-rendered Markdown strings. Report rendering, CLI output, and database dumps format the text at render time.
+Rounds and finding updates are stored as structured columns in `intro_items` and `updates`, never as pre-rendered Markdown strings. Report rendering and CLI output format the text at render time.
 
 **Pull request snapshot tables (`src/store.ts`):**
 
@@ -80,7 +80,7 @@ The database stores at most one pull request snapshot at a time.
 
 ### 2.3 Read and write modes
 
-- **Read-only commands** (`finding list`, `finding show`, `link pending`, `pr show`, `report render`, `report comments`, `report dump`, and the offline pre-check phase of `finding post` and `link reply`) open SQLite with `readOnly: true` inside a read transaction. They write zero bytes to the database file and create no lock or journal files.
+- **Read-only commands** (`finding list`, `finding show`, `link pending`, `pr show`, `report render`, `report comments`, and the offline pre-check phase of `finding post` and `link reply`) open SQLite with `readOnly: true` inside a read transaction. They write zero bytes to the database file and create no lock or journal files.
 - **Mutating commands** (`pr connect`, `pr sync`, `round open`, `round update`, `finding add`, `finding set-*`, `finding update`, `finding post`, `link own|duplicate|note|remove`, `link reply`) execute serial write transactions. Dry runs of `finding post` and `link reply` do not open a write transaction.
 
 ### 2.4 Serial mutation contract
@@ -266,10 +266,6 @@ Report structure:
 
 Each entry under `#### Updates` is formatted at render time from structured database columns as `<yyyy-mm-dd hh:mm> — [Round <n>: ]<event>[ — <note>]` in local time. When an update references a pull request comment (`r…` or `c…`) and the update recorded the pull request URL, the renderer formats the ref as a direct Markdown link (`[r544861](<pr-url>#discussion_r544861)` or `#issuecomment-…`). Check annotations (`a…`) have no individual GitHub URL and render as plain text.
 
-### Text dump (`report dump`)
-
-`report dump` outputs a deterministic, timestamp-free text representation of the review (`review-db v1`), connected pull request URL, and comment links for `git diff`. Header metadata is JSON-encoded, and every free-text line is prefixed with `| ` so content cannot collide with structural headers. Downloaded pull request snapshot tables are omitted.
-
 ## 9. Revisions
 
 `round open` (`--revision`, `--base`) and `finding set-state` (`--revision`) resolve commit expressions in the working directory's git repository using:
@@ -303,5 +299,5 @@ with `LC_ALL=C`. The database stores the resolved lowercase short commit hash (a
 - **Pending review visibility and edit markers**: Pending reviews are visible only to their author's token, and GitHub does not set `lastEditedAt` when a pending comment is edited before submission.
 - **Review verdict bodies**: Top-level review submission bodies have no comment ID (`r…` or `c…`), so they cannot be linked in `comment_links` and do not appear in `link pending` (they remain visible in `report comments`).
 - **Head-only check annotations**: Only check annotations on the pull request's current head commit are stored; re-run `pr sync` after new commits.
-- **Single-writer binary database**: SQLite databases allow one active writer at a time and cannot be line-merged by git.
+- **Single-writer binary database**: SQLite databases allow one active writer at a time.
 - **No cross-version schema migration**: Databases created by an older schema version (`PRAGMA user_version`) must be recreated with `pr-comments init`.
