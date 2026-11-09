@@ -2210,9 +2210,11 @@ function findRepoRoot(from) {
 	}
 	return folder;
 }
-function defaultReportPath(name, now, cwd) {
-	const date = formatStamp(now).slice(0, 10);
-	return join(findRepoRoot(cwd) ?? resolve(cwd), REVIEW_FOLDER, `${date}_${reviewSlug(name)}_review.md`);
+function defaultDatabaseName(name, now) {
+	return `${formatStamp(now).slice(0, 10)}_${reviewSlug(name)}_review.sqlite`;
+}
+function defaultDatabasePath(name, now, cwd) {
+	return join(findRepoRoot(cwd) ?? resolve(cwd), REVIEW_FOLDER, defaultDatabaseName(name, now));
 }
 //#endregion
 //#region src/store.ts
@@ -2933,18 +2935,13 @@ function quoteCliPath(path, platform = process.platform) {
 	if (!(platform === "win32" ? /[^\w%+=:,./\\-]/u : /[^\w%+=:,./-]/u).test(path)) return path;
 	return `'${platform === "win32" ? path.replaceAll("'", "''") : path.replaceAll("'", "'\\''")}'`;
 }
-function reviewPaths(arg) {
-	const extension = extname(arg);
-	const stem = arg.slice(0, arg.length - extension.length);
-	if (extension.toLowerCase() === ".md") return {
-		report: arg,
-		db: `${stem}.sqlite`
+function reviewPaths(dbPath) {
+	const extension = extname(dbPath);
+	if (extension.toLowerCase() !== ".sqlite") throw new Error(`${dbPath} must be a review database (.sqlite)`);
+	return {
+		db: dbPath,
+		report: `${dbPath.slice(0, dbPath.length - extension.length)}.md`
 	};
-	if (extension.toLowerCase() === ".sqlite") return {
-		db: arg,
-		report: `${stem}.md`
-	};
-	throw new Error(`${arg} must be a report (.md) or a review database (.sqlite)`);
 }
 async function publish(temp, target) {
 	try {
@@ -2981,16 +2978,8 @@ async function createDatabase(path, data, pullRequest) {
 		});
 	}
 }
-const existingDatabase = (dbPath) => /* @__PURE__ */ new Error(`${dbPath} already exists; the database is the source of truth and must not be overwritten. If you really want to start this review again, delete the database deliberately first. To start another review, choose another name or location with --db or --report.`);
-const existingReport = (reportPath) => /* @__PURE__ */ new Error(`${reportPath} already exists; init will not overwrite an existing report file. Choose another name or location with --db or --report, or remove the file first.`);
-function mustBeDatabase(dbPath) {
-	if (dbPath !== void 0 && extname(dbPath).toLowerCase() !== ".sqlite") throw new Error(`--db must be a file ending in .sqlite: ${dbPath}`);
-}
-function reportMatchesDatabase(report, db) {
-	if (report === void 0 || db === void 0) return;
-	if (samePath(reviewPaths(reviewPaths(report).report).db, reviewPaths(reviewPaths(db).report).db)) return;
-	throw new Error(`--report ${report} and --db ${db} name different files; the report is always next to the database with the same name`);
-}
+const existingDatabase = (dbPath) => /* @__PURE__ */ new Error(`${dbPath} already exists; the database is the source of truth and must not be overwritten. If you really want to start this review again, delete the database deliberately first. To start another review, choose another name or location with --db.`);
+const existingReport = (reportPath) => /* @__PURE__ */ new Error(`${reportPath} already exists; init will not overwrite an existing report file. Choose another name or location with --db, or remove the file first.`);
 const PULL_REQUEST = "pull_request";
 const runGit = promisify(execFile);
 const EXCLUDE_RULE = "/.ai/review-with-docs/";
@@ -3076,23 +3065,16 @@ async function ensureAiGitExcluded(repoRoot, targetPaths = []) {
 	if (!await isReviewIgnoredByGit(repoRoot, relTargets)) throw new Error("a .gitignore rule negates .ai/review-with-docs/, which overrides .git/info/exclude and exposes .ai/review-with-docs/ to git");
 }
 async function initReviewFile(name, options = {}) {
-	mustBeDatabase(options.db);
-	reportMatchesDatabase(options.report, options.db);
 	const cwd = options.cwd ?? process.cwd();
 	const now = options.now ?? /* @__PURE__ */ new Date();
 	const data = newReview(name);
 	const pullRequest = options.pr === void 0 ? void 0 : formatPullRequestUrl(parsePullRequestUrl(options.pr));
-	const paths = reviewPaths(options.report ?? defaultReportPath(data.target, now, cwd));
-	const dbPath = options.db ?? paths.db;
+	const dbPath = options.db ?? defaultDatabasePath(data.target, now, cwd);
+	const { report: reportTarget } = reviewPaths(dbPath);
 	const targetDir = dirname(resolve(cwd, dbPath));
 	if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
-	const reportTarget = reviewPaths(dbPath).report;
 	await refuseDatabase(reportTarget, dbPath);
 	if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
-	if (options.report !== void 0 && options.report !== reportTarget && !samePath(options.report, dbPath)) {
-		await refuseDatabase(options.report, dbPath);
-		if (await existsOrSymlink(options.report)) throw existingReport(options.report);
-	}
 	const rendered = renderReport(data);
 	const repoRoot = findRepoRoot(targetDir);
 	if (repoRoot !== void 0 && isInsideReviewFolder(targetDir, repoRoot)) await ensureAiGitExcluded(repoRoot, [resolve(cwd, dbPath), resolve(cwd, reportTarget)]);
@@ -3124,8 +3106,8 @@ function loadState(db) {
 		return state;
 	});
 }
-async function loadReviewFile(arg) {
-	const paths = reviewPaths(arg);
+async function loadReviewFile(dbPath) {
+	const paths = reviewPaths(dbPath);
 	const db = openReviewDb(paths.db, "readonly");
 	try {
 		return {
@@ -3136,16 +3118,16 @@ async function loadReviewFile(arg) {
 		db.close();
 	}
 }
-async function loadSnapshot(arg) {
-	const db = openReviewDb(reviewPaths(arg).db, "readonly");
+async function loadSnapshot(dbPath) {
+	const db = openReviewDb(reviewPaths(dbPath).db, "readonly");
 	try {
 		return inTransaction(db, () => loadPullRequest(db));
 	} finally {
 		db.close();
 	}
 }
-async function renderReportFile(arg, options = {}) {
-	const paths = reviewPaths(arg);
+async function renderReportFile(dbPath, options = {}) {
+	const paths = reviewPaths(dbPath);
 	const target = options.out ?? paths.report;
 	await refuseDatabase(target, paths.db);
 	const db = openReviewDb(paths.db, "readonly");
@@ -3165,8 +3147,8 @@ async function renderReportFile(arg, options = {}) {
 		db.close();
 	}
 }
-async function dumpReviewFile(arg) {
-	const { data, links, pullRequest } = await loadReviewFile(arg);
+async function dumpReviewFile(dbPath) {
+	const { data, links, pullRequest } = await loadReviewFile(dbPath);
 	return dumpReview$1(data, {
 		pullRequest,
 		links
@@ -3182,8 +3164,8 @@ function assertFreshSnapshot(db, dbPath, snapshot) {
 	const stored = db.prepare("SELECT host, owner, repo, number, fetched_at FROM pr_pull_requests LIMIT 1").get();
 	if (stored !== void 0 && samePullRequest(stored, snapshot.pullRequest) && snapshot.pullRequest.fetchedAt < stored.fetched_at) throw new Error(`a newer pull request snapshot (${stored.fetched_at}) is already stored; run "pr-comments pr sync --db ${quoteCliPath(dbPath)}" again`);
 }
-async function changeReviewState(arg, change, options = {}) {
-	const paths = reviewPaths(arg);
+async function changeReviewState(dbPath, change, options = {}) {
+	const paths = reviewPaths(dbPath);
 	const db = openReviewDb(paths.db, "existing");
 	let rendered;
 	try {
@@ -3235,8 +3217,8 @@ async function changeReviewState(arg, change, options = {}) {
 		db.close();
 	}
 }
-async function mutateReviewFile(arg, mutate) {
-	const { state, result, reportError } = await changeReviewState(arg, async (current) => {
+async function mutateReviewFile(dbPath, mutate) {
+	const { state, result, reportError } = await changeReviewState(dbPath, async (current) => {
 		const changed = await mutate(current.data);
 		return {
 			state: {
@@ -3255,8 +3237,8 @@ async function mutateReviewFile(arg, mutate) {
 		result
 	};
 }
-async function syncReviewFile(arg, data) {
-	const paths = reviewPaths(arg);
+async function syncReviewFile(dbPath, data) {
+	const paths = reviewPaths(dbPath);
 	const db = openReviewDb(paths.db, "existing");
 	try {
 		inTransaction(db, () => {
@@ -3667,8 +3649,8 @@ function linkAdvice(reason, ref, db) {
 	const stays = reason === "moved" ? `; ${ref} stays on GitHub until you delete it` : "";
 	return `remove the link with "pr-comments link remove --db ${quoteCliPath(db)} ${ref}" and post again (that creates a new comment${stays})`;
 }
-async function postFinding(arg, findingId, options, deps) {
-	const { data, links, pullRequest, paths } = await loadReviewFile(arg);
+async function postFinding(dbPath, findingId, options, deps) {
+	const { data, links, pullRequest, paths } = await loadReviewFile(dbPath);
 	const quotedDb = quoteCliPath(paths.db);
 	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
 	const ref = parsePullRequestUrl(pullRequest);
@@ -3720,7 +3702,7 @@ async function postFinding(arg, findingId, options, deps) {
 	const was = action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`;
 	const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
 	try {
-		const { reportError } = await changeReviewState(arg, (state) => ({
+		const { reportError } = await changeReviewState(dbPath, (state) => ({
 			state: recordPosted(state, id, posted, action, published.state, deps.now()),
 			result: void 0
 		}), {
@@ -3756,9 +3738,9 @@ async function postFinding(arg, findingId, options, deps) {
 }
 //#endregion
 //#region src/review-reply.ts
-async function replyToDuplicate(arg, ref, options, deps) {
+async function replyToDuplicate(dbPath, ref, options, deps) {
 	if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation; there is nothing to reply to`);
-	const { links, pullRequest, paths } = await loadReviewFile(arg);
+	const { links, pullRequest, paths } = await loadReviewFile(dbPath);
 	const quotedDb = quoteCliPath(paths.db);
 	if (pullRequest === void 0) throw new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${quotedDb} <url>"`);
 	const linked = links.find((link) => link.ref === ref);
@@ -3796,7 +3778,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 	if (options.dryRun || result.action === "error" || replyRef === void 0) return replied;
 	const was = result.action === "created" ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`;
 	try {
-		const { reportError } = await changeReviewState(arg, (state) => ({
+		const { reportError } = await changeReviewState(dbPath, (state) => ({
 			state: recordReplied(state, ref, replyRef, result.state, deps.now()),
 			result: void 0
 		}), {
@@ -3823,7 +3805,7 @@ async function replyToDuplicate(arg, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+b39c914`;
+	return `pr-comments ${VERSION}+96be1aa`;
 }
 //#endregion
 //#region src/cli.ts
@@ -3972,7 +3954,6 @@ async function snapshotOf(db) {
 }
 async function initReview({ env, args: [name = ""], values }) {
 	const { db, report, reportError } = await initReviewFile(need("the name", name), {
-		report: values.report,
 		db: values.db,
 		pr: values.pr,
 		now: env.now(),
@@ -4370,13 +4351,9 @@ function def(words, summary, description, run, spec = {}) {
 	};
 }
 const COMMANDS = [
-	def("init", "creates the review database", "Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.\nIt never replaces an existing database or report file. The report (markdown) is written next to the database and updated on every change.\nThe report is always next to the database with the same name, so --report and --db may both be given only if they agree.", initReview, {
+	def("init", "creates the review database", "Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.\nIt never replaces an existing database or report file. The report (markdown) is written next to the database (<stem>.md) and updated on every change.", initReview, {
 		args: [arg("<name>", "what is under review; the title of the report (a slug of it names the files by default)")],
-		options: [
-			opt("pr", "<url>", "connect the review to this pull request"),
-			opt("report", "<file.md>", "the report (.md) or the database (.sqlite) to create (default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.md at the git root)"),
-			opt("db", "<file.sqlite>", "the database to create (default: next to the report)")
-		],
+		options: [opt("pr", "<url>", "connect the review to this pull request"), opt("db", "<file.sqlite>", "the database (.sqlite) to create (default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.sqlite at the git root)")],
 		database: "none",
 		example: "\"PR 42 tenant registry\" --pr https://github.com/acme/widgets/pull/42"
 	}),
