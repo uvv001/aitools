@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { access, lstat, mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { closeSync, existsSync, openSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
+import { access, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual, promisify } from 'node:util';
@@ -14,7 +14,7 @@ import type { ReviewData } from './review-model.ts';
 import { defaultDatabasePath, findRepoRoot, REVIEW_FOLDER } from './review-naming.ts';
 import { newReview } from './review-ops.ts';
 import { renderReport } from './review-render.ts';
-import { getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
+import { getMeta, inTransaction, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
 import { clearPullRequest, loadKnownRefs, loadPullRequest, recordKnownCommentRef, savePullRequest } from './store.ts';
 
 export interface ReviewPaths {
@@ -57,19 +57,20 @@ export function samePath(a: string, b: string): boolean {
   return pathKey(a) === pathKey(b);
 }
 
-async function isDatabaseFile(path: string): Promise<boolean> {
-  let file;
+function isDatabaseFile(path: string): boolean {
+  let fd: number;
   try {
-    file = await open(path, 'r');
+    fd = openSync(path, 'r');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw error;
   }
   try {
-    const { bytesRead, buffer } = await file.read(Buffer.alloc(SQLITE_HEADER.length), 0, SQLITE_HEADER.length, 0);
+    const buffer = Buffer.alloc(SQLITE_HEADER.length);
+    const bytesRead = readSync(fd, buffer, 0, SQLITE_HEADER.length, 0);
     return bytesRead === SQLITE_HEADER.length && buffer.equals(SQLITE_HEADER);
   } finally {
-    await file.close();
+    closeSync(fd);
   }
 }
 
@@ -77,9 +78,9 @@ async function isDatabaseFile(path: string): Promise<boolean> {
 // spelling of the path), any file that starts with the SQLite header (a hard link, a symbolic link, a copy, an NTFS
 // `::$DATA` name of one), and any name that ends in `.sqlite`, whether the file exists or not (also with an NTFS stream
 // suffix). Anything else is fine, whatever it holds.
-export async function refuseDatabase(target: string, db: string): Promise<void> {
+export function refuseDatabase(target: string, db: string): void {
   if (samePath(target, db)) throw new Error(`refusing to write the report over the database ${db}`);
-  if (await isDatabaseFile(target)) throw new Error(`refusing to overwrite the SQLite database ${target} with a report`);
+  if (isDatabaseFile(target)) throw new Error(`refusing to overwrite the SQLite database ${target} with a report`);
   if (/\.sqlite(?::[^\\/]*)?$/iu.test(target)) throw new Error('--out must be a report file, not a database');
 }
 
@@ -261,7 +262,7 @@ export async function initReviewFile(
   const targetDir = dirname(resolve(cwd, dbPath));
 
   if (await existsOrSymlink(dbPath)) throw existingDatabase(dbPath);
-  await refuseDatabase(reportTarget, dbPath);
+  refuseDatabase(reportTarget, dbPath);
   if (await existsOrSymlink(reportTarget)) throw existingReport(reportTarget);
   const rendered = renderReport(data);
 
@@ -333,7 +334,7 @@ export interface RenderResult {
 export async function renderReportFile(dbPath: string, options: { out?: string } = {}): Promise<RenderResult> {
   const paths = reviewPaths(dbPath);
   const target = options.out ?? paths.report;
-  await refuseDatabase(target, paths.db);
+  refuseDatabase(target, paths.db);
   const db = openReviewDb(paths.db, 'readonly');
   try {
     const rendered = renderReport(loadReview(db));
@@ -408,7 +409,7 @@ function assertFreshSnapshot(db: DatabaseSync, dbPath: string, snapshot: PullReq
 // after the transaction commits.
 export async function changeReviewState<T>(
   dbPath: string,
-  change: (state: ReviewState) => StateChange<T> | Promise<StateChange<T>>,
+  change: (state: ReviewState) => StateChange<T>,
   options: {
     snapshot?: PullRequestData;
     pullRequest?: PullRequestRef;
@@ -418,10 +419,11 @@ export async function changeReviewState<T>(
   const paths = reviewPaths(dbPath);
   const db = openReviewDb(paths.db, 'existing');
   let rendered: string | undefined;
+  let changed: StateChange<T>;
   try {
-    const changed = await inTransactionAsync(
+    changed = inTransaction(
       db,
-      async () => {
+      () => {
         if (options.pullRequest !== undefined) assertConnectedPullRequest(db, paths.db, options.pullRequest);
         if (options.snapshot !== undefined) {
           assertFreshSnapshot(db, paths.db, options.snapshot);
@@ -436,7 +438,7 @@ export async function changeReviewState<T>(
         const before = loadState(db);
         let result: StateChange<T>;
         try {
-          result = await change(before);
+          result = change(before);
         } catch (error) {
           if (error instanceof Error && error.message.includes(DB_HINT_PLACEHOLDER)) {
             error.message = error.message.replaceAll(DB_HINT_PLACEHOLDER, () => `--db ${quoteCliPath(paths.db)}`);
@@ -446,6 +448,7 @@ export async function changeReviewState<T>(
         const { state } = result;
         if (state !== before) {
           if (state.data !== before.data) {
+            refuseDatabase(paths.report, paths.db);
             rendered = renderReport(state.data);
             saveReview(db, state.data);
           }
@@ -460,27 +463,24 @@ export async function changeReviewState<T>(
             }
           }
         }
-        if (rendered !== undefined) {
-          await refuseDatabase(paths.report, paths.db);
-        }
         return result;
       },
       { immediate: true },
     );
-    if (rendered !== undefined) {
-      try {
-        await mkdir(dirname(paths.report), { recursive: true });
-        await writeFile(paths.report, rendered, 'utf8');
-      } catch (error) {
-        // The database transaction has already committed; do not report the saved change as failed if the derived
-        // report cannot be refreshed right now, but surface the refresh error to the caller so it can warn.
-        return { ...changed, reportError: error instanceof Error ? error : new Error(String(error)) };
-      }
-    }
-    return changed;
   } finally {
     db.close();
   }
+  if (rendered !== undefined) {
+    try {
+      await mkdir(dirname(paths.report), { recursive: true });
+      await writeFile(paths.report, rendered, 'utf8');
+    } catch (error) {
+      // The database transaction has already committed; do not report the saved change as failed if the derived
+      // report cannot be refreshed right now, but surface the refresh error to the caller so it can warn.
+      return { ...changed, reportError: error instanceof Error ? error : new Error(String(error)) };
+    }
+  }
+  return changed;
 }
 
 export interface Mutation<T> {
@@ -493,10 +493,10 @@ export interface Mutation<T> {
 // `changeReviewState` for a change of the review alone: the links and the pull request are carried along as they are.
 export async function mutateReviewFile<T>(
   dbPath: string,
-  mutate: (data: ReviewData) => Mutation<T> | Promise<Mutation<T>>,
+  mutate: (data: ReviewData) => Mutation<T>,
 ): Promise<Mutation<T>> {
-  const { state, result, reportError } = await changeReviewState(dbPath, async (current) => {
-    const changed = await mutate(current.data);
+  const { state, result, reportError } = await changeReviewState(dbPath, (current) => {
+    const changed = mutate(current.data);
     return { state: { ...current, data: changed.data }, result: changed.result };
   });
   return reportError ? { data: state.data, result, reportError } : { data: state.data, result };

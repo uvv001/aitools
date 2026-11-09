@@ -4,7 +4,7 @@ import { join, toNamespacedPath } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommentLink } from './review-links.ts';
 import type { Finding, IntroEntry, ReviewData, ReviewedItem, UpdateItem } from './review-model.ts';
-import { REVIEW_SCHEMA_VERSION, getMeta, inTransaction, inTransactionAsync, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
+import { REVIEW_SCHEMA_VERSION, getMeta, inTransaction, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
 import { removeScratch, sampleReview, scratchDir, snapshotOf } from './review-test-support.ts';
 import { savePullRequest } from './store.ts';
 
@@ -527,11 +527,10 @@ describe('saveReview and loadReview', () => {
   });
 });
 
-describe('inTransaction and inTransactionAsync', () => {
-  it('hands back what the work returns', async () => {
+describe('inTransaction', () => {
+  it('hands back what the work returns', () => {
     const db = openNew();
     expect(inTransaction(db, () => 7)).toBe(7);
-    expect(await inTransactionAsync(db, () => Promise.resolve('later'))).toBe('later');
     db.close();
   });
 
@@ -547,41 +546,9 @@ describe('inTransaction and inTransactionAsync', () => {
     db.close();
   });
 
-  it('keeps the transaction open while the work waits, and commits when it settles', async () => {
+  it('rolls back when the work throws, and closes the transaction', () => {
     const db = openNew();
     saveReview(db, sample());
-    const other = new DatabaseSync(reviewFile());
-    const changed = await inTransactionAsync(
-      db,
-      async () => {
-        await Promise.resolve();
-        expect(db.isTransaction).toBe(true);
-        expect(() => other.exec('BEGIN IMMEDIATE')).toThrow('database is locked');
-        saveReview(db, review());
-        return 'done';
-      },
-      { immediate: true },
-    );
-    other.close();
-    expect(changed).toBe('done');
-    expect(db.isTransaction).toBe(false);
-    expect(loadReview(db)).toStrictEqual(review());
-    db.close();
-  });
-
-  it('rolls back when the work throws or rejects, and closes the transaction', async () => {
-    const db = openNew();
-    saveReview(db, sample());
-    await expect(
-      inTransactionAsync(db, async () => {
-        saveReview(db, review());
-        await Promise.resolve();
-        throw new Error('later');
-      }),
-    ).rejects.toThrow('later');
-    expect(db.isTransaction).toBe(false);
-    expect(loadReview(db)).toStrictEqual(sample());
-
     expect(() =>
       inTransaction(db, () => {
         saveReview(db, review());
@@ -593,21 +560,21 @@ describe('inTransaction and inTransactionAsync', () => {
     db.close();
   });
 
-  it('joins a transaction that is open, and leaves it to the outermost call', async () => {
+  it('joins a transaction that is open, and leaves it to the outermost call', () => {
     const db = openNew();
     saveReview(db, sample());
-    await expect(
-      inTransactionAsync(db, async () => {
-        await inTransactionAsync(db, async () => saveReview(db, review()));
+    expect(() =>
+      inTransaction(db, () => {
+        inTransaction(db, () => saveReview(db, review()));
         expect(db.isTransaction).toBe(true);
         throw new Error('stop');
       }),
-    ).rejects.toThrow('stop');
+    ).toThrow('stop');
     expect(loadReview(db)).toStrictEqual(sample());
     db.close();
   });
 
-  it('surfaces the original error when SQLite has already rolled the transaction back (e.g. SQLITE_FULL)', async () => {
+  it('surfaces the original error when SQLite has already rolled the transaction back (e.g. SQLITE_FULL)', () => {
     const db = openNew();
     db.exec('PRAGMA max_page_count = 20');
     const fill = () => {
@@ -616,7 +583,6 @@ describe('inTransaction and inTransactionAsync', () => {
       }
     };
     expect(() => inTransaction(db, fill)).toThrow('database or disk is full');
-    await expect(inTransactionAsync(db, async () => fill())).rejects.toThrow('database or disk is full');
     db.close();
   });
 });

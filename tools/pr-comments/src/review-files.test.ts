@@ -385,23 +385,23 @@ describe('refuseDatabase', () => {
   });
 
   it('lets a report go anywhere else: a new file, a text file that is not a database, an old report', async () => {
-    await expect(refuseDatabase(join(dir, 'new.md'), db)).resolves.toBeUndefined();
-    await expect(refuseDatabase(join(dir, 'sub', 'deeper', 'new.md'), db)).resolves.toBeUndefined();
-    await expect(refuseDatabase(await write('notes.md', 'SQLite format 3 is the header of a database file'), db)).resolves.toBeUndefined();
-    await expect(refuseDatabase(await write('old.md', sampleReport()), db)).resolves.toBeUndefined();
-    await expect(refuseDatabase(await write('empty.md', ''), db)).resolves.toBeUndefined();
-    await expect(refuseDatabase(await write('sqlite.md', 'SQLite'), db)).resolves.toBeUndefined();
+    expect(refuseDatabase(join(dir, 'new.md'), db)).toBeUndefined();
+    expect(refuseDatabase(join(dir, 'sub', 'deeper', 'new.md'), db)).toBeUndefined();
+    expect(refuseDatabase(await write('notes.md', 'SQLite format 3 is the header of a database file'), db)).toBeUndefined();
+    expect(refuseDatabase(await write('old.md', sampleReport()), db)).toBeUndefined();
+    expect(refuseDatabase(await write('empty.md', ''), db)).toBeUndefined();
+    expect(refuseDatabase(await write('sqlite.md', 'SQLite'), db)).toBeUndefined();
   });
 
-  it('refuses the database itself, under any spelling of its path', async () => {
+  it('refuses the database itself, under any spelling of its path', () => {
     const message = new Error(`refusing to write the report over the database ${db}`);
     for (const target of [db, `${dir}${sep}sub${sep}..${sep}r.sqlite`, `${dir}${sep}.${sep}r.sqlite`]) {
-      await expect(refuseDatabase(target, db)).rejects.toThrow(message);
+      expect(() => refuseDatabase(target, db)).toThrow(message);
     }
   });
 
-  it.skipIf(process.platform !== 'win32')('refuses the database spelled in another case, where the file system ignores case', async () => {
-    await expect(refuseDatabase(join(dir, 'R.SQLITE'), db)).rejects.toThrow(`refusing to write the report over the database ${db}`);
+  it.skipIf(process.platform !== 'win32')('refuses the database spelled in another case, where the file system ignores case', () => {
+    expect(() => refuseDatabase(join(dir, 'R.SQLITE'), db)).toThrow(`refusing to write the report over the database ${db}`);
   });
 
   it('refuses any file that starts with the SQLite header, whatever its name: a copy, a hard link, another database', async () => {
@@ -414,10 +414,10 @@ describe('refuseDatabase', () => {
     raw.exec('CREATE TABLE pull_requests (id TEXT PRIMARY KEY)');
     raw.close();
 
-    for (const target of [copy, alias, other]) await expect(refuseDatabase(target, db)).rejects.toThrow(REFUSED_OVER(target));
+    for (const target of [copy, alias, other]) expect(() => refuseDatabase(target, db)).toThrow(REFUSED_OVER(target));
   });
 
-  it('refuses a symbolic link to the database', async (ctx) => {
+  it('refuses a symbolic link to the database', (ctx) => {
     const alias = join(dir, 'symbolic.md');
     try {
       symlinkSync(db, alias, 'file');
@@ -425,35 +425,41 @@ describe('refuseDatabase', () => {
       if (['EPERM', 'EACCES', 'ENOSYS'].includes((error as NodeJS.ErrnoException).code ?? '')) return ctx.skip('this machine does not allow creating symbolic links');
       throw error;
     }
-    await expect(refuseDatabase(alias, db)).rejects.toThrow(REFUSED_OVER(alias));
+    expect(() => refuseDatabase(alias, db)).toThrow(REFUSED_OVER(alias));
   });
 
   it('refuses any name that ends in .sqlite, in any case, whether the file exists or not', async () => {
     const text = await write('text.sqlite', 'not a database');
     for (const target of [join(dir, 'new.sqlite'), join(dir, 'NEW.SQLite'), join(dir, 'sub', 'deeper.sqlite'), text]) {
-      await expect(refuseDatabase(target, db)).rejects.toThrow(NOT_A_DATABASE_NAME);
+      expect(() => refuseDatabase(target, db)).toThrow(NOT_A_DATABASE_NAME);
     }
     expect(await readFile(text, 'utf8')).toBe('not a database');
     expect(listing()).toEqual(['r.sqlite', 'text.sqlite']);
   });
 
-  it('refuses a name that only continues like one, such as a stream of a .sqlite file, and one that merely contains the word', async () => {
-    await expect(refuseDatabase(join(dir, 'new.sqlite::$DATA'), db)).rejects.toThrow(NOT_A_DATABASE_NAME);
-    await expect(refuseDatabase(join(dir, 'new.sqlite:notes'), db)).rejects.toThrow(NOT_A_DATABASE_NAME);
-    await expect(refuseDatabase(join(dir, 'new.sqlite.md'), db)).resolves.toBeUndefined();
-    await expect(refuseDatabase(join(dir, 'sqlite'), db)).resolves.toBeUndefined();
+  it('refuses a name that only continues like one, such as a stream of a .sqlite file, and one that merely contains the word', () => {
+    expect(() => refuseDatabase(join(dir, 'new.sqlite::$DATA'), db)).toThrow(NOT_A_DATABASE_NAME);
+    expect(() => refuseDatabase(join(dir, 'new.sqlite:notes'), db)).toThrow(NOT_A_DATABASE_NAME);
+    expect(refuseDatabase(join(dir, 'new.sqlite.md'), db)).toBeUndefined();
+    expect(refuseDatabase(join(dir, 'sqlite'), db)).toBeUndefined();
   });
 
   it.skipIf(process.platform !== 'win32')('refuses the main stream of the database by its NTFS name `::$DATA`', async () => {
-    await expect(refuseDatabase(`${db}::$DATA`, db)).rejects.toThrow(REFUSED_OVER(`${db}::$DATA`));
+    expect(() => refuseDatabase(`${db}::$DATA`, db)).toThrow(REFUSED_OVER(`${db}::$DATA`));
     const copy = join(dir, 'copy.md');
     await writeFile(copy, await readFile(db));
-    await expect(refuseDatabase(`${copy}::$DATA`, db)).rejects.toThrow(REFUSED_OVER(`${copy}::$DATA`));
+    expect(() => refuseDatabase(`${copy}::$DATA`, db)).toThrow(REFUSED_OVER(`${copy}::$DATA`));
   });
 
   it('writes nothing and creates nothing', async () => {
     const before = await readFile(db);
-    for (const target of [db, join(dir, 'new.sqlite'), join(dir, 'new.md')]) await refuseDatabase(target, db).catch(() => undefined);
+    for (const target of [db, join(dir, 'new.sqlite'), join(dir, 'new.md')]) {
+      try {
+        refuseDatabase(target, db);
+      } catch {
+        // expected
+      }
+    }
     expect((await readFile(db)).equals(before)).toBe(true);
     expect(listing()).toEqual(['r.sqlite']);
   });
@@ -900,14 +906,6 @@ describe('mutateReviewFile', () => {
     expect(changed.data).toStrictEqual((await loadReviewFile(db)).data);
   });
 
-  it('lets the callback be asynchronous', async () => {
-    await mutateReviewFile(db, async (data) => {
-      await Promise.resolve();
-      return { data: { ...data, target: 'Later' }, result: null };
-    });
-    expect((await loadReviewFile(db)).data.target).toBe('Later');
-  });
-
   it('saves in one transaction, which a failure rolls back', async () => {
     const { saveReview: save } = await vi.importActual<typeof import('./review-store.ts')>('./review-store.ts');
     const seen: boolean[] = [];
@@ -934,7 +932,6 @@ describe('mutateReviewFile', () => {
         throw new Error('no such thing');
       }),
     ).rejects.toThrow('no such thing');
-    await expect(mutateReviewFile(db, () => Promise.reject(new Error('later')))).rejects.toThrow('later');
     expect((await bytes()).equals(before)).toBe(true);
     expect(saveReview).not.toHaveBeenCalled();
   });
@@ -955,19 +952,13 @@ describe('mutateReviewFile', () => {
         probe();
         return { data: { ...data, target: 'Sync' }, result: null };
       });
-      await mutateReviewFile(db, async (data) => {
-        probe();
-        await Promise.resolve();
-        probe();
-        return { data: { ...data, target: 'Async' }, result: null };
-      });
       probe();
     } finally {
       other.close();
     }
-    // The probe after the calls found the lock free again, so only the three inside them were refused.
-    expect(refused).toEqual(Array.from({ length: 3 }, () => 'database is locked'));
-    expect((await loadReviewFile(db)).data.target).toBe('Async');
+    // The probe after the call found the lock free again, so only the one inside it was refused.
+    expect(refused).toEqual(['database is locked']);
+    expect((await loadReviewFile(db)).data.target).toBe('Sync');
   });
 
   it('renders and updates the report when it changes the review', async () => {
@@ -1057,13 +1048,10 @@ describe('changeReviewState', () => {
   });
 
   it('saves the review, the links and the pull request together, and hands the new state and the result back', async () => {
-    const changed = await changeReviewState(db, async (state) => {
-      await Promise.resolve();
-      return {
-        state: { ...state, data: withFinding(state.data, 'F2'), links: [...state.links, own('r2', 'F2')], pullRequest: PULL_REQUEST },
-        result: 'F2',
-      };
-    });
+    const changed = await changeReviewState(db, (state) => ({
+      state: { ...state, data: withFinding(state.data, 'F2'), links: [...state.links, own('r2', 'F2')], pullRequest: PULL_REQUEST },
+      result: 'F2',
+    }));
     expect(changed.result).toBe('F2');
     const loaded = await loadReviewFile(db);
     expect(loaded.links).toStrictEqual([own('r1', 'F1'), own('r2', 'F2')]);
@@ -1112,23 +1100,20 @@ describe('changeReviewState', () => {
       given = state;
       return { state, result: 'nothing to do' };
     });
-    const asynchronous = await changeReviewState(db, async (state) => ({ state, result: 7 }));
     expect(kept.result).toBe('nothing to do');
     expect(kept.state).toBe(given);
-    expect(asynchronous.result).toBe(7);
     nothingSaved();
     expect((await bytes()).equals(before)).toBe(true);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
-  it('leaves the database byte-identical when the change throws or rejects', async () => {
+  it('leaves the database byte-identical when the change throws', async () => {
     const before = await bytes();
     await expect(
       changeReviewState(db, () => {
         throw new Error('no such thing');
       }),
     ).rejects.toThrow('no such thing');
-    await expect(changeReviewState(db, () => Promise.reject(new Error('later')))).rejects.toThrow('later');
     nothingSaved();
     expect((await bytes()).equals(before)).toBe(true);
     await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
@@ -1218,23 +1203,30 @@ describe('changeReviewState', () => {
         probe();
         return { state: { ...state, pullRequest: PULL_REQUEST }, result: null };
       });
-      await changeReviewState(db, async (state) => {
-        probe();
-        await Promise.resolve();
-        probe();
-        return { state, result: null };
-      });
       probe();
     } finally {
       other.close();
     }
-    expect(refused).toEqual(Array.from({ length: 3 }, () => 'database is locked'));
+    expect(refused).toEqual(['database is locked']);
   });
 
   it('renders and updates the report when it changes the review', async () => {
     await changeReviewState(db, (state) => ({ state: { ...state, data: { ...state.data, target: 'Changed' }, links: [] }, result: null }));
     expect((await readFile(report, 'utf8')).startsWith('# Review — Changed\n')).toBe(true);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
+  });
+
+  it('checks the report path only when the review changes, and rolls back if it is a database', async () => {
+    await writeFile(report, await bytes());
+    await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
+    expect((await loadReviewFile(db)).pullRequest).toBe(PULL_REQUEST);
+
+    const before = await bytes();
+    await expect(
+      changeReviewState(db, (state) => ({ state: { ...state, data: { ...state.data, target: 'Changed' } }, result: null })),
+    ).rejects.toThrow(`refusing to overwrite the SQLite database ${report} with a report`);
+    expect((await bytes()).equals(before)).toBe(true);
+    expect((await loadReviewFile(db)).data.target).toBe('PR 42');
   });
 
   it('keeps a committed database change successful and returns reportError when refreshing the derived report fails with EPERM', async () => {
@@ -1318,7 +1310,6 @@ describe('changeReviewState', () => {
           { snapshot: snapshotOf(NEW_REFS) },
         ),
       ).rejects.toThrow('no such thing');
-      await expect(changeReviewState(db, () => Promise.reject(new Error('later')), { snapshot: snapshotOf(NEW_REFS) })).rejects.toThrow('later');
 
       expect((await bytes()).equals(before)).toBe(true);
       expect((await loadSnapshot(db))?.comments.map((comment) => comment.id)).toEqual(['id-r0', 'id-r1', 'id-r2', 'id-c2']);
@@ -1824,9 +1815,9 @@ describe.skipIf(!hasGit)('the textconv recipe of the README', () => {
 const WRITER = `
 const [moduleUrl, db, pause] = process.argv.slice(1);
 const { mutateReviewFile } = await import(moduleUrl);
-const { result } = await mutateReviewFile(db, async (data) => {
+const { result } = await mutateReviewFile(db, (data) => {
   const id = 'F' + (data.findings.length + 1);
-  await new Promise((done) => setTimeout(done, Number(pause)));
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(pause));
   const finding = { id, state: '⏳', severity: '🔴', title: 'Finding ' + id, description: 'Body.', updates: [] };
   return { data: { ...data, findings: [...data.findings, finding] }, result: id };
 });
@@ -1903,10 +1894,10 @@ describe('mutateReviewFile with several processes', () => {
 const STATE_WRITER = `
 const [moduleUrl, db, pause] = process.argv.slice(1);
 const { changeReviewState } = await import(moduleUrl);
-const { result } = await changeReviewState(db, async (state) => {
+const { result } = await changeReviewState(db, (state) => {
   const id = 'F' + (state.data.findings.length + 1);
   const link = { ref: 'r' + (100 + state.links.length), role: 'own', finding: id };
-  await new Promise((done) => setTimeout(done, Number(pause)));
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(pause));
   const finding = { id, state: '⏳', severity: '🔴', title: 'Finding ' + id, description: 'Body.', updates: [] };
   const data = { ...state.data, findings: [...state.data.findings, finding] };
   return { state: { ...state, data, links: [...state.links, link] }, result: id + ' ' + link.ref };
@@ -1923,10 +1914,10 @@ const { snapshotOf } = await import(supportUrl);
 const ref = 'r' + number;
 const { result } = await changeReviewState(
   db,
-  async (state) => {
+  (state) => {
     if (!state.known.has(ref)) throw new Error(ref + ' is not known');
     const id = 'F' + (state.data.findings.length + 1);
-    await new Promise((done) => setTimeout(done, Number(pause)));
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(pause));
     const finding = { id, state: '⏳', severity: '🔴', title: 'Finding ' + id, description: 'Body.', updates: [] };
     const data = { ...state.data, findings: [...state.data.findings, finding] };
     return { state: { ...state, data, links: [...state.links, { ref, role: 'own', finding: id }] }, result: id + ' ' + ref };

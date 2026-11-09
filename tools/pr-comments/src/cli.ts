@@ -574,7 +574,7 @@ async function renderComments({ env, values }: Context, db: string): Promise<num
     return normalized;
   });
   // Before anything is read or written: the markdown must never replace a database, under whatever name it is reached.
-  if (values.out) await refuseDatabase(values.out, db);
+  if (values.out) refuseDatabase(values.out, db);
   const data = await snapshotOf(db);
   const pendingRefs = values.pending
     ? new Set(pendingItems({ links: (await loadReviewFile(db)).links, data }).map((item) => item.ref))

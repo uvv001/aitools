@@ -105,7 +105,7 @@ CREATE TABLE comment_links (
 ) STRICT;
 
 CREATE UNIQUE INDEX comment_links_own ON comment_links (finding) WHERE role = 'own';
-${PULL_REQUEST_SCHEMA}`;
+`;
 
 // The tables every review database has, whatever its version, which is what tells one from any other SQLite file.
 const TABLES = ['review', 'intro_items', 'findings', 'updates', 'meta'];
@@ -149,7 +149,9 @@ function configure(db: DatabaseSync, path: string, mode: OpenMode): void {
     }
   }
   if (mode !== 'readonly') {
-    if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}PRAGMA user_version = ${REVIEW_SCHEMA_VERSION}`));
+    if (version === 0) {
+      inTransaction(db, () => db.exec(`${SCHEMA}${PULL_REQUEST_SCHEMA}PRAGMA user_version = ${REVIEW_SCHEMA_VERSION}`));
+    }
     db.exec('PRAGMA journal_mode = DELETE');
   }
   db.exec('PRAGMA foreign_keys = ON');
@@ -258,21 +260,6 @@ export function inTransaction<T>(db: DatabaseSync, work: () => T, options: Trans
   begin(db, options);
   try {
     const result = work();
-    db.exec('COMMIT');
-    return result;
-  } catch (error) {
-    if (db.isTransaction) db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
-// `inTransaction` for work that waits: the transaction stays open until the promise settles. Nothing else may use the
-// connection meanwhile.
-export async function inTransactionAsync<T>(db: DatabaseSync, work: () => Promise<T>, options: TransactionOptions = {}): Promise<T> {
-  if (db.isTransaction) return work();
-  begin(db, options);
-  try {
-    const result = await work();
     db.exec('COMMIT');
     return result;
   } catch (error) {

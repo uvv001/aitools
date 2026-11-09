@@ -23,7 +23,7 @@ Node 24.15, TypeScript run directly by Node (type stripping), the built-in `node
 | Area | Files |
 | --- | --- |
 | Command line | `src/cli.ts`: one table of commands, strict arguments, the help texts, one function per command |
-| Review database | `review-store.ts` (schema, open modes, transactions), `store.ts` (the pull request snapshot, `linkable`), `review-files.ts` (init, render, sync, `changeReviewState`), `review-naming.ts`, `review-dump.ts` |
+| Review database | `review-store.ts` (schema, open modes, `inTransaction`), `store.ts` (the pull request snapshot, `linkable`), `review-files.ts` (init, render, sync, `changeReviewState`), `review-naming.ts`, `review-dump.ts` |
 | Review model | `review-model.ts`, `review-ops.ts` (pure changes of a review), `review-links.ts` (rules of the links), `review-view.ts` (list and show), `review-pending.ts` (the list of `link pending`) |
 | Report | `review-render.ts` (writes it), `report-dashboard.ts` |
 | GitHub | `github.ts` (GraphQL reads, check runs), `rest.ts`, `publish.ts` (comment engine), `reply.ts` (reply engine), `review-post.ts` and `review-reply.ts` (glue between the engines and the database), `download.ts`, `token.ts`, `token-memo.ts` |
@@ -121,14 +121,14 @@ A read command must not change the committed file. A read-only connection (`new 
 
 ### 2.4 One transaction per change
 
-`changeReviewState(dbPath, change, { snapshot?, pullRequest?, knownRef? })` in `review-files.ts` is the door for every change of the review, the links and the connected pull request. (`syncReviewFile`, for `pr sync`, has a transaction of its own, see 2.5.) It runs one transaction:
+`changeReviewState(dbPath, change, { snapshot?, pullRequest?, knownRef? })` in `review-files.ts` is the door for every change of the review, the links and the connected pull request. (`syncReviewFile`, for `pr sync`, has a transaction of its own, see 2.5.) It runs one synchronous `inTransaction(db, …, { immediate: true })` (`review-store.ts`, shared with `store.ts`):
 
 1. `BEGIN IMMEDIATE`: the write lock is taken before anything is read. Writers in several processes run one after the other, each on what the one before saved.
 2. When `pullRequest` is given, it checks that the review is still connected to that pull request (host, owner and repository compared without regard to case, the number exactly) and fails with `the review is connected to <url>, not to <expected>` if not. When a snapshot is given (a pull request that was just downloaded), `assertFreshSnapshot` checks that its `fetchedAt` is not earlier than the stored snapshot's `fetched_at`, failing with `a newer pull request snapshot (<stamp>) is already stored; run "pr-comments pr sync --db <db>" again` if stale; otherwise it saves the snapshot first. When `knownRef` (one comment ref or an array of comment refs) is given, `recordKnownCommentRef` records each comment ref (`r…` or `c…`) in `linkable` with `gone = 0` before loading state.
 3. The state is loaded: the review, the links, the connected pull request, and the refs a link may name (`known`).
-4. `change` runs. It returns the new state. Pure modules such as `review-links.ts` write `DB_HINT_PLACEHOLDER` (`--db <file.sqlite>`) in their command hints, and `changeReviewState` replaces it with `--db <quoted-db-path>` (`quoteCliPath`) if `change` throws.
-5. The same state object back means "nothing changed": nothing is written. Otherwise only the parts that differ are written (the review, the links, the connected pull request).
-6. `COMMIT`. Any error rolls everything back, a given snapshot too.
+4. The synchronous `change` callback runs. It returns the new state. Pure modules such as `review-links.ts` write `DB_HINT_PLACEHOLDER` (`--db <file.sqlite>`) in their command hints, and `changeReviewState` replaces it with `--db <quoted-db-path>` (`quoteCliPath`) if `change` throws.
+5. The same state object back means "nothing changed": nothing is written. Otherwise only the parts that differ are written (the review after checking with `refuseDatabase` that the report path is not a database, the links, the connected pull request).
+6. `COMMIT`. Any error rolls the whole transaction back, a given snapshot too.
 
 Mutating commands and `report render` run one at a time per review database. A connection waits up to 10 seconds for a lock (`timeout` of `DatabaseSync`), which guards read-only queries against a write transaction.
 

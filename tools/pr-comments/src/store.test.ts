@@ -262,18 +262,20 @@ describe('store', () => {
     expect(loadPullRequest(db)).toEqual(stored());
   });
 
-  it('leaves the transaction it is called in usable when its own save fails', () => {
+  it('rolls back the enclosing transaction when its own save fails', () => {
     const db = openNew();
     savePullRequest(db, samplePullRequest());
     const broken = samplePullRequest();
     broken.comments.push({ ...broken.comments[0]! });
-    inTransaction(db, () => {
-      expect(() => savePullRequest(db, broken)).toThrow();
-      expect(db.isTransaction).toBe(true);
-      expect(loadPullRequest(db)).toEqual(stored());
-      savePullRequest(db, without('rc-3'));
-    });
-    expect(loadPullRequest(db)!.comments.map((c) => c.id)).not.toContain('rc-3');
+    expect(() =>
+      inTransaction(db, () => {
+        saveReview(db, sampleReview());
+        savePullRequest(db, broken);
+      }),
+    ).toThrow();
+    expect(db.isTransaction).toBe(false);
+    expect(loadPullRequest(db)).toEqual(stored());
+    expect(count(db, 'review')).toBe(0);
   });
 
   it('allows slicing by author with plain SQL', () => {

@@ -9,6 +9,7 @@ import type {
   Review,
   ReviewThread,
 } from './model.ts';
+import { inTransaction } from './review-store.ts';
 
 // The pull request the review is about, inside the review database (review-store.ts creates these tables with the
 // rest of its schema). At most one pull request is stored: the connected one. `pr_comments.ref` is the short id of
@@ -128,19 +129,6 @@ function reconcileLinkable(db: DatabaseSync, present: Map<string, string>): void
   db.exec('DELETE FROM linkable WHERE gone = 1 AND ref NOT IN (SELECT ref FROM comment_links)');
 }
 
-// Runs `work` as a savepoint: it joins the transaction it is called in, and is a transaction of its own otherwise.
-function inSavepoint(db: DatabaseSync, work: () => void): void {
-  db.exec('SAVEPOINT pull_request');
-  try {
-    work();
-    db.exec('RELEASE pull_request');
-  } catch (error) {
-    db.exec('ROLLBACK TO pull_request');
-    db.exec('RELEASE pull_request');
-    throw error;
-  }
-}
-
 // Removes the pull request and everything that came with it.
 function clearRows(db: DatabaseSync): void {
   for (const table of ['pr_check_annotations', 'pr_check_runs', 'pr_comments', 'pr_threads', 'pr_reviews', 'pr_pull_requests']) {
@@ -150,7 +138,7 @@ function clearRows(db: DatabaseSync): void {
 
 // Forgets the stored pull request: for a review that is connected to another one.
 export function clearPullRequest(db: DatabaseSync): void {
-  inSavepoint(db, () => {
+  inTransaction(db, () => {
     clearRows(db);
     reconcileLinkable(db, new Map());
   });
@@ -170,7 +158,7 @@ export function savePullRequest(db: DatabaseSync, data: PullRequestData): void {
   };
   const present = new Map<string, string>();
 
-  inSavepoint(db, () => {
+  inTransaction(db, () => {
     const threadCols = db.prepare('PRAGMA table_info(pr_threads)').all() as { name: string }[];
     if (!threadCols.some(({ name }) => name === 'original_start_line')) {
       db.exec('ALTER TABLE pr_threads ADD COLUMN original_start_line INTEGER');
