@@ -448,36 +448,30 @@ async function resolveTokens(host, owner, { env = process.env, home = homedir() 
 function tokenMemoPath(home = homedir()) {
 	return join(home, ".cache", "pr-comments", "token-sources.json");
 }
-async function readMemo(path) {
+async function recallTokenSource(path) {
 	try {
 		const parsed = JSON.parse(await readFile(path, "utf8"));
-		return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+		const value = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed.token_source : void 0;
+		return typeof value === "string" ? value : void 0;
 	} catch {
-		return {};
+		return;
 	}
 }
-async function recallTokenSource(path, key) {
-	const value = (await readMemo(path))[key];
-	return typeof value === "string" ? value : void 0;
-}
-async function rememberTokenSource(path, key, id) {
+async function rememberTokenSource(path, id) {
 	try {
-		const memo = await readMemo(path);
-		memo[key] = id;
 		await mkdir(dirname(path), { recursive: true });
-		await writeFile(path, `${JSON.stringify(memo, null, 2)}\n`, "utf8");
+		await writeFile(path, `${JSON.stringify({ token_source: id }, null, 2)}\n`, "utf8");
 	} catch {}
 }
 //#endregion
 //#region src/download.ts
-async function withWorkingToken(ref, operation, { env = process.env, home = homedir(), fetchImpl = fetch, purpose = "read" } = {}) {
+async function withWorkingToken(ref, operation, { env = process.env, home = homedir(), fetchImpl = fetch } = {}) {
 	const candidates = await resolveTokens(ref.host, ref.owner, {
 		env,
 		home
 	});
 	const memoPath = tokenMemoPath(home);
-	const key = `${ref.host}/${ref.owner}`.toLowerCase() + (purpose === "write" ? "#write" : "");
-	const remembered = await recallTokenSource(memoPath, key);
+	const remembered = await recallTokenSource(memoPath);
 	const ordered = [...candidates].sort((a, b) => Number(b.id === remembered) - Number(a.id === remembered));
 	const refused = [];
 	let lastError;
@@ -488,7 +482,7 @@ async function withWorkingToken(ref, operation, { env = process.env, home = home
 			host: ref.host,
 			fetchImpl
 		});
-		if (candidate.id !== remembered) await rememberTokenSource(memoPath, key, candidate.id);
+		if (candidate.id !== remembered) await rememberTokenSource(memoPath, candidate.id);
 		return result;
 	} catch (error) {
 		if (!(error instanceof AccessDeniedError)) throw error;
@@ -4053,7 +4047,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+2ac81c6`;
+	return `pr-comments ${VERSION}+6b0fd0a`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4065,8 +4059,8 @@ async function readProcessStdin() {
 }
 const defaultEnvironment = {
 	getPullRequest: (ref) => downloadPullRequest(ref),
-	publish: (ref, comment, options) => withWorkingToken(ref, (context) => publishComment(context, ref, comment, options), { purpose: "write" }),
-	reply: (ref, request, options) => withWorkingToken(ref, (context) => replyToComment(context, ref, request, options), { purpose: "write" }),
+	publish: (ref, comment, options) => withWorkingToken(ref, (context) => publishComment(context, ref, comment, options)),
+	reply: (ref, request, options) => withWorkingToken(ref, (context) => replyToComment(context, ref, request, options)),
 	resolveRevision: (revision) => resolveRevision(revision, process.cwd()),
 	print: (text) => process.stdout.write(text),
 	warn: (text) => process.stderr.write(text),
