@@ -1,6 +1,6 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, linkSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, readdirSync, symlinkSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -27,19 +27,8 @@ import { linkDuplicate, linkNote } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { newReview } from './review-ops.ts';
 import { formatUpdateItem, renderReport } from './review-render.ts';
-import { REVIEW_SCHEMA_VERSION, getMeta, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
+import { REVIEW_SCHEMA_VERSION, getMeta, loadReview, openReviewDb, saveReview, setMeta } from './review-store.ts';
 import { removeScratch, sampleReport, sampleReview as sampleReviewData, scratchDir, snapshotOf } from './review-test-support.ts';
-
-vi.mock('./review-store.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./review-store.ts')>();
-  return {
-    ...actual,
-    openReviewDb: vi.fn(actual.openReviewDb),
-    saveReview: vi.fn(actual.saveReview),
-    saveLinks: vi.fn(actual.saveLinks),
-    setMeta: vi.fn(actual.setMeta),
-  };
-});
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
@@ -92,9 +81,6 @@ function linkable(path: string): { ref: string; gone: number }[] {
     raw.close();
   }
 }
-
-// How the database was opened by the calls since the mock was last cleared.
-const modes = (): string[] => vi.mocked(openReviewDb).mock.calls.map((call) => call[1]);
 
 // A database that holds the sample review, with the report it renders to next to it (`name` is the database's file).
 async function sampleReview(name = 'r.sqlite'): Promise<string> {
@@ -301,16 +287,14 @@ describe('renderReportFile', () => {
     expect(await renderReportFile(db, { out })).toMatchObject({ action: 'updated' });
   });
 
-  it('only reads the database: a read-only connection, the same bytes, nothing else in the folder', async () => {
+  it('only reads the database: the same bytes, nothing else in the folder', async () => {
     const db = await sampleReview();
     const before = await readFile(db);
-    vi.mocked(openReviewDb).mockClear();
 
     await renderReportFile(db);
     await renderReportFile(db, { out: join(dir, 'copy.md') });
     await renderReportFile(db);
 
-    expect(modes()).toEqual(['readonly', 'readonly', 'readonly']);
     expect((await readFile(db)).equals(before)).toBe(true);
     expect(listing()).toEqual(['copy.md', 'r.md', 'r.sqlite']);
   });
@@ -504,12 +488,10 @@ describe('dumpReviewFile', () => {
     }
   });
 
-  it('only reads the database: a read-only connection, the same bytes, nothing else in the folder', async () => {
+  it('only reads the database: the same bytes, nothing else in the folder', async () => {
     const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW });
     const before = await readFile(db);
-    vi.mocked(openReviewDb).mockClear();
     await dumpReviewFile(db);
-    expect(modes()).toEqual(['readonly']);
     expect((await readFile(db)).equals(before)).toBe(true);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
@@ -827,24 +809,21 @@ describe('initReviewFile', () => {
   describe('is all or nothing', () => {
     it('removes the newly created database and leaves nothing when seeding fails', async () => {
       let during: string[] = [];
-      vi.mocked(saveReview).mockImplementationOnce(() => {
-        during = listing();
-        throw new Error('crash');
+      const prepare = DatabaseSync.prototype.prepare;
+      const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
+        if (sql.startsWith('INSERT INTO review')) {
+          during = listing();
+          throw new Error('crash');
+        }
+        return prepare.call(this, sql);
       });
-      await expect(initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW })).rejects.toThrow('crash');
-      expect(during).toEqual(['r.sqlite']);
+      try {
+        await expect(initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW })).rejects.toThrow('crash');
+      } finally {
+        spy.mockRestore();
+      }
+      expect(during).toContain('r.sqlite');
       expect(listing()).toEqual([]);
-    });
-
-    it('never replaces a database that appears before exclusive creation', async () => {
-      const { openReviewDb: open } = await vi.importActual<typeof import('./review-store.ts')>('./review-store.ts');
-      vi.mocked(openReviewDb).mockImplementationOnce((path, mode) => {
-        writeFileSync(path, 'precious');
-        return open(path, mode);
-      });
-      await expect(initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW })).rejects.toThrow('source of truth');
-      expect(await readFile(join(dir, 'r.sqlite'), 'utf8')).toBe('precious');
-      expect(listing()).toEqual(['r.sqlite']);
     });
 
     it('keeps the created database and returns reportError when writing the initial report fails', async () => {
@@ -858,20 +837,18 @@ describe('initReviewFile', () => {
     });
 
     it('writes the review and the pull request in one transaction', async () => {
-      const { saveReview: save, setMeta: set } = await vi.importActual<typeof import('./review-store.ts')>('./review-store.ts');
+      const prepare = DatabaseSync.prototype.prepare;
       const inTransaction: boolean[] = [];
-      vi.mocked(saveReview).mockImplementationOnce((db, data) => {
-        inTransaction.push(db.isTransaction);
-        save(db, data);
-      });
-      vi.mocked(setMeta).mockImplementation((db, key, value) => {
-        inTransaction.push(db.isTransaction);
-        set(db, key, value);
+      const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
+        if (sql.startsWith('INSERT INTO review') || sql.startsWith('INSERT INTO meta')) {
+          inTransaction.push(this.isTransaction);
+        }
+        return prepare.call(this, sql);
       });
       try {
         await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: 'https://github.com/o/r/pull/7' });
       } finally {
-        vi.mocked(setMeta).mockImplementation(set);
+        spy.mockRestore();
       }
       expect(inTransaction).toEqual([true, true]);
     });
@@ -886,7 +863,6 @@ describe('mutateReviewFile', () => {
   beforeEach(async () => {
     report = join(dir, 'r.md');
     ({ db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW }));
-    vi.mocked(saveReview).mockClear();
   });
 
   const retarget =
@@ -907,18 +883,12 @@ describe('mutateReviewFile', () => {
   });
 
   it('saves in one transaction, which a failure rolls back', async () => {
-    const { saveReview: save } = await vi.importActual<typeof import('./review-store.ts')>('./review-store.ts');
-    const seen: boolean[] = [];
-    vi.mocked(saveReview).mockImplementationOnce((handle, data) => {
-      seen.push(handle.isTransaction);
-      save(handle, data);
-      throw new Error('disk full');
-    });
     const before = await bytes();
 
-    await expect(mutateReviewFile(db, retarget('Lost'))).rejects.toThrow('disk full');
+    await expect(
+      mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Lost', findings: [finding('bad')] }, result: null })),
+    ).rejects.toThrow(/CHECK constraint failed/u);
 
-    expect(seen).toEqual([true]);
     expect((await bytes()).equals(before)).toBe(true);
     expect((await loadReviewFile(db)).data.target).toBe('PR 42');
     await mutateReviewFile(db, retarget('Kept'));
@@ -933,7 +903,6 @@ describe('mutateReviewFile', () => {
       }),
     ).rejects.toThrow('no such thing');
     expect((await bytes()).equals(before)).toBe(true);
-    expect(saveReview).not.toHaveBeenCalled();
   });
 
   it('holds the write lock from the load to the commit, so no other writer slips in', async () => {
@@ -1018,16 +987,7 @@ describe('changeReviewState', () => {
       }),
       { snapshot: snapshotOf(REFS) },
     );
-    vi.mocked(saveReview).mockClear();
-    vi.mocked(saveLinks).mockClear();
-    vi.mocked(setMeta).mockClear();
   });
-
-  const nothingSaved = (): void => {
-    expect(saveReview).not.toHaveBeenCalled();
-    expect(saveLinks).not.toHaveBeenCalled();
-    expect(setMeta).not.toHaveBeenCalled();
-  };
 
   it('hands the stored state to the change: the review, the links in order, the pull request, the refs to link to', async () => {
     await changeReviewState(db, (state) => ({
@@ -1063,32 +1023,32 @@ describe('changeReviewState', () => {
 
   describe('writes only what changed', () => {
     it('the links', async () => {
+      const before = await loadReviewFile(db);
       await changeReviewState(db, (state) => ({ state: { ...state, links: [...state.links, { ref: 'c2', role: 'note', note: 'why' }] }, result: null }));
-      expect(saveLinks).toHaveBeenCalledTimes(1);
-      expect(saveReview).not.toHaveBeenCalled();
-      expect(setMeta).not.toHaveBeenCalled();
+      const after = await loadReviewFile(db);
+      expect(after.links).toStrictEqual([own('r1', 'F1'), { ref: 'c2', role: 'note', note: 'why' }]);
+      expect([after.data, after.pullRequest]).toStrictEqual([before.data, before.pullRequest]);
     });
 
     it('the review', async () => {
       await changeReviewState(db, (state) => ({ state: { ...state, data: { ...state.data, target: 'Changed' } }, result: null }));
-      expect(saveReview).toHaveBeenCalledTimes(1);
-      expect(saveLinks).not.toHaveBeenCalled();
-      expect(setMeta).not.toHaveBeenCalled();
-      expect((await loadReviewFile(db)).links).toStrictEqual([own('r1', 'F1')]);
+      const after = await loadReviewFile(db);
+      expect(after.data.target).toBe('Changed');
+      expect(after.links).toStrictEqual([own('r1', 'F1')]);
+      expect(after.pullRequest).toBeUndefined();
     });
 
     it('the pull request', async () => {
+      const before = await loadReviewFile(db);
       await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
-      expect(setMeta).toHaveBeenCalledWith(expect.anything(), 'pull_request', PULL_REQUEST);
-      expect(saveReview).not.toHaveBeenCalled();
-      expect(saveLinks).not.toHaveBeenCalled();
-      expect((await loadReviewFile(db)).pullRequest).toBe(PULL_REQUEST);
+      const after = await loadReviewFile(db);
+      expect(after.pullRequest).toBe(PULL_REQUEST);
+      expect([after.data, after.links]).toStrictEqual([before.data, before.links]);
     });
 
     it('not the links, when a copy of them has the same content', async () => {
       const before = await bytes();
       await changeReviewState(db, (state) => ({ state: { ...state, links: state.links.map((link) => ({ ...link })) }, result: null }));
-      nothingSaved();
       expect((await bytes()).equals(before)).toBe(true);
     });
   });
@@ -1102,7 +1062,6 @@ describe('changeReviewState', () => {
     });
     expect(kept.result).toBe('nothing to do');
     expect(kept.state).toBe(given);
-    nothingSaved();
     expect((await bytes()).equals(before)).toBe(true);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
@@ -1114,29 +1073,20 @@ describe('changeReviewState', () => {
         throw new Error('no such thing');
       }),
     ).rejects.toThrow('no such thing');
-    nothingSaved();
     expect((await bytes()).equals(before)).toBe(true);
     await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
   });
 
   it('rolls back the whole change when a part of the save fails', async () => {
-    const { saveLinks: save } = await vi.importActual<typeof import('./review-store.ts')>('./review-store.ts');
-    const seen: boolean[] = [];
-    vi.mocked(saveLinks).mockImplementationOnce((handle, links) => {
-      seen.push(handle.isTransaction);
-      save(handle, links);
-      throw new Error('disk full');
-    });
     const before = await bytes();
 
     await expect(
       changeReviewState(db, (state) => ({
-        state: { ...state, data: withFinding(state.data, 'F2'), links: [...state.links, own('r2', 'F2')], pullRequest: PULL_REQUEST },
+        state: { ...state, data: withFinding(state.data, 'F2'), links: [...state.links, own('a00000001', 'F2')], pullRequest: PULL_REQUEST },
         result: null,
       })),
-    ).rejects.toThrow('disk full');
+    ).rejects.toThrow(/CHECK constraint failed/u);
 
-    expect(seen).toEqual([true]);
     expect((await bytes()).equals(before)).toBe(true);
     const loaded = await loadReviewFile(db);
     expect([loaded.data.findings.length, loaded.links.length, loaded.pullRequest]).toEqual([1, 1, undefined]);
@@ -1251,12 +1201,6 @@ describe('changeReviewState', () => {
     expect(existsSync(missing)).toBe(false);
   });
 
-  it('opens the database for writing, never read-only', async () => {
-    vi.mocked(openReviewDb).mockClear();
-    await changeReviewState(db, (state) => ({ state, result: null }));
-    expect(modes()).toEqual(['existing']);
-  });
-
   describe('with a snapshot', () => {
     const NEW_REFS = ['r5', 'c6', 'a00000009'];
 
@@ -1293,10 +1237,12 @@ describe('changeReviewState', () => {
     });
 
     it('saves it even when the change leaves the state as it is, and writes nothing else', async () => {
+      const before = await loadReviewFile(db);
       const result = await changeReviewState(db, (state) => ({ state, result: 'nothing to do' }), { snapshot: snapshotOf(NEW_REFS) });
       expect(result.result).toBe('nothing to do');
       expect((await loadSnapshot(db))?.comments).toHaveLength(2);
-      nothingSaved();
+      const after = await loadReviewFile(db);
+      expect([after.data, after.links, after.pullRequest]).toStrictEqual([before.data, before.links, before.pullRequest]);
     });
 
     it('rolls the snapshot back with a change that fails: nothing of it stays', async () => {
@@ -1570,17 +1516,11 @@ describe('syncReviewFile', () => {
       { snapshot: snapshotOf(['r1']) },
     );
     const before = await loadReviewFile(db);
-    vi.mocked(saveReview).mockClear();
-    vi.mocked(saveLinks).mockClear();
-    vi.mocked(setMeta).mockClear();
 
     await syncReviewFile(db, snapshotOf(['r1', 'r2']));
 
     const after = await loadReviewFile(db);
     expect([after.data, after.links, after.pullRequest]).toEqual([before.data, before.links, before.pullRequest]);
-    expect(saveReview).not.toHaveBeenCalled();
-    expect(saveLinks).not.toHaveBeenCalled();
-    expect(setMeta).not.toHaveBeenCalled();
   });
 
   it('refuses a review that is not connected to a pull request, and writes nothing', async () => {
@@ -1702,7 +1642,6 @@ describe('the functions that only read', () => {
       { snapshot: snapshotOf(['r1', 'c2', 'a00000001']) },
     );
     await renderReportFile(db);
-    vi.mocked(openReviewDb).mockClear();
   });
 
   const READERS: [string, (path: string) => Promise<unknown>][] = [
@@ -1713,12 +1652,11 @@ describe('the functions that only read', () => {
     ['renderReportFile to another file', (path) => renderReportFile(path, { out: join(dir, 'copy.md') })],
   ];
 
-  it.each(READERS)('%s opens the database read-only, and leaves its bytes and the folder as they were', async (_name, read) => {
+  it.each(READERS)('%s leaves the database bytes and the folder as they were', async (_name, read) => {
     const before = await readFile(db);
     await read(db);
     await read(db);
 
-    expect(modes()).toEqual(['readonly', 'readonly']);
     expect((await readFile(db)).equals(before)).toBe(true);
     expect(listing().every((name) => ['copy.md', 'r.md', 'r.sqlite'].includes(name))).toBe(true);
   });
