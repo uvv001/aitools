@@ -8,6 +8,7 @@ import type { CliEnvironment } from './cli.ts';
 import { annotationRef } from './comment-ref.ts';
 import { samplePullRequest } from './fixtures.ts';
 import { resolveRevision } from './git-revision.ts';
+import { BEGIN_COMMAND_REFERENCE, END_COMMAND_REFERENCE, renderCommandReferenceMarkdown, syncReadmeCommandReference } from './help-catalog.ts';
 import { renderMarkdown } from './markdown.ts';
 import type { AnnotationLevel, CheckAnnotation, CheckRun, PullRequestData } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
@@ -394,7 +395,7 @@ describe('cli', () => {
     };
 
     it.each(WORDS)('%s --help, -h and help print its help to standard output and exit with 0', async (words) => {
-      const { summary, options, args, example, database } = command(words);
+      const { summary, options, args, notes, example, database } = command(words);
       let first: string | undefined;
       for (const argv of forms(words)) {
         expect(await step(...argv), argv.join(' ')).toBe(0);
@@ -410,7 +411,58 @@ describe('cli', () => {
         expect(first).toContain(description);
       }
       for (const { name } of args) expect(first).toContain(name);
+      for (const note of notes ?? []) expect(first).toContain(note);
       expect(first).toContain({ none: 'creates the database', readonly: 'read-only', change: 'changes the review database' }[database]);
+    });
+
+    it('keeps the generated Command reference in README.md in exact sync with the help catalog', async () => {
+      const readmePath = join(import.meta.dirname, '..', 'README.md');
+      const readme = (await readFile(readmePath, 'utf8')).replaceAll('\r\n', '\n');
+      const start = readme.indexOf(BEGIN_COMMAND_REFERENCE);
+      const end = readme.indexOf(END_COMMAND_REFERENCE);
+
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
+      const between = readme.slice(start + BEGIN_COMMAND_REFERENCE.length + 1, end - 1);
+      const expected = renderCommandReferenceMarkdown();
+      expect(between).toBe(expected);
+      expect(syncReadmeCommandReference(readme)).toBe(readme);
+
+      for (const cmd of COMMANDS) {
+        expect(expected, cmd.words).toContain(`**\`${cmd.words}\`**:`);
+        expect(expected, cmd.words).toContain(synopsis(cmd));
+        expect(expected, cmd.words).toContain(cmd.example);
+        for (const note of cmd.notes ?? []) expect(expected, cmd.words).toContain(note);
+      }
+
+      expect(command('link own').args[1]?.description).toBe('the comment: r544830 or c623843');
+      expect(command('link note').args[0]?.description).toBe('the comment: r544830 or c623843');
+      expect(command('link duplicate').args[1]?.description).toBe('the comment or check annotation: r544830, c623843 or a3f9c2d1e');
+      expect(command('link remove').args[0]?.description).toBe('the comment or check annotation: r544830, c623843 or a3f9c2d1e');
+
+      const proseOutsideCode = expected
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/(`+)[\s\S]*?\1/g, '');
+      expect(proseOutsideCode).not.toMatch(/<[A-Za-z0-9_.:/|+-]+(?: [A-Za-z0-9_.:/|+-]+)*>/);
+    });
+
+    it('replaces stale content between the README command-reference markers and rejects missing markers', () => {
+      const stale = `# Title\n\n${BEGIN_COMMAND_REFERENCE}\nstale text\n${END_COMMAND_REFERENCE}\n\n## Next\n`;
+      const synced = syncReadmeCommandReference(stale);
+      expect(synced).toBe(`# Title\n\n${BEGIN_COMMAND_REFERENCE}\n${renderCommandReferenceMarkdown()}\n${END_COMMAND_REFERENCE}\n\n## Next\n`);
+      expect(syncReadmeCommandReference(stale.replaceAll('\n', '\r\n'))).toBe(synced.replaceAll('\n', '\r\n'));
+
+      const mixedPrefix = `# Prefix\r\nLine 2\n${BEGIN_COMMAND_REFERENCE}`;
+      const mixedSuffix = `${END_COMMAND_REFERENCE}\nFooter 1\r\nFooter 2`;
+      const mixedSynced = syncReadmeCommandReference(`${mixedPrefix}\r\nstale\r\n${mixedSuffix}`);
+      expect(mixedSynced.startsWith(`${mixedPrefix}\r\n`)).toBe(true);
+      expect(mixedSynced.endsWith(`\r\n${mixedSuffix}`)).toBe(true);
+
+      expect(() => syncReadmeCommandReference('# No markers\n')).toThrow(`missing ${BEGIN_COMMAND_REFERENCE} in README.md`);
+      expect(() => syncReadmeCommandReference(`# Half\n${BEGIN_COMMAND_REFERENCE}\n`)).toThrow(`missing ${END_COMMAND_REFERENCE} in README.md`);
+      expect(() => syncReadmeCommandReference(`${END_COMMAND_REFERENCE}\n${BEGIN_COMMAND_REFERENCE}\n`)).toThrow(
+        `missing ${END_COMMAND_REFERENCE} in README.md`,
+      );
     });
 
     it('is not held up by a mistake in the rest of the command line, by a missing database or by a bad --db', async () => {

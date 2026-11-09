@@ -4,10 +4,22 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import type { ParseArgsOptionsConfig } from 'node:util';
 import { isLinkRef } from './comment-ref.ts';
 import { downloadPullRequest, withWorkingToken } from './download.ts';
 import { resolveRevision } from './git-revision.ts';
+import {
+  COMMAND_SPECS,
+  HELP,
+  OPTIONS,
+  groupHint,
+  optionText,
+  showHelp,
+  synopsis,
+  topicOf,
+  unknownCommand,
+  usageError,
+} from './help-catalog.ts';
+import type { ArgSpec, CommandSpec, CommandWords, OptionSpec } from './help-catalog.ts';
 import { findUnknownAuthors, findUnknownRefs, renderMarkdown } from './markdown.ts';
 import type { PullRequestData } from './model.ts';
 import { formatPullRequestUrl, parsePullRequestUrl, type PullRequestRef } from './pr-url.ts';
@@ -601,384 +613,41 @@ async function dumpReview({ env }: Context, db: string): Promise<number> {
   return 0;
 }
 
-export interface OptionSpec {
-  name: string;
-  value?: string;
-  description: string;
-  repeatable?: boolean;
-  required?: boolean;
-}
+export type { ArgSpec, OptionSpec };
+export { synopsis };
 
-export interface ArgSpec {
-  name: string;
-  description: string;
-}
-
-export interface Command {
-  words: string;
-  summary: string;
-  description: string;
-  args: ArgSpec[];
-  options: OptionSpec[];
-  oneOf?: [string, string];
-  database: 'none' | 'readonly' | 'change';
-  example: string;
+export interface Command extends CommandSpec {
   run: (context: Context, db: string) => Promise<Outcome>;
 }
 
-type HelpSpec = Omit<Command, 'database' | 'run'> & { database: Command['database'] | 'unused' };
-
-const arg = (name: string, description: string): ArgSpec => ({ name, description });
-const flag = (name: string, description: string): OptionSpec => ({ name, description });
-const opt = (name: string, value: string, description: string, extra?: { repeatable?: boolean; required?: boolean }): OptionSpec => ({
-  name,
-  value,
-  description,
-  ...extra,
-});
-const reqOpt = (name: string, value: string, description: string): OptionSpec => ({ name, value, description, required: true });
-
-const jsonOption = (what: string): OptionSpec => flag('json', `print ${what} as JSON`);
-const noteOption = (what = 'why'): OptionSpec => opt('note', '<text>', what);
-const roundOption = opt('round', '<n>', 'write "Round <n>: " at the start of the Updates entry (a round that was opened)');
-const descriptionFileOption = (what: string): OptionSpec =>
-  reqOpt('description-file', '<file|->', `${what}, read from a UTF-8 file or from standard input (-)`);
-const postOptions: OptionSpec[] = [
-  flag('by-agent', 'start the comment with a line saying an agent wrote it'),
-  flag('now', 'publish immediately instead of adding to your pending review'),
-  flag('dry-run', 'check everything and say what would happen, without writing anything'),
-];
-const DB_OPTION = reqOpt('db', '<file.sqlite>', 'the review database');
-
-const REVISIONS =
-  'A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the short hash (at least 8 characters) of the commit.';
-const FINDING = arg('<finding>', 'the finding, such as F7 (any case)');
-const COMMENT_REF = arg('<ref>', 'the comment or check annotation: r544830, c623843 or a3f9c2d1e');
-const LOGGED = 'A change is logged under the Updates of the finding, with the time.';
-
-function def(
-  words: string,
-  summary: string,
-  description: string,
-  run: (context: Context, db: string) => Promise<Outcome>,
-  spec: {
-    args?: ArgSpec[];
-    options?: OptionSpec[];
-    oneOf?: [string, string];
-    database?: Command['database'];
-    example?: string;
-  } = {},
-): Command {
-  const { args = [], options = [], oneOf, database = 'change', example } = spec;
-  const baseExample = `pr-comments ${words}${example ? ` ${example}` : ''}`;
-  return {
-    words,
-    summary,
-    description,
-    args,
-    options: database === 'none' ? options : [...options, DB_OPTION],
-    ...(oneOf ? { oneOf } : {}),
-    database,
-    example: database === 'none' ? baseExample : `${baseExample} --db review.sqlite`,
-    run,
-  };
-}
-
-export const COMMANDS: Command[] = [
-  def('init', 'creates the review database',
-    'Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.\n' +
-      'It never replaces an existing database or report file. The report (markdown) is written next to the database (<stem>.md) and updated on every change.',
-    initReview, {
-      args: [arg('<name>', 'what is under review; the title of the report (a slug of it names the files by default)')],
-      options: [
-        opt('pr', '<url>', 'connect the review to this pull request'),
-        opt('db', '<file.sqlite>', 'the database (.sqlite) to create (default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.sqlite at the git root)'),
-      ],
-      database: 'none',
-      example: '"PR 42 tenant registry" --pr https://github.com/acme/widgets/pull/42',
-    }),
-  def('pr connect', 'connects the review to its pull request',
-    'Another pull request is refused once the review has links to the comments of this one.\n' +
-      'Connecting the review to a different pull request drops the downloaded data of the old one; run "pr-comments pr sync --db <file.sqlite>" next.',
-    connectReview, { args: [arg('<url>', 'the URL of the pull request')], example: 'https://github.com/acme/widgets/pull/42' }),
-  def('pr show', 'shows the connected pull request and when it was synced',
-    'Prints the connected pull request and, when it was downloaded, when, its head commit and how much of it the database holds.',
-    showPullRequest, { options: [jsonOption('the status')], database: 'readonly' }),
-  def('pr sync', 'downloads the connected pull request into the database',
-    'Downloads the comments, reviews, threads and check annotations of the connected pull request from GitHub and stores\n' +
-      'them in the database, replacing what the last sync stored. A comment that a link points at is kept, marked as gone,\n' +
-      'when GitHub no longer has it.',
-    syncPullRequest),
-  def('round open', 'opens a round (the revision reviewed and its base)',
-    `Records a new round under Reviewed: the revision that is reviewed and the base it is compared with.\n${REVISIONS}`,
-    openReviewRound, {
-      options: [
-        opt('revision', '<rev>', 'the revision reviewed (default: HEAD)'),
-        opt('base', '<rev>', 'the revision the round is compared with'),
-        flag('no-base', 'there is no base: the code is reviewed as it stands'),
-        noteOption('a note for the round, where the scope or other context of the review can be written, such as "scope: src/ only"'),
-      ],
-      oneOf: ['base', 'no-base'],
-      example: '--base origin/main',
-    }),
-  def('round update', 'adds a note to a round',
-    'Appends a note (such as "no findings" after an empty pass) to a round under Reviewed.',
-    updateReviewRound, {
-      args: [arg('<text>', 'the note, one line')],
-      options: [opt('round', '<n>', 'the round to update (default: the latest round)')],
-      example: '"no findings"',
-    }),
-  def('finding add', 'adds a finding',
-    'Adds a finding, opened by the update "Round <n>: raised" of the latest round, so a round must be open.',
-    addReviewFinding, {
-      options: [
-        reqOpt('severity', '<high|medium|low>', 'the severity'),
-        reqOpt('title', '<text>', 'the title, one line'),
-        descriptionFileOption('the description'),
-        flag('unverified', 'open the finding as unverified instead of awaiting triage'),
-        noteOption('a note for the opening update'),
-        flag('json', 'print {"id": "F7"} instead of "Added F7"'),
-      ],
-      example: '--severity high --title "Missing timeout" --description-file description.md',
-    }),
-  def('finding list', 'lists the findings',
-    'Lists the findings of the review, one line each, and how many of them there are. The criteria are anded.',
-    listFindings, {
-      options: [
-        opt('state', '<state>', 'only findings in this state: awaiting, unverified, approved, fixed, discarded, deferred or improvement'),
-        opt('severity', '<severity>', 'only findings of this severity: high, medium or low'),
-        flag('unposted', 'only findings that have no comment of their own on the pull request yet'),
-        jsonOption('the findings as an array'),
-      ],
-      database: 'readonly',
-      example: '--state approved --unposted',
-    }),
-  def('finding show', 'shows one finding with its updates',
-    'Prints the finding, the comments linked to it and its Updates.',
-    showFinding, { args: [FINDING], options: [jsonOption('the finding, its evidence and its links')], database: 'readonly', example: 'F7' }),
-  def('finding set-state', 'moves a finding to another state',
-    `Moves the finding to another state. ${LOGGED}\nThe state fixed needs the revision that fixes it.\n${REVISIONS}`,
-    setFindingState, {
-      args: [FINDING, arg('<state>', 'awaiting, unverified, approved, fixed, discarded, deferred or improvement')],
-      options: [opt('revision', '<rev>', 'the revision the change is about'), noteOption(), roundOption],
-      example: 'F7 fixed --revision HEAD',
-    }),
-  def('finding set-severity', 'changes the severity of a finding', `Changes the severity of the finding. ${LOGGED}`,
-    setFindingSeverity, { args: [FINDING, arg('<severity>', 'high, medium or low')], options: [noteOption(), roundOption], example: 'F7 medium' }),
-  def('finding set-title', 'changes the title of a finding', `Changes the title of the finding. ${LOGGED}`,
-    setFindingTitle, { args: [FINDING, arg('<title>', 'the new title, one line')], options: [noteOption(), roundOption], example: 'F7 "Missing retry timeout"' }),
-  def('finding set-description', 'replaces the description of a finding', `Replaces the description of the finding with the new text. ${LOGGED}`,
-    setFindingDescription, { args: [FINDING], options: [descriptionFileOption('the new description'), noteOption(), roundOption], example: 'F7 --description-file -' }),
-  def('finding update', 'adds an update to a finding', 'Adds a free-form entry to the Updates of the finding: a question, a verdict, a note.',
-    updateFinding, { args: [FINDING, arg('<text>', 'the update')], options: [roundOption], example: 'F7 "Asked the author" --round 1' }),
-  def('finding post', 'publishes the comment of a finding',
-    'Publishes the comment of one finding, in any state, to the connected pull request (to your pending review unless --now) and\n' +
-      'links it to the finding as its own comment. Run again, it updates that comment. Without --dry-run the returned comment ref\n' +
-      'and link are recorded in the database; run "pr-comments pr sync --db <file.sqlite>" to refresh the full pull request snapshot.',
-    postReviewFinding, {
-      args: [FINDING],
-      options: [
-        opt('anchor', '<n>', 'use the n-th path:lines anchor of the description (default: 1)'),
-        opt('commit', '<sha>', 'pin the comment to this commit, 7-40 hex digits (default: the head of the pull request)'),
-        ...postOptions,
-        jsonOption('the result, the anchors and the text'),
-      ],
-      example: 'F7 --dry-run',
-    }),
-  def('link pending', 'lists the comments and check annotations not linked yet',
-    'Prints one line per comment or check annotation of the synced pull request that no link names: ref, author, place and\n' +
-      'an excerpt. Nothing is printed when everything is processed. Replies are not listed; their thread is the root comment.\n' +
-      'It exits with 0 whenever it ran: pending work is not a failure.',
-    listPending, { options: [jsonOption('the items as an array ([] when there are none)')], database: 'readonly' }),
-  def('link own', 'links a comment as the own comment of a finding',
-    'Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.',
-    linkOwnComment, { args: [FINDING, COMMENT_REF], options: [noteOption()], example: 'F7 r544861' }),
-  def('link duplicate', 'links a comment or check annotation about the same issue',
-    'Links a comment or a check annotation as a duplicate of the finding (a finding may have several).',
-    linkDuplicateComment, { args: [FINDING, COMMENT_REF], options: [noteOption()], example: 'F7 c623843' }),
-  def('link note', 'records that a comment is not a finding, and why',
-    'Records that the comment is no finding, with the reason. A check annotation cannot be a note.',
-    linkNoteComment, { args: [COMMENT_REF, arg('<text>', 'the reason, one line')], example: 'c623843 "a bot, not a finding"' }),
-  def('link remove', 'removes the link of a comment or check annotation',
-    'Removes the link of the comment, whatever its role; the comment is pending again.',
-    unlinkComment, { args: [COMMENT_REF], options: [noteOption()], example: 'r544861' }),
-  def('link reply', 'answers a duplicate with "Duplicate of <link>."',
-    'Answers a comment that is linked as a duplicate of a finding with "Duplicate of <link to the own comment of the finding>."\n' +
-      'in your pending review, and records the returned reply ref and update in the database (run "pr-comments pr sync --db <file.sqlite>"\n' +
-      'to refresh the full pull request snapshot). A conversation comment can only be answered at once, so it needs --now. The thread\n' +
-      'is never resolved by the tool.',
-    replyToLinked, {
-      args: [arg('<ref>', 'the comment that is linked as a duplicate: r544830 or c623843')],
-      options: [...postOptions, jsonOption('the result and the text')],
-      example: 'c623843 --dry-run',
-    }),
-  def('report render', 'writes the review report',
-    'Writes the markdown report of the review, made from the database, and says whether the file was created, updated or\n' +
-      'left unchanged. It writes the report only, never the database, and never over a SQLite file.',
-    renderReview, { options: [opt('out', '<file.md>', 'the report file (default: next to the database, <stem>.md)')], database: 'readonly' }),
-  def('report comments', 'writes the pull request conversation as markdown',
-    'Writes the downloaded pull request (reviews, threads, comments and the Checks section) as markdown, to the\n' +
-      'screen unless --out is given. Run "pr-comments pr sync --db <file.sqlite>" first.',
-    renderComments, {
-      options: [
-        opt('author', '<login>', 'only comments and reviews by this user (several logins comma-separated); a check annotation counts for its app', { repeatable: true }),
-        opt('ref', '<ref>', 'only these comments or check annotations (several refs comma-separated); a review comment includes its thread', { repeatable: true }),
-        flag('pending', 'only comments and check annotations that no link names yet'),
-        opt('out', '<file.md>', 'write the markdown to this file'),
-      ],
-      database: 'readonly',
-      example: '--author alice --out pr-42.md',
-    }),
-  def('report dump', 'prints the review as text, for git diffs',
-    'Prints the review as text: the findings, the rounds, the links and the pull request URL, not the downloaded comments.\n' +
-      'As a git textconv: git config diff.review.textconv "pr-comments report dump --db"',
-    dumpReview, { database: 'readonly' }),
-];
-
-const GROUPS: Record<string, string> = {
-  pr: 'the pull request of the review',
-  round: 'the rounds of the review',
-  finding: 'the findings',
-  link: 'the links between findings and the comments of the pull request',
-  report: 'what is made from the database',
+const HANDLERS: Record<CommandWords, Command['run']> = {
+  init: initReview,
+  'pr connect': connectReview,
+  'pr show': showPullRequest,
+  'pr sync': syncPullRequest,
+  'round open': openReviewRound,
+  'round update': updateReviewRound,
+  'finding add': addReviewFinding,
+  'finding list': listFindings,
+  'finding show': showFinding,
+  'finding set-state': setFindingState,
+  'finding set-severity': setFindingSeverity,
+  'finding set-title': setFindingTitle,
+  'finding set-description': setFindingDescription,
+  'finding update': updateFinding,
+  'finding post': postReviewFinding,
+  'link pending': listPending,
+  'link own': linkOwnComment,
+  'link duplicate': linkDuplicateComment,
+  'link note': linkNoteComment,
+  'link remove': unlinkComment,
+  'link reply': replyToLinked,
+  'report render': renderReview,
+  'report comments': renderComments,
+  'report dump': dumpReview,
 };
 
-const optionText = ({ name, value }: OptionSpec) => (value === undefined ? `--${name}` : `--${name} ${value}`);
-const commandLabel = (command: Pick<HelpSpec, 'words' | 'args'>) => [command.words, ...command.args.map(({ name }) => name)].join(' ');
-
-export function synopsis(command: Pick<HelpSpec, 'words' | 'args' | 'options' | 'oneOf'>): string {
-  const opts = command.options.flatMap((option) => {
-    if (command.oneOf?.[1] === option.name) return [];
-    if (command.oneOf?.[0] === option.name) {
-      const other = command.options.find(({ name }) => name === command.oneOf![1])!;
-      return [`(${optionText(option)} | ${optionText(other)})`];
-    }
-    const text = option.required ? optionText(option) : `[${optionText(option)}]`;
-    return [option.repeatable ? `${text}...` : text];
-  });
-  return ['pr-comments', commandLabel(command), ...opts].join(' ');
-}
-
-function columns(rows: [string, string][]): string[] {
-  const width = Math.max(0, ...rows.map(([left]) => left.length));
-  return rows.map(([left, right]) => `  ${left.padEnd(width)}  ${right}`.trimEnd());
-}
-
-const HELP: HelpSpec = {
-  words: 'help',
-  summary: 'prints the help of a command or of a group',
-  description:
-    'Prints the overview of the commands; or the commands of a group, such as "finding"; or the help of one command.\n' +
-    '"pr-comments <command> --help" prints the same.',
-  args: [arg('[<command>]', 'the words of a command or group, such as "finding" or "finding set-state"')],
-  options: [],
-  database: 'unused',
-  example: 'pr-comments help finding set-state',
-};
-
-function commandHelp(command: HelpSpec): string {
-  const optionRows = command.options.map((option): [string, string] => [
-    optionText(option),
-    `${option.description}${option.repeatable ? '; may be repeated' : ''}`,
-  ]);
-  const dryRun = command.options.some(({ name }) => name === 'dry-run') ? ', except in a dry run' : '';
-  const database = {
-    unused: 'It does not use a database.',
-    none: 'It creates the database and works on no existing one.',
-    readonly: 'It opens the review database read-only and changes nothing in it.',
-    change: `It changes the review database and says which one on stderr ("Review database: <path>")${dryRun}.`,
-  }[command.database];
-  return `${[
-    `pr-comments ${command.words}: ${command.summary}`,
-    '',
-    `Usage: ${synopsis(command)}`,
-    '',
-    command.description,
-    '',
-    ...(command.args.length > 0 ? ['Arguments:', ...columns(command.args.map(({ name, description }) => [name, description])), ''] : []),
-    ...(optionRows.length > 0 ? ['Options:', ...columns(optionRows), ''] : []),
-    database,
-    '',
-    'Example:',
-    `  ${command.example}`,
-  ].join('\n')}\n`;
-}
-
-const inGroup = (group: string) => COMMANDS.filter(({ words }) => words.startsWith(`${group} `));
-
-function groupHelp(group: string): string {
-  return `${[
-    `pr-comments ${group}: ${GROUPS[group]}`,
-    '',
-    'Commands:',
-    ...columns(inGroup(group).map((command) => [commandLabel(command), command.summary])),
-    '',
-    `Run "pr-comments ${group} <command> --help" for the options and an example of a command.`,
-  ].join('\n')}\n`;
-}
-
-function overviewHelp(): string {
-  const sections: [string, Command[]][] = [
-    ['Start a review:', COMMANDS.filter(({ words }) => !words.includes(' '))],
-    ...Object.entries(GROUPS).map(([group, summary]): [string, Command[]] => [`${group} (${summary}):`, inGroup(group)]),
-  ];
-  const width = Math.max(...COMMANDS.map((command) => commandLabel(command).length));
-  return `${[
-    'pr-comments keeps the review of a GitHub pull request in one SQLite database: the findings, their links to the',
-    'comments of the pull request, and the downloaded pull request itself.',
-    '',
-    'Usage: pr-comments <command> [options]',
-    '',
-    ...sections.flatMap(([title, commands]) => [
-      title,
-      ...commands.map((command) => `  ${commandLabel(command).padEnd(width)}  ${command.summary}`),
-      '',
-    ]),
-    'Run "pr-comments <command> --help" (or "pr-comments help <command>") for the options and an example of a command.',
-    'Every command but init works on the review database named by --db <file.sqlite>. "pr-comments --version" prints the version.',
-  ].join('\n')}\n`;
-}
-
-type Topic =
-  | { kind: 'command'; command: Command }
-  | { kind: 'help' }
-  | { kind: 'group'; group: string }
-  | { kind: 'unknown'; text: string; group?: string };
-
-function topicOf(words: string[]): Topic {
-  if (words[0] === HELP.words) return { kind: 'help' };
-  const command = COMMANDS.find((candidate) => candidate.words.split(' ').every((word, at) => words[at] === word));
-  if (command) return { kind: 'command', command };
-  const [first = '', second] = words;
-  if (!Object.hasOwn(GROUPS, first)) return { kind: 'unknown', text: first };
-  return second === undefined ? { kind: 'group', group: first } : { kind: 'unknown', text: `${first} ${second}`, group: first };
-}
-
-const groupHint = (group?: string) =>
-  group === undefined ? 'Run "pr-comments help" for the commands.' : `Run "pr-comments ${group} --help" for the commands of the group.`;
-
-const unknownCommand = (text: string, group?: string) => new Error(`unknown command "${text}"\n${groupHint(group)}`);
-
-const usageError = (command: HelpSpec, message: string) =>
-  new Error(`${message}\nUsage: ${synopsis(command)}\nRun "pr-comments ${command.words} --help" for details.`);
-
-function showHelp(env: CliEnvironment, words: string[], ignoreRest = false): number {
-  if (words.length === 0) {
-    env.print(overviewHelp());
-    return 0;
-  }
-  const topic = topicOf(words);
-  if (topic.kind === 'group') env.print(groupHelp(topic.group));
-  else if (topic.kind === 'help' && (words.length === 1 || ignoreRest)) env.print(commandHelp(HELP));
-  else if (topic.kind === 'command' && (words.length === topic.command.words.split(' ').length || ignoreRest)) env.print(commandHelp(topic.command));
-  else throw unknownCommand(words.join(' '), topic.kind === 'unknown' ? topic.group : undefined);
-  return 0;
-}
-
-const OPTIONS: ParseArgsOptionsConfig = { help: { type: 'boolean', short: 'h' } };
-for (const { name, value, repeatable } of COMMANDS.flatMap((command) => command.options)) {
-  OPTIONS[name] = { type: value === undefined ? 'boolean' : 'string', ...(repeatable ? { multiple: true } : {}) };
-}
+export const COMMANDS: Command[] = COMMAND_SPECS.map((spec) => ({ ...spec, run: HANDLERS[spec.words] }));
 
 // Refuses Node 22.13–24.14 after `node:sqlite` has loaded (older Node versions fail at module load on `node:sqlite`).
 export function checkNodeVersion(version: string = process.versions.node): void {
@@ -1009,9 +678,9 @@ export async function run(argv: string[], env: CliEnvironment = defaultEnvironme
   const { values, positionals, tokens } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: false, tokens: true });
   const options = tokens.filter((token) => token.kind === 'option');
   if (options.some((token) => token.name === 'help' && (argv[token.index] === '-h' || argv[token.index] === '--help'))) {
-    return showHelp(env, positionals, true);
+    return showHelp(env.print, positionals, true);
   }
-  const topic = topicOf(positionals);
+  const topic = topicOf(positionals, COMMANDS);
   const onError =
     topic.kind === 'command'
       ? (message: string) => usageError(topic.command, message)
@@ -1033,12 +702,12 @@ export async function run(argv: string[], env: CliEnvironment = defaultEnvironme
 
   if (topic.kind === 'help') {
     if (options[0]) throw onError(`--${options[0].name} does not apply to help`);
-    return showHelp(env, positionals.slice(1));
+    return showHelp(env.print, positionals.slice(1));
   }
   if (positionals.length === 0) throw onError('Usage: pr-comments <command> [options]');
   if (topic.kind === 'group') {
     if (options[0]) throw onError(`--${options[0].name} does not apply to the ${topic.group} group`);
-    return showHelp(env, positionals);
+    return showHelp(env.print, positionals);
   }
   if (topic.kind === 'unknown') throw unknownCommand(topic.text, topic.group);
 

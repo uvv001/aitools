@@ -10,7 +10,8 @@ import { samplePullRequest } from '../src/fixtures.ts';
 import { renderMarkdown } from '../src/markdown.ts';
 import type { PullRequestData } from '../src/model.ts';
 import { VERSION } from '../src/version.ts';
-import { buildBundle, buildId } from './build.ts';
+import { BEGIN_COMMAND_REFERENCE, END_COMMAND_REFERENCE, renderCommandReferenceMarkdown } from '../src/help-catalog.ts';
+import { buildBundle, buildId, syncReadme } from './build.ts';
 
 const run = promisify(execFile);
 
@@ -322,5 +323,16 @@ describe('bundle', () => {
 
     await writeFile(join(pkgRoot, 'src.ts'), 'export const x = 2;\n', 'utf8');
     expect(buildId(pkgRoot)).toBe(`${head}-dirty`);
+  });
+
+  it('syncs a stale README command reference and skips writing when already in sync', async () => {
+    const readme = join(work, 'README.md');
+    await writeFile(readme, `# Demo\n\n${BEGIN_COMMAND_REFERENCE}\noutdated\n${END_COMMAND_REFERENCE}\n`, 'utf8');
+
+    expect(await syncReadme(readme)).toBe(true);
+    expect(await readFile(readme, 'utf8')).toBe(
+      `# Demo\n\n${BEGIN_COMMAND_REFERENCE}\n${renderCommandReferenceMarkdown()}\n${END_COMMAND_REFERENCE}\n`,
+    );
+    expect(await syncReadme(readme)).toBe(false);
   });
 });
