@@ -255,7 +255,7 @@ When multiple tokens are configured for a host and owner:
 
 ### Markdown report (`<stem>.md`)
 
-`report render` (and automatic post-mutation rendering) writes `<stem>.md` next to the SQLite database (or to `--out`). The report is strictly write-only: `pr-comments` never parses a Markdown report back into the database, and overwrites the file with LF line endings on every render. It refuses to overwrite a SQLite file or write to an `--out` path ending in `.sqlite`.
+`report render` (and automatic post-mutation rendering) writes `<stem>.md` next to the SQLite database. The report is strictly write-only: `pr-comments` never parses a Markdown report back into the database, and overwrites the file with LF line endings on every render. It refuses to overwrite a SQLite file.
 
 Report structure:
 

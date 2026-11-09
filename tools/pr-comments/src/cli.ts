@@ -526,8 +526,8 @@ async function replyToLinked({ env, args: [rawRef = ''], values }: Context, db: 
   return result.action === 'error' ? 1 : 0;
 }
 
-async function renderReview({ env, values }: Context, db: string): Promise<number> {
-  const { report, action } = await renderReportFile(db, { out: values.out });
+async function renderReview({ env }: Context, db: string): Promise<number> {
+  const { report, action } = await renderReportFile(db);
   env.print(`${action.padEnd(ACTION_WIDTH)} ${report}\n`);
   return 0;
 }

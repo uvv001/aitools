@@ -882,10 +882,9 @@ describe('cli', () => {
       it('work on a database that cannot be written at all', async () => {
         await chmod(review, 0o444);
         try {
-          for (const words of READONLY.filter((name) => name !== 'report render')) {
+          for (const words of READONLY) {
             expect(await step(...valid(words), '--db', review), words).toBe(0);
           }
-          expect(await step('report', 'render', '--db', review, '--out', join(work, 'out.md'))).toBe(0);
         } finally {
           await chmod(review, 0o666);
         }
@@ -1596,26 +1595,6 @@ describe('cli', () => {
         expect(printed).toBe(`updated   ${report()}\n`);
         expect(await readFile(report(), 'utf8')).toBe(renderReport((await loaded()).data));
         await expect(step('report', 'render', '--force')).rejects.toThrow(mistake('report render', 'unknown option --force'));
-      });
-
-      it('writes to --out instead, in a folder it creates, and names that file', async () => {
-        const out = join(work, 'reports', 'copy.md');
-
-        await step('report', 'render', '--out', out);
-
-        expect(printed).toBe(`created   ${out}\n`);
-        expect(await readFile(out, 'utf8')).toBe(renderReport((await loaded()).data));
-        expect(await exists(report())).toBe(false);
-      });
-
-      it('never writes over the database or a .sqlite path, and leaves the database as it was', async () => {
-        const before = await bytes();
-
-        await expect(step('report', 'render', '--out', review)).rejects.toThrow('refusing to write the report over the database');
-        await expect(step('report', 'render', '--out', join(docs, 'new.sqlite'))).rejects.toThrow('--out must be a report file, not a database');
-
-        expect((await bytes()).equals(before)).toBe(true);
-        expect(await exists(join(docs, 'new.sqlite'))).toBe(false);
       });
     });
 

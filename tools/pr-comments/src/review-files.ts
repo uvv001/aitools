@@ -346,23 +346,22 @@ export interface RenderResult {
   action: 'created' | 'updated' | 'unchanged';
 }
 
-// Writes the derived report, with LF line breaks and no BOM, to `out` or next to the database. The
-// database is only read. An existing file is overwritten whatever it holds, except a database: `out` may be neither
-// `dbPath` nor any other SQLite file, nor named `.sqlite`.
-export async function renderReportFile(dbPath: string, options: { out?: string } = {}): Promise<RenderResult> {
+// Writes the derived report, with LF line breaks and no BOM, next to the database. The
+// database is only read. An existing file is overwritten whatever it holds, except a database: the report path may
+// not be a SQLite file.
+export async function renderReportFile(dbPath: string): Promise<RenderResult> {
   const paths = reviewPaths(dbPath);
-  const target = options.out ?? paths.report;
-  refuseDatabase(target, paths.db);
+  refuseDatabase(paths.report, paths.db);
   const db = openReviewDb(paths.db, 'readonly');
   try {
     const rendered = renderReport(loadReview(db));
-    const current = await readExisting(target);
+    const current = await readExisting(paths.report);
     const action: RenderResult['action'] = current === rendered ? 'unchanged' : current === undefined ? 'created' : 'updated';
     if (action !== 'unchanged') {
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, rendered, 'utf8');
+      await mkdir(dirname(paths.report), { recursive: true });
+      await writeFile(paths.report, rendered, 'utf8');
     }
-    return { report: target, action };
+    return { report: paths.report, action };
   } finally {
     db.close();
   }

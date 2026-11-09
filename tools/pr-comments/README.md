@@ -452,11 +452,9 @@ pr-comments link reply c623843 --dry-run --db review.sqlite
 **`report render`**: writes the review report. Writes the markdown report of the review, made from the database, and says whether the file was created, updated or left unchanged. It overwrites the report each time (change the review with the commands, never in the markdown). It writes the report only, never the database, and never over a SQLite file.
 
 ```
-pr-comments report render [--out <file.md>] --db <file.sqlite>
+pr-comments report render --db <file.sqlite>
 pr-comments report render --db review.sqlite
 ```
-
-- `--out <file.md>`: the report file (default: next to the database, `<stem>`.md).
 
 **`report comments`**: writes the pull request conversation as markdown. Writes the downloaded pull request (reviews, threads, comments and the Checks section) as markdown, to the screen unless --out is given. Run "pr-comments pr sync --db `<file.sqlite>`" first.
 

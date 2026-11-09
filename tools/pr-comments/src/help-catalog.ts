@@ -346,7 +346,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
     'Writes the markdown report of the review, made from the database, and says whether the file was created, updated or\n' +
       'left unchanged. It overwrites the report each time (change the review with the commands, never in the markdown).\n' +
       'It writes the report only, never the database, and never over a SQLite file.',
-    { options: [opt('out', '<file.md>', 'the report file (default: next to the database, <stem>.md)')], database: 'readonly' },
+    { database: 'readonly' },
   ),
   spec(
     'report comments',

@@ -264,97 +264,15 @@ describe('renderReportFile', () => {
     expect(await renderReportFile(db)).toMatchObject({ action: 'unchanged' });
   });
 
-  it('overwrites any other file it is told to write to, whatever it holds', async () => {
-    const db = await sampleReview();
-    const other = await write('other.md', 'something else');
-    expect(await renderReportFile(db, { out: other })).toEqual({ report: other, action: 'updated' });
-    expect(await readFile(other, 'utf8')).toBe(sampleReport());
-  });
-
-  it('renders to another file and creates its folders, and leaves the report alone', async () => {
-    const db = await sampleReview();
-    const report = join(dir, 'r.md');
-    await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Changed' }, result: null }));
-    await writeFile(report, sampleReport(), 'utf8');
-    const out = join(dir, 'copies', 'copy.md');
-
-    expect(await renderReportFile(db, { out })).toEqual({ report: out, action: 'created' });
-    expect((await readFile(out, 'utf8')).startsWith('# Review — Changed\n')).toBe(true);
-    expect(await renderReportFile(db, { out })).toEqual({ report: out, action: 'unchanged' });
-    expect(await readFile(report, 'utf8')).toBe(sampleReport());
-
-    await writeFile(out, 'edited copy', 'utf8');
-    expect(await renderReportFile(db, { out })).toMatchObject({ action: 'updated' });
-  });
-
   it('only reads the database: the same bytes, nothing else in the folder', async () => {
     const db = await sampleReview();
     const before = await readFile(db);
 
     await renderReportFile(db);
-    await renderReportFile(db, { out: join(dir, 'copy.md') });
     await renderReportFile(db);
 
     expect((await readFile(db)).equals(before)).toBe(true);
-    expect(listing()).toEqual(['copy.md', 'r.md', 'r.sqlite']);
-  });
-});
-
-describe('renderReportFile and databases', () => {
-  let db: string;
-  let before: Buffer;
-
-  beforeEach(async () => {
-    db = await sampleReview();
-    before = await readFile(db);
-  });
-
-  const kept = async (path = db): Promise<boolean> => (await readFile(path)).equals(before);
-
-  it('refuses the database of the report as --out, however it is spelled', async () => {
-    const message = new Error(`refusing to write the report over the database ${db}`);
-    for (const out of [db, `${dir}${sep}sub${sep}..${sep}r.sqlite`]) {
-      await expect(renderReportFile(db, { out })).rejects.toThrow(message);
-    }
-    expect(await kept()).toBe(true);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
-  });
-
-  it('refuses another database, by its header and not by its name', async () => {
-    const copy = join(dir, 'copy.md');
-    await writeFile(copy, before);
-    const other = join(dir, 'other.txt');
-    const raw = new DatabaseSync(other);
-    raw.exec('CREATE TABLE pull_requests (id TEXT PRIMARY KEY)');
-    raw.close();
-    const otherBefore = await readFile(other);
-    const alias = join(dir, 'alias.md');
-    linkSync(db, alias);
-
-    for (const out of [copy, other, alias]) {
-      const message = new Error(`refusing to overwrite the SQLite database ${out} with a report`);
-      await expect(renderReportFile(db, { out })).rejects.toThrow(message);
-    }
-    expect(await kept()).toBe(true);
-    expect(await kept(copy)).toBe(true);
-    expect(await kept(alias)).toBe(true);
-    expect((await readFile(other)).equals(otherBefore)).toBe(true);
-  });
-
-  it('refuses an --out named .sqlite, whether it exists or not', async () => {
-    const text = await write('text.sqlite', 'not a database');
-    for (const out of [join(dir, 'new.sqlite'), join(dir, 'NEW.SQLite'), text]) {
-      await expect(renderReportFile(db, { out })).rejects.toThrow(new Error('--out must be a report file, not a database'));
-    }
-    expect(listing()).toEqual(['r.md', 'r.sqlite', 'text.sqlite']);
-    expect(await readFile(text, 'utf8')).toBe('not a database');
-    expect(await kept()).toBe(true);
-  });
-
-  it('does not take a text that merely starts like a database for one', async () => {
-    const out = await write('notes.md', 'SQLite format 3 is the header of a database file');
-    expect(await renderReportFile(db, { out })).toMatchObject({ action: 'updated' });
-    expect(await readFile(out, 'utf8')).toBe(sampleReport());
   });
 });
 
@@ -1649,7 +1567,6 @@ describe('the functions that only read', () => {
     ['loadSnapshot', (path) => loadSnapshot(path)],
     ['dumpReviewFile', (path) => dumpReviewFile(path)],
     ['renderReportFile', (path) => renderReportFile(path)],
-    ['renderReportFile to another file', (path) => renderReportFile(path, { out: join(dir, 'copy.md') })],
   ];
 
   it.each(READERS)('%s leaves the database bytes and the folder as they were', async (_name, read) => {
@@ -1658,7 +1575,7 @@ describe('the functions that only read', () => {
     await read(db);
 
     expect((await readFile(db)).equals(before)).toBe(true);
-    expect(listing().every((name) => ['copy.md', 'r.md', 'r.sqlite'].includes(name))).toBe(true);
+    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
   it.each(READERS)('%s fails on a missing database without creating one', async (_name, read) => {
