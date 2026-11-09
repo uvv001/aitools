@@ -765,14 +765,13 @@ const COMMAND_SPECS = [
 	}),
 	spec("report comments", "writes the pull request conversation as markdown", "Writes the downloaded pull request (reviews, threads, comments and the Checks section) as markdown, to the\nscreen unless --out is given. Run \"pr-comments pr sync --db <file.sqlite>\" first.", {
 		options: [
-			opt("author", "<login>", "only comments and reviews by this user (several logins comma-separated); a check annotation counts for its app", { repeatable: true }),
 			opt("ref", "<ref>", "only these comments or check annotations (several refs comma-separated); a review comment includes its thread", { repeatable: true }),
 			flag("pending", "only comments and check annotations that no link names yet"),
 			opt("out", "<file.md>", "write the markdown to this file")
 		],
 		notes: ["With `--ref` or `--pending`, review bodies are not shown. An unknown `--ref` gives a warning, and a malformed ref is an error.", "On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16."],
 		database: "readonly",
-		example: "--author alice --out pr-42.md"
+		example: "--pending --out pr-42.md"
 	}),
 	spec("report dump", "prints the review as text, for git diffs", "Prints the review as text: the findings, the rounds, the links and the pull request URL, not the downloaded comments.\nAs a git textconv: git config diff.review.textconv \"pr-comments report dump --db\"", { database: "readonly" })
 ];
@@ -1045,16 +1044,6 @@ function renderCheckRun(run) {
 		items.join(isTight ? "\n" : "\n\n")
 	].join("\n\n");
 }
-const normalizeLogin = (login) => login.toLowerCase().replace(/^@/, "").replace(/\[bot\]$/, "");
-function findUnknownAuthors(data, logins) {
-	const authors = [
-		...data.comments.map((c) => c.author),
-		...data.reviews.map((r) => r.author),
-		...(data.checkRuns ?? []).map((run) => run.app)
-	];
-	const known = new Set(authors.map(normalizeLogin));
-	return logins.filter((login) => !known.has(normalizeLogin(login)));
-}
 function findUnknownRefs(data, refs) {
 	const known = /* @__PURE__ */ new Set();
 	for (const comment of data.comments) {
@@ -1066,8 +1055,6 @@ function findUnknownRefs(data, refs) {
 }
 function renderMarkdown(data, options = {}) {
 	const { pullRequest: pr } = data;
-	const wanted = options.authors?.map(normalizeLogin);
-	const matches = (author) => wanted === void 0 || wanted.includes(normalizeLogin(author));
 	const wantedRefs = options.refs ? new Set(options.refs.map((r) => r.toLowerCase())) : void 0;
 	const pending = options.pendingRefs;
 	const matchesRef = (ref) => (wantedRefs === void 0 || ref !== void 0 && wantedRefs.has(ref)) && (pending === void 0 || ref !== void 0 && pending.has(ref));
@@ -1081,15 +1068,14 @@ function renderMarkdown(data, options = {}) {
 		`- Created: ${pr.createdAt}`,
 		`- Synced: ${pr.fetchedAt}`
 	];
-	if (options.authors) meta.push(`- Filter: only comments by ${options.authors.map((a) => `@${a}`).join(", ")}`);
 	if (options.refs) meta.push(`- Filter: only refs ${options.refs.map((r) => `\`${r.toLowerCase()}\``).join(", ")}`);
 	if (options.pendingRefs) meta.push("- Filter: only pending comments and check annotations");
 	out.push(meta.join("\n"));
-	const conversation = [...data.comments.filter((c) => c.kind === "issue" && matches(c.author) && matchesRef(commentRefFromUrl(c.url))).map((comment) => ({
+	const conversation = [...data.comments.filter((c) => c.kind === "issue" && matchesRef(commentRefFromUrl(c.url))).map((comment) => ({
 		at: comment.createdAt,
 		kind: "comment",
 		comment
-	})), ...wantedRefs === void 0 && pending === void 0 ? data.reviews.filter((r) => matches(r.author) && (r.state !== "COMMENTED" || r.body.trim() !== "")).map((review) => ({
+	})), ...wantedRefs === void 0 && pending === void 0 ? data.reviews.filter((r) => r.state !== "COMMENTED" || r.body.trim() !== "").map((review) => ({
 		at: review.submittedAt ?? "",
 		kind: "review",
 		review
@@ -1099,7 +1085,7 @@ function renderMarkdown(data, options = {}) {
 		thread,
 		comments: threadComments(thread)
 	})).filter((t) => {
-		if (!t.comments.some((c) => matches(c.author))) return false;
+		if (t.comments.length === 0) return false;
 		if (wantedRefs !== void 0 && !t.comments.some((c) => {
 			const ref = commentRefFromUrl(c.url);
 			return ref !== void 0 && wantedRefs.has(ref);
@@ -1110,14 +1096,13 @@ function renderMarkdown(data, options = {}) {
 		}
 		return true;
 	}).sort((a, b) => a.thread.path.localeCompare(b.thread.path) || (a.thread.line ?? a.thread.originalLine ?? 0) - (b.thread.line ?? b.thread.originalLine ?? 0) || (a.comments[0]?.createdAt ?? "").localeCompare(b.comments[0]?.createdAt ?? ""));
-	const checkRuns = (data.checkRuns ?? []).filter((run) => matches(run.app)).map((run) => wantedRefs === void 0 && pending === void 0 ? run : {
+	const checkRuns = (data.checkRuns ?? []).map((run) => wantedRefs === void 0 && pending === void 0 ? run : {
 		...run,
 		annotations: run.annotations.filter((a) => matchesRef(a.ref))
 	}).filter((run) => wantedRefs === void 0 && pending === void 0 || run.annotations.length > 0).sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
 	if (conversation.length > 0) out.push("## Conversation", conversation.map(renderConversationItem).join("\n\n"));
 	if (threads.length > 0) {
 		const isContext = (comment) => {
-			if (wanted !== void 0 && !matches(comment.author)) return true;
 			if (wantedRefs !== void 0) {
 				const ref = commentRefFromUrl(comment.url);
 				if (ref === void 0 || !wantedRefs.has(ref)) return true;
@@ -3930,7 +3915,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+49182a1`;
+	return `pr-comments ${VERSION}+6682d23`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4340,8 +4325,6 @@ async function renderReview({ env, values }, db) {
 	return 0;
 }
 async function renderComments({ env, values }, db) {
-	const authors = values.author?.flatMap((value) => value.split(/[\s,]+/)).filter(Boolean);
-	if (authors?.length === 0) throw new Error("--author needs at least one login");
 	const rawRefs = values.ref?.flatMap((value) => value.split(/[\s,]+/)).filter(Boolean);
 	if (rawRefs?.length === 0) throw new Error("--ref needs at least one ref");
 	const refs = rawRefs?.map((ref) => {
@@ -4355,10 +4338,8 @@ async function renderComments({ env, values }, db) {
 		links: (await loadReviewFile(db)).links,
 		data
 	}).map((item) => item.ref)) : void 0;
-	for (const login of findUnknownAuthors(data, authors ?? [])) env.warn(`Warning: no comments, reviews or check annotations by ${login} in this pull request\n`);
 	for (const ref of findUnknownRefs(data, refs ?? [])) env.warn(`Warning: no comment or check annotation ${ref} in this pull request\n`);
 	const markdown = renderMarkdown(data, {
-		authors,
 		refs,
 		pendingRefs
 	});
