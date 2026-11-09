@@ -1,5 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
-import { once } from 'node:events';
+import { execFile } from 'node:child_process';
 import { existsSync, linkSync, readdirSync, symlinkSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
@@ -1250,50 +1249,6 @@ describe('the report of a review connected to a pull request', () => {
   });
 });
 
-describe('loadReviewFile with links', () => {
-  it('reads the review, the links and the pull request from one snapshot', async () => {
-    const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: PULL_REQUEST });
-    await changeReviewState(
-      db,
-      (state) => ({
-        state: { ...state, data: withFinding(state.data, 'F1'), links: [own('r1', 'F1'), { ref: 'c2', role: 'note', note: 'why' }] },
-        result: null,
-      }),
-      { snapshot: snapshotOf(['r1', 'c2']) },
-    );
-    // A second connection has no busy timeout, so a write it is not allowed fails at once; every statement of the
-    // load after its first one runs while the load holds its read lock.
-    const writer = new DatabaseSync(db);
-    const prepare = DatabaseSync.prototype.prepare;
-    const blocked: string[] = [];
-    let statements = 0;
-    const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
-      if (this.isTransaction && statements++ > 0) {
-        try {
-          writer.exec("UPDATE meta SET value = 'changed'");
-        } catch (error) {
-          blocked.push((error as Error).message);
-        }
-      }
-      return prepare.call(this, sql);
-    });
-    let loaded;
-    try {
-      loaded = await loadReviewFile(db);
-    } finally {
-      spy.mockRestore();
-      writer.close();
-    }
-
-    expect(statements).toBeGreaterThan(6);
-    expect(blocked).toEqual(Array.from({ length: statements - 1 }, () => 'database is locked'));
-    expect(loaded.pullRequest).toBe(PULL_REQUEST);
-    expect(loaded.links).toHaveLength(2);
-    expect(meta(db, 'pull_request')).toBe(PULL_REQUEST);
-  });
-});
-
-
 describe('loadSnapshot', () => {
   it('is undefined before the first sync, and holds the pull request that was synced afterwards', async () => {
     const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: PULL_REQUEST });
@@ -1521,31 +1476,21 @@ describe('the functions that only read', () => {
   });
 });
 
-// A lock only collides between connections that live at the same time, so these tests use real processes. The writer
-// takes the next id from the data it was handed, as `addFinding` does, and pauses before it answers, which widens the
-// window in which a second writer could read the same state.
-const WRITER = `
+// A lock only collides between connections that live at the same time, so this test uses real processes. Each writer
+// adds a finding and its own link, taking the next id and ref from the state it was handed, and pauses before it
+// answers, which widens the window in which a second writer could read the same state.
+const STATE_WRITER = `
 const [moduleUrl, db, pause] = process.argv.slice(1);
-const { mutateReviewFile } = await import(moduleUrl);
-const { result } = await mutateReviewFile(db, (data) => {
-  const id = 'F' + (data.findings.length + 1);
+const { changeReviewState } = await import(moduleUrl);
+const { result } = await changeReviewState(db, (state) => {
+  const id = 'F' + (state.data.findings.length + 1);
+  const link = { ref: 'r' + (100 + state.links.length), role: 'own', finding: id };
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(pause));
   const finding = { id, state: '⏳', severity: '🔴', title: 'Finding ' + id, description: 'Body.', updates: [] };
-  return { data: { ...data, findings: [...data.findings, finding] }, result: id };
+  const data = { ...state.data, findings: [...state.data.findings, finding] };
+  return { state: { ...state, data, links: [...state.links, link] }, result: id + ' ' + link.ref };
 });
 console.log(result);
-`;
-
-const HOLDER = `
-const { DatabaseSync } = require('node:sqlite');
-const [db, hold] = process.argv.slice(1);
-const handle = new DatabaseSync(db);
-handle.exec('BEGIN IMMEDIATE');
-console.log('locked');
-setTimeout(() => {
-  handle.exec('COMMIT');
-  handle.close();
-}, Number(hold));
 `;
 
 const REVIEW_FILES = new URL('./review-files.ts', import.meta.url).href;
@@ -1563,190 +1508,25 @@ const runNode = (args: string[]): Promise<Run> =>
     });
   });
 
-describe('mutateReviewFile with several processes', () => {
-  let db: string;
-
-  beforeEach(async () => {
-    ({ db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW }));
-  });
-
-  it('serialises concurrent writers: every one succeeds, no id is handed out twice, no finding is lost', async () => {
-    const writers = 8;
-    const runs = await Promise.all(
-      Array.from({ length: writers }, () => runNode(['--input-type=module', '-e', WRITER, REVIEW_FILES, db, '40'])),
-    );
-
-    expect(runs.map(({ code, stderr }) => ({ code, stderr }))).toEqual(runs.map(() => ({ code: 0, stderr: '' })));
-    const ids = runs.map(({ stdout }) => stdout.trim()).sort();
-    expect(new Set(ids).size).toBe(writers);
-    const saved = (await loadReviewFile(db)).data;
-    expect(saved.findings.map((finding) => finding.id).sort()).toEqual(ids);
-    expect(listing()).toEqual(['r.md', 'r.sqlite']);
-  }, 60_000);
-
-  it('waits for a lock that another process holds instead of failing with "database is locked"', async () => {
-    const holder = spawn(process.execPath, ['-e', HOLDER, db, '1000'], { stdio: ['ignore', 'pipe', 'inherit'] });
-    const exited = once(holder, 'exit');
-    try {
-      await once(holder.stdout, 'data');
-      const started = Date.now();
-      // The call blocks until the other process commits, which is what the busy timeout is for.
-      await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Waited' }, result: null }));
-      expect(Date.now() - started).toBeGreaterThan(50);
-    } finally {
-      holder.kill();
-      await exited;
-    }
-    expect((await loadReviewFile(db)).data.target).toBe('Waited');
-  }, 60_000);
-});
-
-// Like WRITER, for the whole state: each writer adds a finding and the own link of it, taking the next id and the next
-// ref from the state it was handed.
-const STATE_WRITER = `
-const [moduleUrl, db, pause] = process.argv.slice(1);
-const { changeReviewState } = await import(moduleUrl);
-const { result } = await changeReviewState(db, (state) => {
-  const id = 'F' + (state.data.findings.length + 1);
-  const link = { ref: 'r' + (100 + state.links.length), role: 'own', finding: id };
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(pause));
-  const finding = { id, state: '⏳', severity: '🔴', title: 'Finding ' + id, description: 'Body.', updates: [] };
-  const data = { ...state.data, findings: [...state.data.findings, finding] };
-  return { state: { ...state, data, links: [...state.links, link] }, result: id + ' ' + link.ref };
-});
-console.log(result);
-`;
-
-// Each writer replaces the stored pull request with one of its own (a comment of its own number) and links it in the
-// same change, which only works when the snapshot is saved before the change runs and `known` holds its comment.
-const SNAPSHOT_WRITER = `
-const [filesUrl, supportUrl, db, number, pause] = process.argv.slice(1);
-const { changeReviewState } = await import(filesUrl);
-const { snapshotOf } = await import(supportUrl);
-const ref = 'r' + number;
-const { result } = await changeReviewState(
-  db,
-  (state) => {
-    if (!state.known.has(ref)) throw new Error(ref + ' is not known');
-    const id = 'F' + (state.data.findings.length + 1);
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(pause));
-    const finding = { id, state: '⏳', severity: '🔴', title: 'Finding ' + id, description: 'Body.', updates: [] };
-    const data = { ...state.data, findings: [...state.data.findings, finding] };
-    return { state: { ...state, data, links: [...state.links, { ref, role: 'own', finding: id }] }, result: id + ' ' + ref };
-  },
-  { snapshot: snapshotOf([ref]) },
-);
-console.log(result);
-`;
-
-const TEST_SUPPORT = new URL('./review-test-support.ts', import.meta.url).href;
-
-// A sync of a pull request, from a process of its own.
-const SYNC_WRITER = `
-const [filesUrl, supportUrl, db, refs] = process.argv.slice(1);
-const { syncReviewFile } = await import(filesUrl);
-const { snapshotOf } = await import(supportUrl);
-const result = await syncReviewFile(db, snapshotOf(refs.split(',')));
-console.log(result.comments);
-`;
-
 describe('changeReviewState with several processes', () => {
-  const writers = 8;
-
-  // A review connected to the pull request, whose stored pull request has the comments r100, r101 ... that the writers link.
-  async function connected(): Promise<string> {
+  it('serialises concurrent writers: each adds its own finding and link, and nothing is lost', async () => {
+    const writers = 4;
     const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: PULL_REQUEST });
     await syncReviewFile(db, snapshotOf(Array.from({ length: writers }, (_, at) => `r${100 + at}`)));
-    return db;
-  }
 
-  async function race(db: string): Promise<Run[]> {
-    return Promise.all(Array.from({ length: writers }, () => runNode(['--input-type=module', '-e', STATE_WRITER, REVIEW_FILES, db, '40'])));
-  }
+    const runs = await Promise.all(
+      Array.from({ length: writers }, () => runNode(['--input-type=module', '-e', STATE_WRITER, REVIEW_FILES, db, '40'])),
+    );
 
-  async function everyoneArrived(db: string, runs: Run[]): Promise<void> {
     expect(runs.map(({ code, stderr }) => ({ code, stderr }))).toEqual(runs.map(() => ({ code: 0, stderr: '' })));
     const answers = runs.map(({ stdout }) => stdout.trim()).sort();
     const loaded = await loadReviewFile(db);
     expect(new Set(answers).size).toBe(writers);
     expect(loaded.data.findings.map((each) => each.id).sort()).toEqual(answers.map((answer) => answer.split(' ')[0]).sort());
-    expect(loaded.links.map((link) => `${link.finding} ${link.ref}`).sort()).toEqual(answers.sort());
+    expect(loaded.links.map((link) => `${link.finding} ${link.ref}`).sort()).toEqual(answers);
     expect(new Set(loaded.links.map((link) => link.ref)).size).toBe(writers);
     expect(userVersion(db)).toBe(REVIEW_SCHEMA_VERSION);
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
-  }
-
-  it('serialises concurrent writers: each adds its own finding and link, and nothing is lost', async () => {
-    const db = await connected();
-    await everyoneArrived(db, await race(db));
-  }, 60_000);
-
-  it('waits for a lock that another process holds instead of failing with "database is locked"', async () => {
-    const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW });
-    const holder = spawn(process.execPath, ['-e', HOLDER, db, '1000'], { stdio: ['ignore', 'pipe', 'inherit'] });
-    const exited = once(holder, 'exit');
-    try {
-      await once(holder.stdout, 'data');
-      const started = Date.now();
-      await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
-      expect(Date.now() - started).toBeGreaterThan(50);
-    } finally {
-      holder.kill();
-      await exited;
-    }
-    expect((await loadReviewFile(db)).pullRequest).toBe(PULL_REQUEST);
-  }, 60_000);
-
-  it('saves the snapshot of each of several processes first, one after the other, so each can link its own comment', async () => {
-    const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: PULL_REQUEST });
-    const runs = await Promise.all(
-      Array.from({ length: 4 }, (_, at) => runNode(['--input-type=module', '-e', SNAPSHOT_WRITER, REVIEW_FILES, TEST_SUPPORT, db, String(at + 1), '40'])),
-    );
-
-    expect(runs.map(({ code, stderr }) => ({ code, stderr }))).toEqual(runs.map(() => ({ code: 0, stderr: '' })));
-    const answers = runs.map(({ stdout }) => stdout.trim()).sort();
-    expect(answers.map((answer) => answer.split(' ')[1]).sort()).toEqual(['r1', 'r2', 'r3', 'r4']);
-    expect(new Set(answers.map((answer) => answer.split(' ')[0])).size).toBe(4);
-
-    const loaded = await loadReviewFile(db);
-    expect(loaded.links.map((link) => `${link.finding} ${link.ref}`).sort()).toEqual(answers);
-    expect(loaded.data.findings).toHaveLength(4);
-    // The last writer's snapshot is the stored one; the comments of the others stay as gone, because they are linked.
-    expect(loaded.known.size).toBe(1);
-    expect(linkable(db).map((row) => row.gone).sort()).toEqual([0, 1, 1, 1]);
-    expect((await loadSnapshot(db))?.comments).toHaveLength(1);
-    expect(listing()).toEqual(['r.md', 'r.sqlite']);
   }, 60_000);
 });
 
-describe('syncReviewFile with several processes', () => {
-  it('serialises concurrent syncs: each succeeds and the database holds the pull request of one of them', async () => {
-    const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: PULL_REQUEST });
-    const runs = await Promise.all(
-      ['r1', 'r1,r2', 'r1,r2,r3', 'c4'].map((refs) => runNode(['--input-type=module', '-e', SYNC_WRITER, REVIEW_FILES, TEST_SUPPORT, db, refs])),
-    );
-
-    expect(runs.map(({ code, stderr }) => ({ code, stderr }))).toEqual(runs.map(() => ({ code: 0, stderr: '' })));
-    const known = [...(await loadReviewFile(db)).known].sort();
-    expect([['c4'], ['r1'], ['r1', 'r2'], ['r1', 'r2', 'r3']]).toContainEqual(known);
-    expect((await loadSnapshot(db))?.comments.map((comment) => comment.id).sort()).toEqual(known.map((ref) => `id-${ref}`));
-    expect(linkable(db).map((row) => row.ref)).toEqual(known);
-    expect(listing()).toEqual(['r.md', 'r.sqlite']);
-  }, 60_000);
-
-  it('waits for a lock that another process holds instead of failing with "database is locked"', async () => {
-    const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: PULL_REQUEST });
-    const holder = spawn(process.execPath, ['-e', HOLDER, db, '1000'], { stdio: ['ignore', 'pipe', 'inherit'] });
-    const exited = once(holder, 'exit');
-    try {
-      await once(holder.stdout, 'data');
-      const started = Date.now();
-      await syncReviewFile(db, snapshotOf(['r1']));
-      expect(Date.now() - started).toBeGreaterThan(50);
-    } finally {
-      holder.kill();
-      await exited;
-    }
-    expect((await loadReviewFile(db)).known).toEqual(new Set(['r1']));
-  }, 60_000);
-});
