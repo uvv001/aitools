@@ -2649,7 +2649,6 @@ function savePullRequest(db, data) {
 	};
 	const present = /* @__PURE__ */ new Map();
 	inTransaction(db, () => {
-		if (!db.prepare("PRAGMA table_info(pr_threads)").all().some(({ name }) => name === "original_start_line")) db.exec("ALTER TABLE pr_threads ADD COLUMN original_start_line INTEGER");
 		clearRows(db);
 		insert("pr_pull_requests", {
 			id: pr.id,
@@ -4054,7 +4053,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+31dc572`;
+	return `pr-comments ${VERSION}+2ac81c6`;
 }
 //#endregion
 //#region src/cli.ts
