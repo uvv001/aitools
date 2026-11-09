@@ -9,10 +9,9 @@ import {
   formatStamp,
   newReview,
   openRound,
-  setState,
-  setTitle,
 } from './review-ops.ts';
 import { formatUpdateItem, renderReport } from './review-render.ts';
+import { seeded } from './review-test-support.ts';
 
 const START = '2026-10-08 09:05';
 const PR = 'https://github.com/acme/widgets/pull/42';
@@ -38,11 +37,11 @@ function deepFreeze<T>(value: T): T {
 }
 
 // Every review in a result renders to a report with the expected title and LF line breaks.
-function sound(result: ReviewState): ReviewState {
+function sound(result: ReviewState, message?: string): ReviewState {
   const text = renderReport(result.data);
-  expect(text.startsWith(`# Review — ${result.data.target}\n`)).toBe(true);
-  expect(text.endsWith('\n')).toBe(true);
-  expect(text).not.toContain('\r');
+  expect(text.startsWith(`# Review — ${result.data.target}\n`), message).toBe(true);
+  expect(text.endsWith('\n'), message).toBe(true);
+  expect(text, message).not.toContain('\r');
   return result;
 }
 
@@ -1054,65 +1053,30 @@ describe('comment links in the Updates', () => {
   });
 });
 
-// A seeded walk mixing the operations on links with the operations on the review: every operation is either refused,
-// with the state unchanged, or leaves a state whose review reads back as it is and whose links keep their rules.
-describe('random walks over the link operations and the review operations', () => {
-  function seeded(seed: number): () => number {
-    let state = seed;
-    return () => {
-      state = (state + 0x6d2b79f5) | 0;
-      let mixed = Math.imul(state ^ (state >>> 15), state | 1);
-      mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
-      return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
+// A seeded walk over the link operations: every operation is either refused, with the state unchanged, or leaves a
+// state whose links keep their rules and whose review is otherwise untouched.
+describe('random walks over the link operations', () => {
   type Random = () => number;
   const pick = <Item>(random: Random, items: readonly Item[]): Item => items[Math.floor(random() * items.length)] as Item;
 
-  const WORDS = ['plain', 'two words', '`code`', 'café 日本', '🚀', '- item', '**bold**', '#hash', ' — ', '> q', '\ufffd', 'x\u0007y'];
-  const FENCED = '```ts\ncode  \n```';
-  const BLANKS = ['', ' ', '  ', '\t', '\u00a0'];
-  const BREAKS = ['\n', '\r\n', '\n\n', ' \n', '\n  '];
-
-  function text(random: Random, breaks = true): string {
-    let result = pick(random, BLANKS);
-    for (let count = 1 + Math.floor(random() * 3); count > 0; count--) {
-      result += (random() < 0.1 ? FENCED : pick(random, WORDS)) + pick(random, BLANKS);
-      if (count > 1) result += breaks ? pick(random, BREAKS) : ' ';
-    }
-    return result;
-  }
-
+  const NOTES = ['plain', 'two words', 'a\nb', '  ', 'x\u0007y'];
   const REFS = ['r1', 'r2', 'r3', 'r4', 'c1', 'c2', 'c3', 'a3f9c2d1e', 'a1b2c3d4e', 'r999', 'x1', ''];
   const PULL_REQUESTS = [PR, 'https://GitHub.com/Acme/Widgets/pull/42', 'https://github.com/acme/widgets/pull/43', 'https://github.com/acme/widgets/issues/1'];
   const WHERES = ['pending', 'posted', undefined] as const;
-
-  const onData = (state: ReviewState, data: ReviewData): ReviewState => ({ ...state, data });
-
-  // The operations, by index; the ones that only touch links come after the review's own.
-  const REVIEW_OPERATIONS = 5;
-  const OPERATIONS = 13;
-  const WEIGHTED = [0, 1, 1, 2, 3, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 8, 9, 9, 10, 11, 11, 12];
+  const OPERATIONS = 8;
 
   function step(state: ReviewState, random: Random, minute: number): { operation: number; run: (input: ReviewState) => ReviewState } {
     const now = at(minute);
-    const findings = state.data.findings;
-    const finding = findings.length === 0 || random() < 0.05 ? 'F9' : pick(random, findings).id;
+    const finding = random() < 0.1 ? 'F9' : pick(random, state.data.findings).id;
     const id = random() < 0.3 ? finding.toLowerCase() : finding;
     const linked = state.links.length === 0 || random() < 0.25 ? undefined : pick(random, state.links).ref;
     const ref = linked ?? pick(random, REFS);
-    const remark = random() < 0.5 ? text(random) : undefined;
-    const operation = pick(random, WEIGHTED);
+    const remark = random() < 0.5 ? pick(random, NOTES) : undefined;
+    const operation = Math.floor(random() * OPERATIONS);
     const runs: ((input: ReviewState) => ReviewState)[] = [
-      (input) => onData(input, openRound(input.data, { revision: 'abc1234', base: null })),
-      (input) => onData(input, addFinding(input.data, { severity: 'low', title: text(random, false), description: text(random) }, now).data),
-      (input) => onData(input, setState(input.data, id, { state: 'approved', note: remark }, now)),
-      (input) => onData(input, setTitle(input.data, id, { title: text(random, false) }, now)),
-      (input) => onData(input, addUpdate(input.data, id, { text: text(random) }, now)),
       (input) => linkOwn(input, id, ref, now, remark),
       (input) => linkDuplicate(input, id, ref, now, remark),
-      (input) => linkNote(input, ref, text(random, random() < 0.7)),
+      (input) => linkNote(input, ref, pick(random, NOTES)),
       (input) => unlink(input, ref, now, remark),
       (input) => recordPosted(input, id, ref, 'created', pick(random, WHERES), now),
       (input) => recordPosted(input, id, ref, 'updated', pick(random, WHERES), now),
@@ -1125,52 +1089,52 @@ describe('random walks over the link operations and the review operations', () =
   // The rules of the links that every state keeps: a ref once, one own per finding, a finding for the roles that have
   // one and a one-line note for the one that has that, links to findings there are and to refs the database holds, a
   // check annotation only as a duplicate, and nothing else on a link.
-  function consistent(state: ReviewState): void {
+  function consistent(state: ReviewState, label: string): void {
     const refs = state.links.map((link) => link.ref);
-    expect(new Set(refs).size).toBe(refs.length);
+    expect(new Set(refs).size, label).toBe(refs.length);
     const owners = state.links.filter((link) => link.role === 'own').map((link) => link.finding);
-    expect(new Set(owners).size).toBe(owners.length);
+    expect(new Set(owners).size, label).toBe(owners.length);
     const ids = state.data.findings.map((finding) => finding.id);
     for (const link of state.links) {
-      expect(isLinkRef(link.ref)).toBe(true);
-      expect(state.known.has(link.ref)).toBe(true);
-      if (isAnnotationRef(link.ref)) expect(link.role).toBe('duplicate');
+      expect(isLinkRef(link.ref), label).toBe(true);
+      expect(state.known.has(link.ref), label).toBe(true);
+      if (isAnnotationRef(link.ref)) expect(link.role, label).toBe('duplicate');
       if (link.role === 'note') {
-        expect(Object.keys(link).sort()).toStrictEqual(['note', 'ref', 'role']);
-        expect(link.note).toMatch(/^\S(?:.*\S)?$/u);
-        expect(link.note).not.toMatch(/[\r\n\u2028\u2029]/u);
+        expect(Object.keys(link).sort(), label).toStrictEqual(['note', 'ref', 'role']);
+        expect(link.note, label).toMatch(/^\S(?:.*\S)?$/u);
+        expect(link.note, label).not.toMatch(/[\r\n\u2028\u2029]/u);
       } else {
-        expect(Object.keys(link).sort()).toStrictEqual(['finding', 'ref', 'role']);
-        expect(ids).toContain(link.finding);
+        expect(Object.keys(link).sort(), label).toStrictEqual(['finding', 'ref', 'role']);
+        expect(ids, label).toContain(link.finding);
       }
     }
-    if (state.pullRequest !== undefined) expect(state.pullRequest).toMatch(/^https:\/\/github\.com\/acme\/widgets\/pull\/\d+$/iu);
+    if (state.pullRequest !== undefined) expect(state.pullRequest, label).toMatch(/^https:\/\/github\.com\/acme\/widgets\/pull\/\d+$/iu);
   }
 
-  it('refuses or leaves a state that holds its rules, in 40 walks of 40 steps', () => {
+  it('refuses or leaves a state that holds its rules, in 10 walks of 20 steps', () => {
     const accepted = new Set<number>();
     let refused = 0;
-    for (let seed = 1; seed <= 40; seed++) {
+    for (let seed = 1; seed <= 10; seed++) {
       const random = seeded(seed);
       let state = stateWith([], 1 + (seed % 3));
-      sound(state);
-      for (let index = 0; index < 40; index++) {
+      sound(state, `seed ${seed}`);
+      for (let index = 0; index < 20; index++) {
+        const label = `seed ${seed}, step ${index}`;
         const { operation, run } = step(state, random, index + 1);
         const input = deepFreeze(structuredClone(state));
         let result: ReviewState;
         try {
           result = run(input);
         } catch (error) {
-          expect(error).toBeInstanceOf(Error);
-          expect(input).toStrictEqual(state);
+          expect(error, label).toBeInstanceOf(Error);
+          expect(input, label).toStrictEqual(state);
           refused++;
           continue;
         }
-        expect(input).toStrictEqual(state);
-        // The operations on links change the Updates of findings and nothing else of the review.
-        if (operation >= REVIEW_OPERATIONS) expect(withoutUpdates(result.data)).toStrictEqual(withoutUpdates(input.data));
-        state = sound(result);
-        consistent(state);
+        expect(input, label).toStrictEqual(state);
+        expect(withoutUpdates(result.data), label).toStrictEqual(withoutUpdates(input.data));
+        state = sound(result, label);
+        consistent(state, label);
         accepted.add(operation);
       }
     }

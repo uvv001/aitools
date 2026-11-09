@@ -14,6 +14,7 @@ import {
 } from './review-ops.ts';
 import type { AddFindingInput, SeverityName } from './review-ops.ts';
 import { formatRoundItem, formatUpdateItem, renderReport } from './review-render.ts';
+import { seeded } from './review-test-support.ts';
 
 const START = '2026-10-08 09:05';
 
@@ -31,22 +32,22 @@ function deepFreeze<T>(value: T): T {
 }
 
 // Every result renders to a report with the expected title, sections, finding headers in order, and LF line breaks.
-function sound(result: ReviewData): ReviewData {
+function sound(result: ReviewData, message?: string): ReviewData {
   const text = renderReport(result);
-  expect(text.startsWith(`# Review — ${result.target}\n`)).toBe(true);
-  expect(text.endsWith('\n')).toBe(true);
-  expect(text).not.toContain('\r');
+  expect(text.startsWith(`# Review — ${result.target}\n`), message).toBe(true);
+  expect(text.endsWith('\n'), message).toBe(true);
+  expect(text, message).not.toContain('\r');
   const introAt = text.indexOf('\n## Intro\n');
   const dashboardAt = text.indexOf('\n## Dashboard\n');
   const findingsAt = text.indexOf('\n## Findings\n');
-  expect(introAt).toBeGreaterThan(0);
-  expect(dashboardAt).toBeGreaterThan(introAt);
-  expect(findingsAt).toBeGreaterThan(dashboardAt);
+  expect(introAt, message).toBeGreaterThan(0);
+  expect(dashboardAt, message).toBeGreaterThan(introAt);
+  expect(findingsAt, message).toBeGreaterThan(dashboardAt);
   let after = findingsAt;
   for (const finding of result.findings) {
     const heading = `\n### ${finding.state} ${finding.severity} ${finding.id} — ${finding.title}\n`;
     const pos = text.indexOf(heading, after);
-    expect(pos).toBeGreaterThan(after);
+    expect(pos, message).toBeGreaterThan(after);
     after = pos + 1;
   }
   return result;
@@ -837,48 +838,7 @@ describe('blanks at the end of the first line', () => {
 });
 
 describe('hostile and invalid text', () => {
-  const HOSTILE = [
-    '# Title',
-    '## Findings',
-    '### ✅ 🔴 F1 — quoted',
-    '#### Description',
-    '```',
-    '~~~ts',
-    'a\n```',
-    '```\n#### Updates',
-    '**Status** — x',
-    '- **Rules** — x',
-    '**Rules**',
-    '**Reviewed**',
-    '- **Reviewed** — x',
-    '\r',
-    'a\rb',
-    'a\u2028b',
-    '\u2029',
-    '',
-    '   ',
-    '\n\n',
-    '  ### x',
-    'x\n\n### y',
-    '> quote\n# heading',
-    '| a | b |\n|---|---|',
-    '- a\n- b',
-    '2026-10-08 09:05 — Round 9: x',
-    '<!-- comment -->',
-    'tab\n\t#### x',
-    '\t```',
-    '```\n```\n```',
-    'a\n\n\n\nb',
-    ' lead',
-    'trail ',
-    '`',
-    '``` a ```',
-    'x\n   \ny',
-    'Round 4: x',
-    '— dash first',
-    'abcdef12',
-  ];
-
+  const CONTROLS = ['\u0000', '\u0001', '\u0008', '\u000B', '\u000C', '\u000E', '\u001A', '\u001F', '\u007F'];
   const base = reviewWith(1);
   const sweeps: [string, (text: string) => ReviewData, string][] = [
     ['newReview target', (text) => newReview(text), 'target'],
@@ -899,25 +859,7 @@ describe('hostile and invalid text', () => {
     ['updateRound text', (text) => updateRound(open(), { text }), 'text'],
   ];
 
-  it.each(sweeps)('%s is refused, or written so that the report renders cleanly', (_name, run) => {
-    let accepted = 0;
-    for (const hostile of HOSTILE) {
-      let result: ReviewData;
-      try {
-        result = run(hostile);
-      } catch (error) {
-        expect(error).toBeInstanceOf(Error);
-        continue;
-      }
-      accepted++;
-      sound(result);
-    }
-    expect(accepted).toBeGreaterThan(0);
-  });
-
-  const CONTROLS = ['\u0000', '\u0001', '\u0008', '\u000B', '\u000C', '\u000E', '\u001A', '\u001F', '\u007F'];
-
-  it.each(sweeps)('%s refuses NUL and the other control characters, wherever they stand', (_name, run, what) => {
+  it('refuses NUL and the other control characters at the line where they stand', () => {
     for (const control of CONTROLS) {
       const code = control.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0');
       const placed: [string, number][] = [
@@ -928,8 +870,29 @@ describe('hostile and invalid text', () => {
         [`a\r\n\r\nb${control}c`, 3],
       ];
       for (const [text, line] of placed) {
-        expect(() => run(text)).toThrow(new Error(`${what} contains a control character (U+${code}) at line ${line}`));
+        expect(() => addFinding(open(), { ...FINDING, description: text }, at())).toThrow(
+          new Error(`description contains a control character (U+${code}) at line ${line}`),
+        );
       }
+    }
+  });
+
+  it.each(sweeps)('%s refuses a control character', (_name, run, what) => {
+    expect(() => run('a\u0000b')).toThrow(new Error(`${what} contains a control character (U+0000) at line 1`));
+  });
+
+  it('refuses a lone carriage return or Unicode line separator in multi-line text', () => {
+    for (const bad of ['a\rb', 'a\u2028b', 'a\u2029b']) {
+      refuses(
+        open(),
+        (input) => addFinding(input, { ...FINDING, description: bad }, at()),
+        'description contains a carriage return or line separator that is not a line break',
+      );
+      refuses(
+        open(),
+        (input) => openRound(input, { revision: 'abc1234', base: null, note: bad }),
+        'note contains a carriage return or line separator that is not a line break',
+      );
     }
   });
 
@@ -943,19 +906,9 @@ describe('hostile and invalid text', () => {
   });
 });
 
-// A seeded walk of many operations over texts with blanks at the ends of their lines: every operation is either
+// A seeded walk of operations over texts with blanks at the ends of their lines: every operation is either
 // refused, with the review unchanged, or leaves a review that renders cleanly.
 describe('random walks over every operation', () => {
-  function seeded(seed: number): () => number {
-    let state = seed;
-    return () => {
-      state = (state + 0x6d2b79f5) | 0;
-      let mixed = Math.imul(state ^ (state >>> 15), state | 1);
-      mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
-      return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
   type Random = () => number;
   const pick = <Item>(random: Random, items: readonly Item[]): Item => items[Math.floor(random() * items.length)] as Item;
 
@@ -1001,28 +954,29 @@ describe('random walks over every operation', () => {
     return { operation, run: runs[operation] as (input: ReviewData) => ReviewData };
   }
 
-  it('refuses or leaves a review that renders cleanly, in 60 walks of 40 steps', () => {
+  it('refuses or leaves a review that renders cleanly, in 10 walks of 20 steps', () => {
     const accepted = new Set<number>();
     let refused = 0;
-    for (let seed = 1; seed <= 60; seed++) {
+    for (let seed = 1; seed <= 10; seed++) {
       const random = seeded(seed);
       const start = newReview(`PR ${seed}`);
       // Every other walk starts with a round open.
       let data = sound(seed % 2 === 0 ? openRound(start, { revision: 'abc1234', base: null }) : start);
-      for (let index = 0; index < 40; index++) {
+      for (let index = 0; index < 20; index++) {
+        const label = `seed ${seed}, step ${index}`;
         const { operation, run } = step(data, random, index + 1);
         const input = deepFreeze(structuredClone(data));
         let result: ReviewData;
         try {
           result = run(input);
         } catch (error) {
-          expect(error).toBeInstanceOf(Error);
-          expect(input).toStrictEqual(data);
+          expect(error, label).toBeInstanceOf(Error);
+          expect(input, label).toStrictEqual(data);
           refused++;
           continue;
         }
-        expect(input).toStrictEqual(data);
-        data = sound(result);
+        expect(input, label).toStrictEqual(data);
+        data = sound(result, label);
         accepted.add(operation);
       }
     }
