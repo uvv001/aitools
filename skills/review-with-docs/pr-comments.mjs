@@ -1774,70 +1774,13 @@ function buildDashboard(findings) {
 		const listed = findings.filter((finding) => finding.state === state.marker);
 		if (listed.length === 0) continue;
 		block.push(`### ${state.marker} ${listed.length} ${state.label}`, "");
-		listed.forEach((finding, index) => block.push(`  ${index + 1}. [${finding.id}](#${finding.anchor})`));
+		listed.forEach((finding, index) => block.push(`  ${index + 1}. [${finding.id}](#${finding.id.toLowerCase()})`));
 		block.push("");
 	}
 	return block;
 }
 //#endregion
 //#region src/review-render.ts
-const HTML_TAG = /<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?|\/[A-Za-z][A-Za-z0-9-]*\s*|!--[\s\S]*?--)>/g;
-const EMPHASIS = /(?<![\p{L}\p{N}_])(_+)(?!\s)(.+?)(?<!\s)\1(?![\p{L}\p{N}_])/gu;
-function stripLinks(text) {
-	let current = text;
-	let replaced = true;
-	while (replaced) {
-		replaced = false;
-		for (let mid = current.indexOf("]("); mid !== -1; mid = current.indexOf("](", mid + 2)) {
-			let bracketDepth = 1;
-			let open = mid;
-			while (open > 0 && bracketDepth > 0) {
-				open--;
-				if (current[open] === "]") bracketDepth++;
-				else if (current[open] === "[") bracketDepth--;
-			}
-			if (bracketDepth !== 0) continue;
-			let parenDepth = 1;
-			let close = mid + 2;
-			while (close < current.length && (current[close] === " " || current[close] === "	")) close++;
-			if (current[close] === "<") {
-				const endAngle = current.indexOf(">", close + 1);
-				if (endAngle === -1 || current.slice(close + 1, endAngle).includes("<")) continue;
-				close = endAngle + 1;
-			}
-			while (close < current.length && parenDepth > 0) {
-				const ch = current[close];
-				if (parenDepth === 1 && (ch === "\"" || ch === "'") && (current[close - 1] === " " || current[close - 1] === "	")) {
-					const endQuote = current.indexOf(ch, close + 1);
-					if (endQuote !== -1) {
-						close = endQuote + 1;
-						continue;
-					}
-				}
-				if (ch === "(") parenDepth++;
-				else if (ch === ")") parenDepth--;
-				close++;
-			}
-			if (parenDepth !== 0) continue;
-			const isImage = open > 0 && current[open - 1] === "!";
-			const label = isImage ? "" : current.slice(open + 1, mid);
-			current = current.slice(0, isImage ? open - 1 : open) + label + current.slice(close);
-			replaced = true;
-			break;
-		}
-	}
-	return current;
-}
-function stripInlineMarkup(text) {
-	let current = stripLinks(text).replace(HTML_TAG, "");
-	for (let next = current.replace(EMPHASIS, "$2"); next !== current; next = current.replace(EMPHASIS, "$2")) current = next;
-	return current;
-}
-function slug(heading) {
-	const literals = [];
-	const hold = (value) => `\0${literals.push(value) - 1}\0`;
-	return stripInlineMarkup(heading.replace(/(?<!\\)(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g, (_, _ticks, code) => hold(code)).replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, (_, char) => hold(char))).replace(/\0(\d+)\0/g, (_, id) => literals[Number(id)]).toLowerCase().replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, "").replace(/ /gu, "-");
-}
 function formatRoundItem({ round, revision, base, notes = [] }) {
 	const prefix = `Round ${round} — \`${revision}\`, ${base === null ? "base none — reviewed as it stands" : `base \`${base}\``}`;
 	if (notes.length === 0) return prefix;
@@ -1874,14 +1817,6 @@ function formatUpdateItem(item) {
 }
 const bullet = (text) => `- ${text}`;
 const heading = ({ state, severity, id, title }) => `${state} ${severity} ${id} — ${title}`;
-function dashboardFinding(finding) {
-	const { id, state } = finding;
-	return {
-		id,
-		state,
-		anchor: slug(heading(finding))
-	};
-}
 function entryLines$1(entry) {
 	return [
 		"**Reviewed**",
@@ -1892,6 +1827,7 @@ function entryLines$1(entry) {
 function findingLines$1(finding) {
 	const { description, updates } = finding;
 	return [
+		`<a id="${finding.id.toLowerCase()}"></a>`,
 		`### ${heading(finding)}`,
 		"",
 		"#### Description",
@@ -1908,7 +1844,7 @@ function renderReport(data) {
 		"## Intro",
 		"",
 		...entryLines$1(data.intro.reviewed),
-		...buildDashboard(data.findings.map(dashboardFinding)),
+		...buildDashboard(data.findings),
 		"## Findings",
 		...data.findings.flatMap((finding) => ["", ...findingLines$1(finding)])
 	].join("\n")}\n`;
@@ -4118,7 +4054,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+b0af229`;
+	return `pr-comments ${VERSION}+31dc572`;
 }
 //#endregion
 //#region src/cli.ts
