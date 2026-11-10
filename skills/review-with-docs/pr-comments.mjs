@@ -1738,7 +1738,7 @@ function buildDashboard(findings) {
 		const listed = findings.filter((finding) => finding.state === state.marker);
 		if (listed.length === 0) continue;
 		block.push(`### ${state.marker} ${listed.length} ${state.label}`, "");
-		listed.forEach((finding, index) => block.push(`  ${index + 1}. [${finding.id}](#${finding.id.toLowerCase()})`));
+		listed.forEach((finding, index) => block.push(`  ${index + 1}. [${finding.id}](#${finding.anchor})`));
 		block.push("");
 	}
 	return block;
@@ -1781,6 +1781,7 @@ function formatUpdateItem(item) {
 }
 const bullet = (text) => `- ${text}`;
 const heading = ({ state, severity, id, title }) => `${state} ${severity} ${id} — ${title}`;
+const slug = (heading) => heading.toLowerCase().replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, "").replace(/ /gu, "-");
 function entryLines(entry) {
 	return [
 		"**Reviewed**",
@@ -1791,7 +1792,6 @@ function entryLines(entry) {
 function findingLines(finding) {
 	const { description, updates } = finding;
 	return [
-		`<a id="${finding.id.toLowerCase()}"></a>`,
 		`### ${heading(finding)}`,
 		"",
 		"#### Description",
@@ -1808,7 +1808,11 @@ function renderReport(data) {
 		"## Intro",
 		"",
 		...entryLines(data.intro.reviewed),
-		...buildDashboard(data.findings),
+		...buildDashboard(data.findings.map((finding) => ({
+			id: finding.id,
+			state: finding.state,
+			anchor: slug(heading(finding))
+		}))),
 		"## Findings",
 		...data.findings.flatMap((finding) => ["", ...findingLines(finding)])
 	].join("\n")}\n`;
@@ -3851,7 +3855,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+e3ea022`;
+	return `pr-comments ${VERSION}+8c28f1e`;
 }
 //#endregion
 //#region src/cli.ts
