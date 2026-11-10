@@ -115,8 +115,9 @@ calls for — a verdict is step 5, a publish or sync request step 6, new changes
    `<report-stem>/round-<n>/merged/<slug>.md` and run this filtering and gating
    per [fleet.md](fleet.md): when a round surfaces more than 10 candidate
    findings or the review already carries more than 30 findings in
-   `finding list`, dispatch a deduplication agent (or sharded deduplication
-   fleet when `candidates × existing findings` is large) with access to the
+   `finding list`, dispatch a deduplication agent (or a sharded deduplication
+   fleet when there are more than 20 candidate findings or
+   `candidates × existing findings > 500`) with access to the
    candidate finding files, `finding list` / `finding show`, and the codebase
    before recording results. Record each qualifying `reopen <F>` with
    `finding set-description <F> --description-file <file> --round <n>` where

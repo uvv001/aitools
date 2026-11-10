@@ -149,8 +149,10 @@ changed, or flagged as ambiguous for the user's call), and keep `new`
 
 When a round surfaces more than 10 candidate findings or the review already
 carries more than 30 findings in `finding list`, dispatch a deduplication agent
-(or a sharded deduplication fleet when `candidates × existing findings` is
-large, ~10–15 candidates per agent followed by a cross-shard merge) with the
+(or a sharded deduplication fleet when there are more than 20 candidate
+findings or `candidates × existing findings > 500` — ~10–15 candidates per
+shard, or ~30–50 existing findings per shard when candidates ≤ 20, followed by
+a cross-shard merge) with the
 shared brief, the **closed-finding gate** of step 7 ([SKILL.md](SKILL.md))
 verbatim, access to the candidate finding files, `finding list` /
 `finding show` (`--db <file.sqlite>`), and the codebase to merge same-defect
