@@ -46,35 +46,62 @@ changes from `git diff <base>`.
 From round 2 on, execution separates into two ordered phases:
 
 1. **Verification phase (`recheck`).** First, verify every open finding
-   (⏳ ❓ ✅), every 🔧 fixed finding, and any closed finding (❌ 📌 🔀) whose
-   code changed against the full changeset and codebase (step 7 of
-   [SKILL.md](SKILL.md)). Up to 15 findings in re-check scope use one `recheck`
-   agent; past 15 findings, shard verification across parallel `recheck-1`,
-   `recheck-2`, … agents (~15–20 findings per agent, each with full codebase
-   access and its own `<report-stem>/round-<n>/recheck-<i>.md` coverage file).
-   Each `recheck` brief carries the shared brief, the findings in its shard
-   (id, state, title, and description from `finding list` / `finding show`),
-   step 7 from "Every round reads the **full changeset**" to "whose state
-   stands until the user rules" verbatim, and the States paragraph from
-   "verifies it the way the finding was verified" to "confirms it" of
+   (⏳ ❓ ✅), every 🔧 fixed finding, and any closed finding (❌ 📌 🔀) where
+   its causal path changed or concrete new proof is brought against the full
+   changeset and codebase (step 7 of [SKILL.md](SKILL.md)). Up to 15 findings
+   in re-check scope use one `recheck` agent; past 15 findings, shard
+   verification across parallel `recheck-1`, `recheck-2`, … agents (~15–20
+   findings per agent, each with full codebase access and its own
+   `<report-stem>/round-<n>/recheck-<i>.md` coverage file). Each `recheck`
+   brief carries the shared brief, the findings in its shard (id, state, title,
+   description, and `Updates` from `finding show <F> --db <file.sqlite>`), step
+   7 from "Every round reads the **full changeset**" to
+   "in the same area, not the same defect" verbatim, and the States paragraph
+   from "verifies it the way the finding was verified" to "confirms it" of
    [SKILL.md](SKILL.md). Its coverage file holds one line per finding —
-   finding, outcome (`fixed`, `holds`, `partial`, `regressed` or `defective`),
-   and the evidence at the new revision — and it writes a finding file for each
-   new defect it meets, a defective fix included, and for each closed finding
-   whose concern returns, naming it. It replies with those lines, plus the
-   reply line of a rule brief for each new finding file. Record all outcomes
-   (`finding update` / `finding set-state` and any new finding from a defective
-   fix or returning closed concern) in the database before starting discovery.
+   finding, outcome (`fixed`, `holds`, `partial`, `regressed`, `defective`, or
+   `reopen`), and the evidence at the new revision. For a closed finding
+   (❌ 📌 🔀) under the closed-finding gate: `holds` drops non-qualifying
+   repeats; `reopen <F>` writes a revised description file
+   (`<report-stem>/round-<n>/recheck/<slug>.md`, or `recheck-<i>/<slug>.md`)
+   where the description changed when the same defect qualifies to reopen; and
+   a distinct defect in the same area leaves `<F>` at `holds` (unless `<F>`
+   also reopened) and writes a `new` finding file naming `<F>` where relevant —
+   just as a defective fix writes a `new` finding file. It replies with its
+   coverage lines, `reopen <F> [<file>]` (with severity, anchor, new proof or
+   causal change and why prior rationale no longer holds, and ❓ if unverified;
+   or flagged as ambiguous for the user's call) for each reopened finding, and
+   the reply line of a rule brief for each `new` finding file. Record all
+   outcomes (`finding update`, `finding set-state`, `finding set-state` — plus
+   `finding set-description` where the description changed — for `reopen <F>`,
+   and step 4 `finding add` for any `new` finding) in the database before
+   starting discovery.
 2. **Discovery phase.** Only after the verification phase is recorded in the
    database, dispatch the round's discovery fleet (`purpose-fit`,
    `best-practices`, and rule agents), passing the updated finding list from
    `finding list` / `finding show` — id, post-verification state, title, and
    description (or, past 30 findings, instructing agents to read `finding list`
    and `finding show` with `--db <file.sqlite>`) — so discovery agents see the
-   post-verification states and descriptions. Each brief asks for what none of
-   them covers, so an agent hands back only what is new; a concern a closed
-   finding (❌ 📌 🔀) covers comes back only with better evidence, in a finding
-   that names it.
+   post-verification states and descriptions, along with the **closed-finding
+   gate** of step 7 ([SKILL.md](SKILL.md), from
+   "Before deciding on any re-check or candidate" to
+   "in the same area, not the same defect") verbatim and
+   `node <skill-dir>/pr-comments.mjs finding show <F> --db <file.sqlite>` to
+   inspect `Updates`. Each agent filters out candidates already covered by open
+   (⏳ ❓ ✅) findings or by 🔧 fixed findings whose fix holds — if discovery
+   surfaces concrete proof that a 🔧 fixed finding still fails, it reopens
+   `<F>` (writing a revised description file where the description changed and
+   replying `reopen <F> [<file>]` with severity, anchor, and the new proof)
+   instead of dropping it — and for any
+   candidate touching a closed finding (❌ 📌 🔀) reads `<F>`'s `Updates` via
+   `finding show <F> --db <file.sqlite>` and applies the closed-finding gate:
+   filtering out non-qualifying repeats, writing a revised description file
+   where the description changed and replying `reopen <F> [<file>]` (with
+   severity, anchor, new proof or causal change and why prior rationale no
+   longer holds, and ❓ if unverified; or flagged as ambiguous for the user's
+   call) for a qualifying returning closed defect, and returning a `new`
+   finding (naming `<F>` where relevant) only for a distinct, independently
+   actionable defect.
 
 ## Files
 
@@ -101,18 +128,36 @@ files, so the orchestrator passes paths.
 
 ## Merging
 
-Findings that point at the same anchor or the same underlying root cause across
-agents merge into one: record the description whose evidence is stronger, fold
-in any additional occurrences or anchors from the others, write the merged text
-to `<report-stem>/round-<n>/merged/<slug>.md`, and pass that path to
-`finding add`.
+Candidates that report the **same defect** (on a shared anchor or shared root
+cause) across agents merge into one — including multiple candidates that reopen
+the same `<F>`, while never merging a qualifying `reopen <F>` with a distinct
+`new` defect that merely shares a line: record the description whose evidence
+is stronger, fold in any additional occurrences or anchors from the others, and
+write the merged text to `<report-stem>/round-<n>/merged/<slug>.md` (passing
+that path to `finding add`, or to `finding set-description` where the
+description changed when reopening `<F>`). Filter out candidates already
+covered by open (⏳ ❓ ✅) findings or by 🔧 fixed findings whose fix holds —
+if discovery surfaces concrete proof that a 🔧 fixed finding still fails,
+reopen `<F>` (`reopen <F> [<file>]`) instead of dropping it — and for any
+candidate touching a closed finding (❌ 📌 🔀), inspect `<F>`'s `Updates` via
+`finding show <F> --db <file.sqlite>` and apply the **closed-finding gate** of
+step 7 ([SKILL.md](SKILL.md)): filter out non-qualifying repeats, return
+`reopen <F> [<file>]` for qualifying returning closed defects (for
+`finding set-state` plus `finding set-description` where the description
+changed, or flagged as ambiguous for the user's call), and keep `new`
+(`finding add`, naming `<F>` where relevant) only for distinct defects.
 
 When a round surfaces more than 10 candidate findings or the review already
 carries more than 30 findings in `finding list`, dispatch a deduplication agent
 (or a sharded deduplication fleet when `candidates × existing findings` is
 large, ~10–15 candidates per agent followed by a cross-shard merge) with the
-shared brief, access to the candidate finding files, `finding list` /
-`finding show` (`--db <file.sqlite>`), and the codebase to merge
-overlapping/same-cause candidates into
-`<report-stem>/round-<n>/merged/<slug>.md` and filter out candidates already
-covered by existing findings before the orchestrator runs `finding add`.
+shared brief, the **closed-finding gate** of step 7 ([SKILL.md](SKILL.md))
+verbatim, access to the candidate finding files, `finding list` /
+`finding show` (`--db <file.sqlite>`), and the codebase to merge same-defect
+candidates into `<report-stem>/round-<n>/merged/<slug>.md` and apply that
+filtering and closed-finding gate — returning `reopen <F> [<file>]` (with
+severity, anchor, new proof or causal change and why prior rationale no longer
+holds, and ❓ if unverified; or flagged as ambiguous for the user's call) for
+regressed 🔧 fixed findings or qualifying returning closed defects, and `new`
+lines only for distinct defects — before the orchestrator records reopenings
+and runs `finding add`.

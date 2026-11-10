@@ -103,31 +103,49 @@ calls for — a verdict is step 5, a publish or sync request step 6, new changes
    rule, plus purpose fit, best practices, and `recheck` (or `recheck-<i>`
    shards) in a later round — and the index shows the tier bound of
    [fleet.md](fleet.md) for each dispatch.
-4. **Record.** With a fleet, merge candidate findings that point at the same
-   anchor or the same underlying root cause into
-   `<report-stem>/round-<n>/merged/<slug>.md` and filter out candidates already
-   covered by existing findings per [fleet.md](fleet.md): when a round surfaces
-   more than 10 candidate findings or the review already carries more than 30
-   findings in `finding list`, dispatch a deduplication agent (or sharded
-   deduplication fleet when `candidates × existing findings` is large) with
-   access to the candidate finding files, `finding list` / `finding show`, and
-   the codebase before the orchestrator runs `finding add`. Then
-   `finding add --severity --title --description-file` records each surviving
-   finding in the open round, with `--unverified` where its evidence stayed
-   unsettled — a fleet's reply line marks it ❓; the description follows
-   [Evidence](#evidence). Where the user asked up front for a sync, run it now
-   and record what others wrote ([pull-request.md](pull-request.md)). A round
-   that still has no finding is a result: record it with
-   `round update 'no findings'` (`'no new findings'` in a later round). Then
-   tell the user and hand over the report's path.
-   **Ready when:** overlapping or same-cause candidates are merged and
-   already-covered candidates filtered out (via the deduplication dispatch of
-   [fleet.md](fleet.md) where triggered), every finding carries severity,
-   evidence, and a suggested fix in its description and `finding list` shows
-   each of them — or, where the round has no finding, it records `no findings`
-   (`no new findings` in a later round) — where the user asked up front for a
-   sync, the pull request's comments are reconciled and the `tier bound`
-   condition holds (step 6), and the user has the report's path.
+4. **Record.** Filter out candidates already covered by open (⏳ ❓ ✅)
+   findings or by 🔧 fixed findings whose fix holds — if discovery surfaces
+   concrete proof that a 🔧 fixed finding still fails, reopen `<F>`
+   (`reopen <F>`) instead of dropping it — and apply the **closed-finding
+   gate** (step 7, reading `<F>`'s `Updates` via `finding show <F>`) to
+   candidates touching closed findings (❌ 📌 🔀). With a fleet, merge
+   candidates that report the **same defect** (on a shared anchor or shared
+   root cause — never merge a qualifying `reopen <F>` with a distinct `new`
+   defect that merely shares a line) into
+   `<report-stem>/round-<n>/merged/<slug>.md` and run this filtering and gating
+   per [fleet.md](fleet.md): when a round surfaces more than 10 candidate
+   findings or the review already carries more than 30 findings in
+   `finding list`, dispatch a deduplication agent (or sharded deduplication
+   fleet when `candidates × existing findings` is large) with access to the
+   candidate finding files, `finding list` / `finding show`, and the codebase
+   before recording results. Record each qualifying `reopen <F>` with
+   `finding set-description <F> --description-file <file> --round <n>` where
+   the description changed, `finding set-severity <F> <severity> --round <n>`
+   where severity changed, and
+   `finding set-state <F> (awaiting | unverified) --round <n> --note <new proof or causal change, and why prior rationale no longer holds>`,
+   and record each surviving new defect in the open round with
+   `finding add --severity --title --description-file`, adding `--unverified`
+   where its evidence stayed unsettled — a fleet's reply line marks it ❓;
+   descriptions follow [Evidence](#evidence). Where the user asked up front for
+   a sync, run it now and record what others wrote
+   ([pull-request.md](pull-request.md)). A round that neither adds nor reopens
+   a finding is a result: record it with `round update 'no findings'`
+   (`'no new findings'` in a later round). Then tell the user and hand over the
+   report's path.
+   **Ready when:** same-defect candidates are merged (keeping any `reopen <F>`
+   separate from distinct `new` defects), candidates covered by open findings
+   or by 🔧 fixed findings whose fix holds are filtered out (with any 🔧 fixed
+   finding proven still to fail reopened), and candidates touching closed
+   findings (❌ 📌 🔀) are resolved under the closed-finding gate (via the
+   deduplication dispatch of [fleet.md](fleet.md) where triggered); every added
+   or reopened finding carries severity, evidence, and a suggested fix in its
+   description (with reopened findings moved to `awaiting` or `unverified` with
+   a `Round <n>:` note recording the new proof or causal change) and
+   `finding list` shows each of them — or, where the round neither adds nor
+   reopens a finding, it records `no findings` (`no new findings` in a later
+   round) — where the user asked up front for a sync, the pull request's
+   comments are reconciled and the `tier bound` condition holds (step 6), and
+   the user has the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
@@ -168,30 +186,62 @@ calls for — a verdict is step 5, a publish or sync request step 6, new changes
    Every round reads the **full changeset** at the new revision — never a
    diff between revisions, because authors amend and force-push and
    per-commit attribution misleads. Comparing revisions serves one purpose:
-   telling where the code the findings point at changed. Every open finding
+   telling where a finding's code or causal path changed. Every open finding
    (⏳ ❓ ✅) and every 🔧 fixed one, since a fix regresses, is re-checked; a
-   closed finding (❌ 📌 🔀) is re-checked where the code it points at
-   changed: only changed ground overturns the user's ruling, and a concern
-   that returns with better evidence is a new finding naming the old one,
-   whose state stands until the user rules.
+   closed finding (❌ 📌 🔀) is re-checked where its causal path changed or
+   concrete new proof is brought. Before deciding on any re-check or candidate
+   covered by a closed finding (❌ discarded, 📌 deferred, 🔀 improvement),
+   read `<F>`'s `Updates` via `finding show <F>` and apply the
+   **closed-finding gate**:
+   - **Drop** (`holds` in `recheck`): drop rephrased arguments, extra static
+     occurrences of the same pattern, or disagreements with a design or
+     preference ruling in `Updates`. For 📌 deferred and 🔀 improvement (where
+     the user already accepted the defect exists), stronger proof alone still
+     drops.
+   - **Reopen `<F>`** (recorded with
+     `finding set-description <F> --description-file <file> --round <n>` where
+     the description changed, `finding set-severity <F> <severity> --round <n>`
+     where severity changed, and
+     `finding set-state <F> (awaiting | unverified) --round <n> --note <new proof or causal change, and why prior rationale no longer holds>` —
+     `unverified` where qualifying new ground is established under this gate
+     but the defect remains unsettled under [Evidence](#evidence)): use for the
+     **same defect** instead of filing a duplicate ID, preserving `<F>`'s prior
+     rationale and new proof in its `Updates`:
+     - **❌ discarded:** reopen only when changed code in its causal path
+       creates a new material failure, or concrete proof (failing test,
+       execution trace, reproduction) refutes a **factual premise** recorded in
+       the discard note.
+     - **📌 deferred / 🔀 improvement:** reopen only when code changed since
+       the verdict and introduced a new regression or crossed a higher severity
+       boundary.
+     - Where the prior rationale or baseline is unavailable or genuinely
+       ambiguous, surface it as **the user's call** rather than dropping it
+       silently.
+   - **New finding** (recorded with `finding add`, naming `<F>` where
+     relevant): file a new finding only when the candidate is a **distinct,
+     independently actionable defect** in the same area, not the same defect.
    Execute the round in two ordered phases ([fleet.md](fleet.md)):
    1. **Verification phase (`recheck`).** First, verify every open finding
       (⏳ ❓ ✅), every 🔧 fixed finding, and any closed finding (❌ 📌 🔀)
-      whose code changed against the full changeset and codebase — one
-      `recheck` agent up to 15 findings in re-check scope; past 15 findings,
-      shard verification across parallel `recheck-1`, `recheck-2`, … agents
-      (~15–20 findings per agent, each with full codebase access and its own
+      where its causal path changed or concrete new proof is brought against
+      the full changeset and codebase — one `recheck` agent up to 15 findings
+      in re-check scope; past 15 findings, shard verification across parallel
+      `recheck-1`, `recheck-2`, … agents (~15–20 findings per agent, each with
+      full codebase access and its own
       `<report-stem>/round-<n>/recheck-<i>.md` coverage file). Record all
       outcomes in the database — each an Updates entry carrying `--round <n>`
-      (`finding update`, or `finding set-state` where the state moves, `fixed`
-      per [States](#states)) plus step 4 (`finding add`) for any new finding
-      from a defective fix or returning closed concern.
+      (`finding update`, `finding set-state` where the state moves with `fixed`
+      per [States](#states), or `finding set-state` — plus
+      `finding set-description` where the description changed — for a reopened
+      closed finding) plus step 4 (`finding add`) for any new finding from a
+      defective fix or distinct defect.
    2. **Discovery phase.** Only after the verification phase is recorded in the
       database, dispatch the round's discovery fleet (`purpose-fit`,
       `best-practices`, and rule agents, step 3), passing the updated finding
       list from `finding list` / `finding show` so discovery agents see the
-      post-verification states and descriptions, and record newly discovered
-      findings in step 4.
+      post-verification states and descriptions, and record any reopenings
+      (`set-state`, plus `set-description` where the description changed) and
+      newly discovered findings in step 4.
    **Ready when:** the round stands in the database with its revision, its
    base, and a note carrying any narrowing; the verification phase is recorded
    in the database before the discovery fleet is dispatched; step 3's and step
