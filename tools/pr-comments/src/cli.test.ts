@@ -1578,7 +1578,7 @@ describe('cli', () => {
         expect(printed).toBe(`unchanged ${report()}\n`);
 
         await step('finding', 'set-state', 'F3', 'approved');
-        expect(await readFile(report(), 'utf8')).toContain('<a id="f3"></a>\n### ✅ ⚪ F3 — Waiting');
+        expect(await readFile(report(), 'utf8')).toContain('### ✅ ⚪ F3 — Waiting');
         await step('report', 'render');
         expect(printed).toBe(`unchanged ${report()}\n`);
       });

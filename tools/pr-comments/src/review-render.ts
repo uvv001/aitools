@@ -63,6 +63,12 @@ const bullet = (text: string): string => `- ${text}`;
 
 const heading = ({ state, severity, id, title }: Finding): string => `${state} ${severity} ${id} — ${title}`;
 
+export const slug = (heading: string): string =>
+  heading
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu, '')
+    .replace(/ /gu, '-');
+
 function entryLines(entry: IntroEntry<ReviewedItem>): string[] {
   return ['**Reviewed**', ...(entry.items.length > 0 ? ['', ...entry.items.map((item) => bullet(formatRoundItem(item)))] : []), ''];
 }
@@ -70,7 +76,6 @@ function entryLines(entry: IntroEntry<ReviewedItem>): string[] {
 function findingLines(finding: Finding): string[] {
   const { description, updates } = finding;
   return [
-    `<a id="${finding.id.toLowerCase()}"></a>`,
     `### ${heading(finding)}`,
     '',
     '#### Description',
@@ -90,7 +95,7 @@ export function renderReport(data: ReviewData): string {
     '## Intro',
     '',
     ...entryLines(data.intro.reviewed),
-    ...buildDashboard(data.findings),
+    ...buildDashboard(data.findings.map((finding) => ({ id: finding.id, state: finding.state, anchor: slug(heading(finding)) }))),
     '## Findings',
     ...data.findings.flatMap((finding) => ['', ...findingLines(finding)]),
   ];
