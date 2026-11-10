@@ -38,7 +38,10 @@ Links are records in the database; nothing reaches GitHub. A note attaches to
 no finding and leaves no trace in the report, so every comment that raises a
 concern on the changeset — even one the agent refutes or that collides with a
 rule — goes to a finding (with the counter-evidence recorded there) for the
-user to triage. `link remove <ref>` undoes a link.
+user to triage. `link remove <ref>` undoes a link. `reopen <F>` (`--round <n>`)
+and `finding add` record against the open round `<n>` — open step 7's round
+first when a sync triggers a re-review round in step 7 ([SKILL.md](SKILL.md)),
+or use the current round during step 4 or step 6.
 
 Whenever there are more than 10 pending items, when the review already carries
 more than 30 findings, or when `pending items × existing findings > 150`,
@@ -56,18 +59,55 @@ agent, keeping each thread's refs in one slice), each dispatched with its
   with `--db <file.sqlite>` rather than pasting every finding's full
   description into every brief), the user's login, and the table and the
   paragraph after it;
-- the output: a description file per [fleet.md](fleet.md) for each concern no
-  finding covers yet;
-- the reply: one classification per comment (replies included) or annotation
-  in its slice — `own <F>`, `duplicate <F>`,
-  `counter-evidence <F> '<counter-evidence>'`, `note '<reason>'`, or the new
-  finding's reply line per [fleet.md](fleet.md) — for the orchestrator to
-  record. Where `<F>` is a new finding of the slice, the agent writes the
-  `<ref>` of its file `pr-comments/<ref>.md`, and the orchestrator records the
-  id that `finding add` gives that file. When multiple `PR-comment` slices emit
-  new finding files (`pr-comments/<ref>.md`), run the deduplication pass from
-  [fleet.md](fleet.md) across those candidate files before `finding add` and
-  `link duplicate`.
+- the output: a description file
+  (`<report-stem>/round-<n>/pr-comments/<item-ref>.md` per
+  [fleet.md](fleet.md)) for each concern no finding covers yet;
+- the reply: classify every comment (replies included) and annotation in its
+  slice for the orchestrator to record, naming the classified `<item-ref>`
+  first on every line — `<item-ref> | own <target>`,
+  `<item-ref> | duplicate <target>`,
+  `<item-ref> | counter-evidence <target> '<counter-evidence>'`,
+  `<item-ref> | note '<reason>'`, or `<item-ref> | <new-finding reply line>`
+  ([fleet.md](fleet.md)) for `pr-comments/<item-ref>.md` — where `<target>` is
+  either an existing `<F>` or `pr-comments/<ref>.md` in the slice (the
+  `<item-ref>` of `pr-comments/<item-ref>.md` defaults to `duplicate`, or adds
+  `<item-ref> | own pr-comments/<item-ref>.md` when the user wrote it by hand).
+
+When `PR-comment` slices emit `pr-comments/<ref>.md` files, resolve them before
+recording findings and links. Whenever multiple slices emit
+`pr-comments/<ref>.md` files or [fleet.md](fleet.md)'s deduplication threshold
+holds (`> 10` candidate files, or `> 30` existing findings in `finding list`
+where `PR-comment` slices did not receive full finding descriptions in their
+briefs), run the deduplication pass from [fleet.md](fleet.md) across those
+candidate files. Below that threshold with a single slice emitting
+`pr-comments/<ref>.md` files, apply the same merging, filtering, and
+closed-finding gate ([fleet.md](fleet.md), Merging; step 7 of
+[SKILL.md](SKILL.md)) directly before `finding add`. Either way, preserve a
+complete map from every input `pr-comments/<ref>.md` (so every `<item-ref>`
+routed to `pr-comments/<ref>.md` follows it) to its target:
+
+1. **A surviving `new` file** (`pr-comments/<ref>.md` or `merged/<slug>.md`):
+   once `finding add` assigns `<F>` to that surviving file in the open round
+   `<n>`, every input `pr-comments/<ref>.md` mapped to it resolves to `<F>`.
+2. **An existing finding `<F>`** (covered by an open ⏳ ❓ ✅ or 🔧 fixed
+   finding, reopening a regressed 🔧 fixed or qualifying closed ❌ 📌 🔀
+   finding via `reopen <F> [<file>]`, or covered by a closed finding ❌ 📌 🔀
+   whose ruling stands under the closed-finding gate): apply any qualifying
+   `reopen <F>` (`--round <n>`) first per step 4 / step 7 of
+   [SKILL.md](SKILL.md) (or surface it as the user's call when ambiguous), and
+   resolve every input `pr-comments/<ref>.md` mapped to it to `<F>`.
+
+Once any `pr-comments/<ref>.md` files resolve to `<F>`, record each
+`<item-ref>` (the file's own `<ref>` and every `<item-ref>` routed to
+`pr-comments/<ref>.md`, alongside items classified directly against existing
+findings) against `<F>` (`link own <F> <item-ref>` when `<item-ref>` was the
+user's own hand-written comment and `<F>` has no own comment yet,
+`finding update <F> '<item-ref>: <counter-evidence>'` plus
+`link note <item-ref> 'counter-evidence recorded on <F>'` for
+`counter-evidence`, and `link duplicate <F> <item-ref>` otherwise — recording
+`finding update <F>` too where a comment mapped to an existing `<F>` brought
+counter-evidence without reopening it), and record `note` items with
+`link note <item-ref> '<reason>'`, leaving `link pending` empty.
 
 ## Publish
 

@@ -177,12 +177,14 @@ calls for — a verdict is step 5, a publish or sync request step 6, new changes
    - the user knows the pending review waits for their submit.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
    reviewed area, which the user reports or picks up by syncing the PR. A pull
-   request target runs `pr sync` first, then [pull-request.md](pull-request.md)
-   for what is new, so the round sees what others wrote.
-   `round open --revision --base --note` records it — the note carries the
-   scope, the rule sources where the instruction files changed, the agreed
-   checks the round applies, and any narrowing (the user may narrow a round to
-   some findings or paths; the re-check covers that subset).
+   request target runs `pr sync` first. `round open --revision --base --note`
+   opens round `<n>` — the note carries the scope, the rule sources where the
+   instruction files changed, the agreed checks the round applies, and any
+   narrowing (the user may narrow a round to some findings or paths; the
+   re-check covers that subset). On a pull request target, reconcile what is
+   new ([pull-request.md](pull-request.md)) against round `<n>` before
+   verification and discovery, so `reopen <F>` (`--round <n>`) and
+   `finding add` record in round `<n>` and the round sees what others wrote.
    Every round reads the **full changeset** at the new revision — never a
    diff between revisions, because authors amend and force-push and
    per-commit attribution misleads. Comparing revisions serves one purpose:

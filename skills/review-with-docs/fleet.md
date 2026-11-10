@@ -161,3 +161,10 @@ holds, and ❓ if unverified; or flagged as ambiguous for the user's call) for
 regressed 🔧 fixed findings or qualifying returning closed defects, and `new`
 lines only for distinct defects — before the orchestrator records reopenings
 and runs `finding add`.
+
+When deduplicating `pr-comments/<ref>.md` candidates
+([pull-request.md](pull-request.md)), preserve a complete map (across shards
+too) from every input `pr-comments/<ref>.md` to its surviving `new` file
+(`pr-comments/<ref>.md` or `merged/<slug>.md`) or to the existing `<F>` that
+covers it (open, 🔧 fixed, `reopen <F>`, or closed under the gate), so every
+`<item-ref>` routed to it still resolves to `<F>`.
