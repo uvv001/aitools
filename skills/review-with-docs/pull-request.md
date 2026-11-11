@@ -18,36 +18,39 @@ the user to create it.
 
 `pr sync` downloads the PR into the database — comments, reviews, threads,
 check annotations. Run it after every push and before every publish.
-`link pending` then lists each top-level comment and check annotation that no
-link names yet; empty output means every one is handled. Read the full pending
-threads and annotations with `report comments --pending` — when the fleet
-threshold below is met, the parallel agents read them instead — then classify
-each comment (replies included) and annotation and record it from the
+`link pending` then lists every unlinked comment (thread roots and replies,
+`r<id>` / `c<id>`), nonempty submitted review body (`v<id>`), and check
+annotation (`a<hex>`); empty output means every one is handled. Read the
+pending conversation comments, nonempty review bodies, pending threads
+(already-linked comments in a thread stay visible marked `_(context)_`), and
+pending check annotations with `report comments --pending` — when the fleet
+threshold below is met, the parallel agents read their slices instead — then
+classify only the non-`_(context)_` unlinked refs and record each from the
 orchestrator:
 
-| The comment or annotation | Command |
+| The pending item | Command |
 |---|---|
-| a comment the user wrote by hand saying what a finding says | `link own <F> <ref>` |
-| the same concern as a finding | `link duplicate <F> <ref>` |
+| a comment (`r…` or `c…`) the user wrote by hand saying what a finding says | `link own <F> <ref>` |
+| a comment or review body (`v…`) raising the same concern as a finding (including a `v…` review body the user wrote) | `link duplicate <F> <ref>` |
 | counter-evidence on a finding | `finding update <F> '<ref>: <counter-evidence>'`, then `link note <ref> 'counter-evidence recorded on <F>'` |
-| chatter or a status comment that raises no concern | `link note <ref> '<reason>'` |
-| a concern no finding covers yet | `finding add`, then `link duplicate <F> <ref>` |
-| a check annotation, always | `link duplicate <F> <ref>` |
+| chatter, a verdict note, or a status item (`r…`, `c…`, or `v…`) that raises no concern | `link note <ref> '<reason>'` |
+| a concern no finding covers yet | `finding add`, then `link duplicate <F> <ref>` (`link own <F> <ref>` when `<ref>` is an `r…` / `c…` comment the user wrote by hand) |
+| a check annotation (`a…`), always | `link duplicate <F> <ref>` |
 
 Links are records in the database; nothing reaches GitHub. A note attaches to
-no finding and leaves no trace in the report, so every comment that raises a
-concern on the changeset — even one the agent refutes or that collides with a
-rule — goes to a finding (with the counter-evidence recorded there) for the
-user to triage. `link remove <ref>` undoes a link. `reopen <F>` (`--round <n>`)
-and `finding add` record against the open round `<n>` — open step 7's round
-first when a sync triggers a re-review round in step 7 ([SKILL.md](SKILL.md)),
-or use the current round during step 4 or step 6.
+no finding and leaves no trace in the report, so every comment or review body
+that raises a concern on the changeset — even one the agent refutes or that
+collides with a rule — goes to a finding (with the counter-evidence recorded
+there) for the user to triage. `link remove <ref>` undoes a link. `reopen <F>`
+(`--round <n>`) and `finding add` record against the open round `<n>` — open
+step 7's round first when a sync triggers a re-review round in step 7
+([SKILL.md](SKILL.md)), or use the current round during step 4 or step 6.
 
 Whenever there are more than 10 pending items, when the review already carries
 more than 30 findings, or when `pending items × existing findings > 150`,
-slice the refs across parallel **PR-comment agents** (~10–15 threads/items per
-agent, keeping each thread's refs in one slice), each dispatched with its
-`model` per [fleet.md](fleet.md). Each brief carries:
+slice the pending refs across parallel **PR-comment agents** (~10–15
+threads/items per agent, keeping each thread's pending refs in one slice), each
+dispatched with its `model` per [fleet.md](fleet.md). Each brief carries:
 
 - the shared brief of [fleet.md](fleet.md);
 - the command
@@ -62,16 +65,18 @@ agent, keeping each thread's refs in one slice), each dispatched with its
 - the output: a description file
   (`<report-stem>/round-<n>/pr-comments/<item-ref>.md` per
   [fleet.md](fleet.md)) for each concern no finding covers yet;
-- the reply: classify every comment (replies included) and annotation in its
-  slice for the orchestrator to record, naming the classified `<item-ref>`
-  first on every line — `<item-ref> | own <target>`,
+- the reply: classify every non-`_(context)_` ref in its slice (comments,
+  review bodies, and check annotations; comments marked `_(context)_` provide
+  thread context only) for the orchestrator to record, naming the classified
+  `<item-ref>` first on every line — `<item-ref> | own <target>`,
   `<item-ref> | duplicate <target>`,
   `<item-ref> | counter-evidence <target> '<counter-evidence>'`,
   `<item-ref> | note '<reason>'`, or `<item-ref> | <new-finding reply line>`
   ([fleet.md](fleet.md)) for `pr-comments/<item-ref>.md` — where `<target>` is
   either an existing `<F>` or `pr-comments/<ref>.md` in the slice (the
   `<item-ref>` of `pr-comments/<item-ref>.md` defaults to `duplicate`, or adds
-  `<item-ref> | own pr-comments/<item-ref>.md` when the user wrote it by hand).
+  `<item-ref> | own pr-comments/<item-ref>.md` when `<item-ref>` is an
+  `r…` / `c…` comment the user wrote by hand).
 
 When `PR-comment` slices emit `pr-comments/<ref>.md` files, resolve them before
 recording findings and links. Whenever multiple slices emit
@@ -101,11 +106,11 @@ Once any `pr-comments/<ref>.md` files resolve to `<F>`, record each
 `<item-ref>` (the file's own `<ref>` and every `<item-ref>` routed to
 `pr-comments/<ref>.md`, alongside items classified directly against existing
 findings) against `<F>` (`link own <F> <item-ref>` when `<item-ref>` was the
-user's own hand-written comment and `<F>` has no own comment yet,
+user's own hand-written `r…` / `c…` comment and `<F>` has no own comment yet,
 `finding update <F> '<item-ref>: <counter-evidence>'` plus
 `link note <item-ref> 'counter-evidence recorded on <F>'` for
 `counter-evidence`, and `link duplicate <F> <item-ref>` otherwise — recording
-`finding update <F>` too where a comment mapped to an existing `<F>` brought
+`finding update <F>` too where an item mapped to an existing `<F>` brought
 counter-evidence without reopening it), and record `note` items with
 `link note <item-ref> '<reason>'`, leaving `link pending` empty.
 
@@ -125,12 +130,14 @@ counter-evidence without reopening it), and record `note` items with
    the comments wait for their submit in the web UI. Any other post goes
    straight here: the post checks the place before it writes, and the comment
    stays unseen until that submit.
-4. A comment that duplicates a finding is answered only on the user's request,
-   with `link reply <ref> --by-agent` and a dry run first before a `--now`
-   reply. The reply goes into the same pending review. A conversation comment
-   (`c…`) can only be answered at once, and its answer links to a comment that
-   others cannot open before the submit: answer it after the user has
-   submitted the review.
+4. A comment (`r…` or `c…` — never a `v…` review body or an `a…` check
+   annotation) that duplicates a finding is answered only on the user's
+   request, with `link reply <ref> --by-agent` and a dry run first before a
+   `--now` reply. The reply goes into the same pending review (and `link reply`
+   auto-links the reply ref as a `note` so `link pending` stays empty). A
+   conversation comment (`c…`) can only be answered at once, and its answer
+   links to a comment that others cannot open before the submit: answer it
+   after the user has submitted the review.
 
 `--by-agent` goes on every post and reply, dry runs included, so the preview
 is the exact text. `--now` publishes at once, and a conversation comment (`c…`)

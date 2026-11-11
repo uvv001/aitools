@@ -171,8 +171,8 @@ calls for — a verdict is step 5, a publish or sync request step 6, new changes
    **Ready when:**
    - **posts:** `finding list --state approved --unposted` lists only findings
      the user chose to hold back or whose refused post is the user's call;
-   - the pull request's comments are **reconciled**: `link pending` prints
-     nothing;
+   - the pull request's comments, review bodies, and check annotations are
+     **reconciled**: `link pending` prints nothing;
    - **tier bound:** where a PR-comment dispatch ran, the index shows the tier
      bound of [fleet.md](fleet.md);
    - the user knows the pending review waits for their submit.
