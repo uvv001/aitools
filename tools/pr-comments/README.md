@@ -111,29 +111,35 @@ pr-comments pr show --db $DB
 
 `pr show` tells when the data was downloaded, the head commit, and how much the database holds.
 
-**6. Deal with what others wrote.** `link pending` is the to-do list for top-level comments and check annotations. It prints every top-level comment and every check annotation of the pull request that no link names yet. Read full pending threads with `report comments --pending`, and read `report comments` for submitted review bodies, unlinked replies in already linked threads, and edited linked comments.
+**6. Deal with what others wrote.** `link pending` is the to-do list for comments (thread roots and replies), nonempty submitted review bodies (`v…`), and check annotations (`a…`). It prints every item of the pull request that no link names yet. Read full pending conversation items, review bodies, threads, and annotations with `report comments --pending` (already-linked comments in a thread with a new pending reply stay visible as `_(context)_`), and read `report comments` to inspect edited linked comments.
 
 ```
 pr-comments link pending --db $DB
-  r544861  erin  src/tenants/registry.ts:22  thread open, 0 replies — "The tenant lookup never gives up: add an upper bound."
-  r544900  bob   src/tenants/registry.ts:25  thread open, 1 reply — "This loop has no limit. A dead tenant blocks the worker."
-  c623843  dave  conversation                "Can we also log the retry count?"
+  v91204   carol  review                      changes requested — "Please bound the tenant lookup retries."
+  r544861  erin   src/tenants/registry.ts:22  thread open, 0 replies — "The tenant lookup never gives up: add an upper bound."
+  r544900  bob    src/tenants/registry.ts:25  thread open, 1 reply — "This loop has no limit. A dead tenant blocks the worker."
+  r544901  alice  src/tenants/registry.ts:25  reply, thread open — "Will add a cap."
+  c623843  dave   conversation                "Can we also log the retry count?"
   a126305ce  sonarqube-cloud  failure  src/tenants/registry.ts:22  "Refactor this method to reduce its Cognitive Complexity from 19 to the 15 allow…"
   a8d5d4a2a  sonarqube-cloud  warning  src/tenants/retry.ts:7      "Either log or rethrow this exception."
 ```
 
 Go through the list. Each line gets a link:
 
-- A comment you wrote by hand that says what a finding says: `link own`.
-- A comment (or check annotation) about the same issue as a finding: `link duplicate`.
-- A comment that is no finding: `link note`, with the reason.
+- A comment (`r…` or `c…`) you wrote by hand that says what a finding says: `link own`.
+- A comment, review body (`v…`), or check annotation about the same issue as a finding: `link duplicate`.
+- A comment or review body (`v…`) that is no finding: `link note`, with the reason.
 - A new issue: first `finding add`, then link it to that finding. A check annotation is always linked as a duplicate of a finding. It is never a note.
 
 ```
 pr-comments link own F1 r544861 --note "written by hand" --db $DB
 F1: own comment r544861 linked
+pr-comments link duplicate F1 v91204 --db $DB
+F1: duplicate v91204 linked
 pr-comments link duplicate F1 r544900 --db $DB
 F1: duplicate r544900 linked
+pr-comments link note r544901 "author status reply" --db $DB
+r544901: noted
 pr-comments link note c623843 "a wish, not a finding" --db $DB
 c623843: noted
 pr-comments finding add --severity low --title "Cognitive complexity of Registry.resolve" --description-file - --db $DB
@@ -144,7 +150,7 @@ pr-comments link duplicate F2 a8d5d4a2a --db $DB
 F2: duplicate a8d5d4a2a linked
 ```
 
-When `link pending` prints nothing, every top-level comment and check annotation is linked. Empty output means no top-level item is left in the pending list. The exit code is 0 whether it printed something or not, so pending work is never a failure. (Before the first `pr sync` it is an error instead.) Replies are not listed in `link pending`: their thread is represented by its first comment, so read `report comments` to inspect replies, edited comments, and review bodies.
+When `link pending` prints nothing, every comment, nonempty submitted review body, and check annotation is linked. Empty output means no unlinked item is left in the pending list. The exit code is 0 whether it printed something or not, so pending work is never a failure. (Before the first `pr sync` it is an error instead.)
 
 **7. Post the findings.** `finding list --unposted` shows the findings that have no comment of their own yet, in any state; `--state approved` narrows it to the approved ones. First look at what would happen, then post:
 
@@ -165,7 +171,7 @@ pr-comments link reply r544900 --dry-run --db $DB
 pr-comments link reply r544900 --db $DB
 ```
 
-`F1` has the own comment `r544861`, so the reply to the duplicate `r544900` points to it. A conversation comment (`c…`) can only be answered at once, so it needs `--now`. Check annotations are never answered.
+`F1` has the own comment `r544861`, so the reply to the duplicate `r544900` points to it (and `link reply` automatically links the reply comment itself as a `note` so `link pending` stays empty). A conversation comment (`c…`) can only be answered at once, so it needs `--now`. Review bodies (`v…`) and check annotations (`a…`) are never answered.
 
 **9. Submit the pending review in the GitHub web UI.** One submit sends all your comments and replies to the author at once. This is one round of review. The tool never submits for you.
 
@@ -381,9 +387,9 @@ pr-comments finding post F7 --dry-run --db review.sqlite
 
 ### Links
 
-A link ties a comment or a check annotation of the pull request to the review. Its role is `own` (the comment of a finding, at most one per finding), `duplicate` (the same issue as a finding, any number) or `note` (a comment that is no finding, with the reason). A ref is linked once. Links are records in the database only. The refs must be in the downloaded pull request, so run `pr sync` first.
+A link ties a comment, a nonempty submitted review body or a check annotation of the pull request to the review. Its role is `own` (the comment of a finding, at most one per finding; `r…` or `c…` only), `duplicate` (the same issue as a finding, any number) or `note` (a comment or review body that is no finding, with the reason). A ref is linked once. Links are records in the database only. The refs must be in the downloaded pull request, so run `pr sync` first.
 
-**`link pending`**: lists the comments and check annotations not linked yet. Prints one line per top-level comment or check annotation of the synced pull request that no link names: ref, author or app, place, state or level, and an excerpt. Nothing is printed when everything is processed (use "report comments" to inspect thread replies, edited comments, and submitted review bodies). Replies are not listed; their thread is the root comment. It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.
+**`link pending`**: lists the comments, review bodies and check annotations not linked yet. Prints one line per comment (thread roots and replies), nonempty submitted review body or check annotation of the synced pull request that no link names: ref, author or app, place, state or level, and an excerpt. Nothing is printed when everything is processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.
 
 ```
 pr-comments link pending --db <file.sqlite>
@@ -401,7 +407,7 @@ pr-comments link own F7 r544861 --db review.sqlite
 - `<ref>`: the comment: r544830 or c623843.
 - `--note <text>`: why.
 
-**`link duplicate`**: links a comment or check annotation about the same issue. Links a comment or a check annotation as a duplicate of the finding (a finding may have several).
+**`link duplicate`**: links a comment, review body or check annotation about the same issue. Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have several).
 
 ```
 pr-comments link duplicate <finding> <ref> [--note <text>] --db <file.sqlite>
@@ -409,30 +415,30 @@ pr-comments link duplicate F7 c623843 --db review.sqlite
 ```
 
 - `<finding>`: the finding, such as F7 (any case).
-- `<ref>`: the comment or check annotation: r544830, c623843 or a3f9c2d1e.
+- `<ref>`: the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e.
 - `--note <text>`: why.
 
-**`link note`**: records that a comment is not a finding, and why. Records that the comment is no finding, with the reason. A check annotation cannot be a note.
+**`link note`**: records that a comment or review body is not a finding, and why. Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note.
 
 ```
 pr-comments link note <ref> <text> --db <file.sqlite>
 pr-comments link note c623843 "a bot, not a finding" --db review.sqlite
 ```
 
-- `<ref>`: the comment: r544830 or c623843.
+- `<ref>`: the comment or review body: r544830, c623843 or v91204.
 - `<text>`: the reason, one line.
 
-**`link remove`**: removes the link of a comment or check annotation. Removes the link of the comment, whatever its role; the comment is pending again.
+**`link remove`**: removes the link of a comment, review body or check annotation. Removes the link of the comment, review body or check annotation, whatever its role; it is pending again.
 
 ```
 pr-comments link remove <ref> [--note <text>] --db <file.sqlite>
 pr-comments link remove r544861 --db review.sqlite
 ```
 
-- `<ref>`: the comment or check annotation: r544830, c623843 or a3f9c2d1e.
+- `<ref>`: the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e.
 - `--note <text>`: why.
 
-**`link reply`**: answers a duplicate with "Duplicate of `<link>`." Answers a comment that is linked as a duplicate of a finding with "Duplicate of `<link to the own comment of the finding>`." in your pending review, and records the returned reply ref and update in the database (run "pr-comments pr sync --db `<file.sqlite>`" to refresh the full pull request snapshot). The finding must have an own comment. Needs a token with write permission. A conversation comment can only be answered at once, so it needs --now. The thread is never resolved by the tool.
+**`link reply`**: answers a duplicate with "Duplicate of `<link>`." Answers a comment that is linked as a duplicate of a finding with "Duplicate of `<link to the own comment of the finding>`." in your pending review, and records the returned reply ref (linked as a note) and update in the database (run "pr-comments pr sync --db `<file.sqlite>`" to refresh the full pull request snapshot). The finding must have an own comment. Needs a token with write permission. A conversation comment can only be answered at once, so it needs --now. The thread is never resolved by the tool.
 
 ```
 pr-comments link reply <ref> [--by-agent] [--now] [--dry-run] --db <file.sqlite>
@@ -463,10 +469,10 @@ pr-comments report comments [--ref <ref>]... [--pending] [--out <file.md>] --db 
 pr-comments report comments --pending --out pr-42.md --db review.sqlite
 ```
 
-- `--ref <ref>`: only these comments or check annotations (several refs comma-separated); a review comment includes its thread; may be repeated.
-- `--pending`: only comments and check annotations that no link names yet.
+- `--ref <ref>`: only these comments, review bodies or check annotations (several refs comma-separated); a review comment includes its thread; may be repeated.
+- `--pending`: only comments, nonempty submitted review bodies and check annotations that no link names yet.
 - `--out <file.md>`: write the markdown to this file.
-- With `--ref` or `--pending`, review bodies are not shown. An unknown `--ref` gives a warning, and a malformed ref is an error.
+- With `--ref` or `--pending`, matching threads keep their non-matching comments marked `_(context)_`, and empty or pending review bodies are omitted. An unknown `--ref` gives a warning, and a malformed ref is an error.
 - On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.
 
 ### Help and version
@@ -511,13 +517,14 @@ Any state can follow any other. A resolved thread on GitHub does not change a fi
 | Id | What it is | Where it comes from |
 | --- | --- | --- |
 | `F7` | A finding of the review | The next free number. Never reused. Any case on input |
-| `r544830` | A review comment (inline or on a file) | The number in the comment's link: `#discussion_r544830` |
+| `r544830` | A review comment (inline or on a file, root or reply) | The number in the comment's link: `#discussion_r544830` |
 | `c623843` | A conversation comment | `#issuecomment-623843` |
+| `v91204` | A nonempty submitted pull request review body | `#pullrequestreview-91204` |
 | `a3f9c2d1e` | A check annotation | `a` and 8 hex digits, computed from the app, the path, the lines and the message |
 
 Check annotations are the "Check failure on line 132" items that tools such as SonarQube publish through the Checks API. They are not comments and have no id on GitHub, so the tool makes one. The same issue in unchanged code gets the same id. Only the check runs of the head commit that have annotations are read.
 
-The GitHub web UI cannot search a comment by id, so the Updates of the report show every comment id as a link to the comment, for example `PR comment [r544861](https://github.com/acme/widgets/pull/42#discussion_r544861) linked as its own`. A check annotation has no URL and stays a bare id. Entries written by an earlier version keep bare ids.
+The GitHub web UI cannot search a comment or review by id, so the Updates of the report show every comment or review id as a link, for example `PR comment [r544861](https://github.com/acme/widgets/pull/42#discussion_r544861) linked as its own` or `PR review [v91204](https://github.com/acme/widgets/pull/42#pullrequestreview-91204) linked as a duplicate`. A check annotation has no URL and stays a bare id. Entries written by an earlier version keep bare ids.
 
 ### Revisions
 

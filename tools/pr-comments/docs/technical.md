@@ -35,7 +35,7 @@ The architecture separates pure domain logic from I/O:
 - Only `init` creates a database. When `--db` is omitted, `init` places `<yyyy-mm-dd>_<slug>_review.sqlite` and its companion `.md` report in `.ai/review-with-docs/` at the git root. Whenever the target path is inside `.ai/review-with-docs/` (including subdirectories), `init` checks git ignore rules with `git check-ignore`, adds `/.ai/review-with-docs/` to `.git/info/exclude` if needed (so `.ai/` itself can remain tracked), and aborts if a `.gitignore` rule still exposes the directory.
 - `init` refuses existing database or report paths (including symbolic links), opens the database file exclusively (`wx`), and writes the initial state in one transaction. If initialization fails, `init` removes the file.
 - Connections use `journal_mode = DELETE` and `foreign_keys = ON`. No `-wal` or `-shm` files are created; a `-journal` file exists only during an active write.
-- `PRAGMA user_version` stores the schema version (currently `6`). The tool does not migrate across schema versions; it rejects databases from older or newer schema versions and rejects SQLite files that lack the review tables.
+- `PRAGMA user_version` stores the schema version (currently `7`). The tool does not migrate across schema versions; it rejects databases from older or newer schema versions and rejects SQLite files that lack the review tables.
 
 ### 2.2 Logical data model
 
@@ -58,7 +58,7 @@ Rounds and finding updates are stored as structured columns in `intro_items` and
 | Table | Purpose |
 | --- | --- |
 | `pr_pull_requests` | Connected pull request metadata, branch refs, `head_sha`, `created_at`, and `fetched_at` |
-| `pr_reviews` | Pull request reviews (`COMMENTED`, `PENDING`, etc.), author, state, body, commit, and URL |
+| `pr_reviews` | Pull request reviews (`COMMENTED`, `PENDING`, etc.) with short `ref` (`v<id>`), author, state, body, commit, and URL |
 | `pr_threads` | Review threads with file path, current and original line ranges, `is_resolved`, and `is_outdated` |
 | `pr_comments` | Review comments and issue comments with short `ref`, thread/review IDs, reply target, body, commits, diff hunk, and URL |
 | `pr_check_runs` | Head-commit check runs that contain annotations |
@@ -68,7 +68,7 @@ The database stores at most one pull request snapshot at a time.
 
 **Link tables and relational invariants (`src/review-store.ts`):**
 
-- `linkable` stores every known ref (`r<id>` review comment, `c<id>` conversation comment, or `a<8-hex>` check annotation), its `kind`, and a boolean `gone` flag (`0` or `1`).
+- `linkable` stores every known ref (`r<id>` review comment, `c<id>` conversation comment, `v<id>` nonempty submitted pull request review body, or `a<8-hex>` check annotation), its `kind` (`review_comment`, `conversation_comment`, `review`, or `annotation`), and a boolean `gone` flag (`0` or `1`).
 - `comment_links` maps each linked `ref` (unique, foreign key to `linkable.ref`) to a `role` (`own`, `duplicate`, or `note`), an optional `finding` (`DEFERRABLE INITIALLY DEFERRED` foreign key to `findings.id`), and an optional `note`.
 - Relational invariants enforced by constraints and indexes:
   - A link can reference only a ref present in `linkable`.
@@ -76,6 +76,7 @@ The database stores at most one pull request snapshot at a time.
   - `own` and `duplicate` links must reference a finding; `note` links must not reference a finding and must include a note text.
   - Each finding can have at most one `own` link (enforced by a partial unique index).
   - Check annotations (`a…`) can only have the `duplicate` role.
+  - Pull request review bodies (`v…`) can have the `duplicate` or `note` role, never `own`.
   - The foreign key from `comment_links.finding` to `findings.id` is deferred until transaction commit so finding rows can be replaced cleanly inside a write transaction.
 
 ### 2.3 Read and write modes
@@ -101,7 +102,7 @@ After a review mutation commits (or `init` completes), the tool refreshes the co
 1. Verifies the connected pull request identity and ensures the downloaded snapshot is not older than the stored snapshot.
 2. Replaces all `pr_*` snapshot rows with the freshly downloaded data.
 3. Reconciles `linkable`:
-   - Every comment and annotation present in the new snapshot is stored in `linkable` with `gone = 0`.
+   - Every comment, nonempty submitted review body, and annotation present in the new snapshot is stored in `linkable` with `gone = 0`.
    - Any previous `linkable` row missing from the new snapshot is marked `gone = 1` if a row in `comment_links` still references it; otherwise, it is deleted.
 
 This reconciliation preserves existing links across force-pushes, deleted comments, and new check runs:
@@ -117,18 +118,19 @@ When `finding post` or `link reply` creates a comment on GitHub, the new comment
 
 1. The command loads the review read-only and validates offline preconditions.
 2. The publish or reply engine sends the request to GitHub (stopping early on `--dry-run`).
-3. On success, a write transaction verifies the connected pull request, inserts or updates the relevant comment refs in `linkable` with `gone = 0` (`finding post` records the own comment ref; `link reply` records both the target duplicate ref and the new reply ref), and saves the link or reply update.
+3. On success, a write transaction verifies the connected pull request, inserts or updates the relevant comment refs in `linkable` with `gone = 0` (`finding post` records the own comment ref; `link reply` records both the target duplicate ref and the new reply ref), and saves the link or reply update (`link reply` also auto-links the reply ref as a `note` so it does not surface in `link pending`).
 
 ## 3. Ids
 
 | Prefix | Entity | Source |
 | --- | --- | --- |
 | `F7` | Finding | Next unused integer in the review (never reused; matched case-insensitively) |
-| `r544830` | Review comment (inline or file) | GitHub database ID from `#discussion_r544830` |
+| `r544830` | Review comment (inline or file, root or reply) | GitHub database ID from `#discussion_r544830` |
 | `c623843` | Conversation (issue) comment | GitHub database ID from `#issuecomment-623843` |
+| `v91204` | Nonempty submitted pull request review body | GitHub database ID from `#pullrequestreview-91204` |
 | `a3f9c2d1e` | Check annotation | Deterministic hash (see below) |
 
-`r…` and `c…` IDs are stable when a pending review is submitted. Because the GitHub web UI cannot search comments by numeric ID, rendered reports format comment IDs as direct links (Section 8).
+`r…` and `c…` IDs are stable when a pending review is submitted, and `v…` IDs identify submitted reviews with non-empty bodies. Because the GitHub web UI cannot search comments or reviews by numeric ID, rendered reports format `r…`, `c…`, and `v…` IDs as direct links (Section 8).
 
 GitHub does not assign stable IDs to check annotations. `pr-comments` computes each annotation ID as `a` followed by the first 8 lowercase hex digits of the UTF-8 SHA-256 hash of:
 
@@ -204,7 +206,7 @@ These behaviors were verified against GitHub Enterprise Server 3.19.4 using a cl
 - GraphQL `addPullRequestReviewThreadReply` posts immediately if called without a pending review ID, creating a standalone `COMMENTED` review. To prevent accidental immediate comments, `pr-comments` always supplies a pending review ID—creating an empty pending review first if necessary and deleting that empty review if the reply mutation fails.
 - Conversation comments (`c…`) have no thread or pending state; replying creates a new conversation comment and requires `--now`.
 - GitHub rejects a conversation comment whose entire body is `Duplicate of <url>` without trailing punctuation, so duplicate replies always end with a period (`Duplicate of <url>.`).
-- Before posting a duplicate reply, `link reply` verifies that the finding's `own` comment still exists on the pull request and skips posting (`unchanged`) if an identical reply by the viewer is already in the thread.
+- Before posting a duplicate reply, `link reply` verifies that the finding's `own` comment still exists on the pull request and skips posting (`unchanged`) if an identical reply by the viewer already follows the target comment.
 - The tool never resolves threads or minimizes/edits other users' comments.
 
 ## 6. Check annotations
@@ -264,7 +266,7 @@ Report structure:
 3. `## Dashboard`: Starts with `<!-- generated by pr-comments — do not edit by hand -->` and groups findings by state (`### <marker> <count> <label>`) with numbered heading-slug anchor links.
 4. `## Findings`: One `### <state> <severity> <ID> — <title>` section per finding, containing `#### Description` and `#### Updates`.
 
-Each entry under `#### Updates` is formatted at render time from structured database columns as `<yyyy-mm-dd hh:mm> — [Round <n>: ]<event>[ — <note>]` in local time. When an update references a pull request comment (`r…` or `c…`) and the update recorded the pull request URL, the renderer formats the ref as a direct Markdown link (`[r544861](<pr-url>#discussion_r544861)` or `#issuecomment-…`). Check annotations (`a…`) have no individual GitHub URL and render as plain text.
+Each entry under `#### Updates` is formatted at render time from structured database columns as `<yyyy-mm-dd hh:mm> — [Round <n>: ]<event>[ — <note>]` in local time. When an update references a pull request comment (`r…` or `c…`) or review body (`v…`) and the update recorded the pull request URL, the renderer formats the ref as a direct Markdown link (`[r544861](<pr-url>#discussion_r544861)`, `#issuecomment-…`, or `#pullrequestreview-…`). Check annotations (`a…`) have no individual GitHub URL and render as plain text.
 
 ## 9. Revisions
 
@@ -297,7 +299,7 @@ with `LC_ALL=C`. The database stores the resolved lowercase short commit hash (a
 - **Fine-grained tokens and check annotations**: Check annotation downloads require Checks read access; if a token lacks permission to read check runs, `pr sync` fails rather than silently skipping checks.
 - **Live verification scope**: Live tests were run against GitHub Enterprise Server 3.19.4 with a classic token. Behavior on `github.com`, fine-grained token edge cases, head-branch pushes while a pending review exists, and cross-hunk line ranges were not live-tested.
 - **Pending review visibility and edit markers**: Pending reviews are visible only to their author's token, and GitHub does not set `lastEditedAt` when a pending comment is edited before submission.
-- **Review verdict bodies**: Top-level review submission bodies have no comment ID (`r…` or `c…`), so they cannot be linked in `comment_links` and do not appear in `link pending` (they remain visible in `report comments`).
+- **Empty or pending review verdicts**: Submitted reviews with non-empty bodies receive `v<id>` refs and can be linked as `duplicate` or `note` (GitHub has no reply thread on a review body, so `link reply` applies only to `r…` and `c…` comments). Empty review verdicts (such as a bare `APPROVED` or `DISMISSED` event) and unsubmitted `PENDING` reviews have no linkable body and do not appear in `link pending` (submitted ones remain visible in unfiltered `report comments`).
 - **Head-only check annotations**: Only check annotations on the pull request's current head commit are stored; re-run `pr sync` after new commits.
 - **Single-writer binary database**: SQLite databases allow one active writer at a time.
 - **No cross-version schema migration**: Databases created by an older schema version (`PRAGMA user_version`) must be recreated with `pr-comments init`.

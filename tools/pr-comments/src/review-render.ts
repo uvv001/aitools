@@ -1,4 +1,4 @@
-import { commentLink, isAnnotationRef } from './comment-ref.ts';
+import { commentLink, isAnnotationRef, isReviewBodyRef } from './comment-ref.ts';
 import { buildDashboard } from './report-dashboard.ts';
 import type { Finding, IntroEntry, ReviewData, ReviewedItem, UpdateItem } from './review-model.ts';
 
@@ -11,8 +11,11 @@ export function formatRoundItem({ round, revision, base, notes = [] }: ReviewedI
   return [`${prefix}; ${[head, ...more].join('; ')}`, ...rest].join('\n');
 }
 
-const formatCommentSubject = (pullRequest: string | undefined, ref: string): string =>
-  isAnnotationRef(ref) ? `check annotation ${ref}` : `PR comment ${commentLink(pullRequest, ref)}`;
+function formatCommentSubject(pullRequest: string | undefined, ref: string): string {
+  if (isAnnotationRef(ref)) return `check annotation ${ref}`;
+  if (isReviewBodyRef(ref)) return `PR review ${commentLink(pullRequest, ref)}`;
+  return `PR comment ${commentLink(pullRequest, ref)}`;
+}
 
 const formatRole = (role: 'own' | 'duplicate'): string => (role === 'own' ? 'its own' : 'a duplicate');
 

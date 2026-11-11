@@ -1,21 +1,23 @@
-import { isAnnotationRef, isLinkRef } from './comment-ref.ts';
+import { isAnnotationRef, isCommentRef, isLinkRef, isReviewBodyRef } from './comment-ref.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
 import type { FindingLinkRole, PostedUpdateAction, ReviewData } from './review-model.ts';
 import { amend, oneLineText } from './review-ops.ts';
 import { findFinding } from './review-view.ts';
 
-// How a PR comment relates to the review:
+// How a PR comment, review body or check annotation relates to the review:
 // - `own`: the comment of a finding (at most one per finding): the one `finding post` publishes, or an existing
-//   comment adopted as the finding's own.
-// - `duplicate`: another comment about the same issue as a finding (many per finding).
-// - `note`: a comment that is not a finding; `note` says why. No finding.
+//   comment (`r…` or `c…`) adopted as the finding's own.
+// - `duplicate`: another comment, review body (`v…`) or check annotation (`a…`) about the same issue as a finding
+//   (many per finding).
+// - `note`: a comment or review body (`v…`) that is not a finding; `note` says why. No finding.
 // A check annotation (the issues that SonarQube and the like publish through the Checks API; the tool publishes
 // nothing of them and cannot answer them) is only ever a `duplicate`: every check item has to be tied to a finding.
+// A pull request review body (`v…`) can be a `duplicate` or a `note`, never `own`, and cannot be answered with `link reply`.
 export type LinkRole = 'own' | 'duplicate' | 'note';
 
 export interface CommentLink {
-  // The GitHub comment, as in comment-ref.ts: "r544830" (review comment) or "c623843" (conversation comment); or
-  // the check annotation "a3f9c2d1e" ("a" and eight hex digits). An item is linked once: a ref appears in at most one link.
+  // The GitHub comment ("r544830" review comment or "c623843" conversation comment), submitted review body ("v91204"),
+  // or check annotation "a3f9c2d1e" ("a" and eight hex digits). An item is linked once: a ref appears in at most one link.
   ref: string;
   role: LinkRole;
   // The finding id ("F7"): present for `own` and `duplicate`, absent for `note`.
@@ -31,9 +33,9 @@ export interface ReviewState {
   links: CommentLink[];
   // The canonical URL "https://<host>/<owner>/<repo>/pull/<number>" of the pull request; absent until connected.
   pullRequest?: string;
-  // The ids of the PR comments and check annotations that the database holds from the last `pr sync` (and that are not
-  // gone): the only ones a link may point at. The links table has a foreign key to them; the operations check it first
-  // to give a message that says what to do.
+  // The ids of the PR comments, nonempty submitted review bodies and check annotations that the database holds from the
+  // last `pr sync` (and that are not gone): the only ones a link may point at. The links table has a foreign key to
+  // them; the operations check it first to give a message that says what to do.
   known: ReadonlySet<string>;
 }
 
@@ -44,7 +46,7 @@ const REMOVE = `pr-comments link remove ${DB_HINT_PLACEHOLDER}`;
 
 function checkedRef(ref: string): void {
   if (!isLinkRef(ref)) {
-    throw new Error(`"${ref}" is not a PR comment ref; expected r544830, c623843 or a3f9c2d1e`);
+    throw new Error(`"${ref}" is not a PR comment ref; expected r544830, c623843, v91204 or a3f9c2d1e`);
   }
 }
 
@@ -62,6 +64,12 @@ const NOTHING_TO_REPLY = '; there is nothing to reply to';
 
 function refuseAnnotation(ref: string, why: string): void {
   if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation${why}`);
+}
+
+function refuseReviewBodyAsOwn(ref: string): void {
+  if (isReviewBodyRef(ref)) {
+    throw new Error(`pull request review ${ref} cannot be the own comment of a finding; link it with "link duplicate" or "link note"`);
+  }
 }
 
 const linkOf = (links: CommentLink[], ref: string): CommentLink | undefined => links.find((link) => link.ref === ref);
@@ -134,6 +142,7 @@ function linkToFinding(
 // does not exist.
 export function linkOwn(state: ReviewState, findingId: string, ref: string, now: Date, note?: string): ReviewState {
   refuseAnnotation(ref, ONLY_DUPLICATE);
+  refuseReviewBodyAsOwn(ref);
   return linkToFinding(state, findingId, ref, 'own', now, note);
 }
 
@@ -189,6 +198,7 @@ export function recordPosted(
   now: Date,
 ): ReviewState {
   refuseAnnotation(ref, ONLY_DUPLICATE);
+  refuseReviewBodyAsOwn(ref);
   const found = findFinding(state.data, findingId);
   checkedRef(ref);
   knownRef(state, ref);
@@ -203,13 +213,12 @@ export function recordPosted(
   return { ...state, data, links: own === undefined ? [...state.links, { ref, role: 'own', finding: found.id }] : state.links };
 }
 
-// What `link reply` records after answering the duplicate comment `ref` (it must be linked with the role
-// `duplicate`; anything else is an error) with the reply `replyRef`: an Updates entry of
-// its finding, `replied to duplicate r546056 with r546201` (refs as in the list above; `... in the pending review` when
-// `where` is 'pending'), no `Round n:` prefix. When that finding's Updates already hold a `replied` entry for the same
-// two refs (`ref` and `replyRef`), nothing changes and the very same state comes back: a rerun finds the reply it made,
-// and records nothing twice. The links themselves do not change. A check annotation is never answered: refused,
-// whatever the review. Only `ref` has to be in the database: the reply is no link.
+// What `link reply` records after answering the duplicate comment `ref` (it must be a comment ref `r…` or `c…` linked
+// with the role `duplicate`; anything else is an error) with the reply `replyRef`: an Updates entry of its finding,
+// `replied to duplicate r546056 with r546201` (refs as in the list above; `... in the pending review` when `where` is
+// 'pending'), no `Round n:` prefix, and a `note` link on `replyRef` (`duplicate reply to <ref>`) whenever `replyRef` is
+// not linked yet so `link pending` never lists the tool's own duplicate reply. On a rerun where the `replied` entry
+// already exists, no duplicate update is added (and when `replyRef` is already linked too, the very same state comes back).
 export function recordReplied(
   state: ReviewState,
   ref: string,
@@ -218,9 +227,17 @@ export function recordReplied(
   now: Date,
 ): ReviewState {
   refuseAnnotation(ref, NOTHING_TO_REPLY);
+  if (isReviewBodyRef(ref)) {
+    throw new Error(`${ref} is a pull request review, not a comment; only a comment (r… or c…) can be answered`);
+  }
   checkedRef(ref);
   checkedRef(replyRef);
+  if (!isCommentRef(replyRef)) {
+    throw new Error(`"${replyRef}" is not a comment id; expected r544830 or c623843`);
+  }
   knownRef(state, ref);
+  const replyLinked = state.links.some((item) => item.ref === replyRef);
+  if (!replyLinked) knownRef(state, replyRef);
   const link = linkOf(state.links, ref);
   if (link === undefined) {
     throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate ${DB_HINT_PLACEHOLDER} <finding> ${ref}"`);
@@ -233,21 +250,20 @@ export function recordReplied(
     );
   }
   const found = findFinding(state.data, link.finding!);
-  if (
-    found.updates.some(
-      (entry) =>
-        entry.kind === 'replied' &&
-        entry.ref === ref &&
-        entry.replyRef === replyRef &&
-        entry.pullRequest === state.pullRequest,
-    )
-  ) {
-    return state;
-  }
+  const alreadyRecorded = found.updates.some(
+    (entry) =>
+      entry.kind === 'replied' &&
+      entry.ref === ref &&
+      entry.replyRef === replyRef &&
+      entry.pullRequest === state.pullRequest,
+  );
+  if (alreadyRecorded && replyLinked) return state;
+  const links = replyLinked ? state.links : [...state.links, { ref: replyRef, role: 'note' as const, note: `duplicate reply to ${ref}` }];
+  if (alreadyRecorded) return { ...state, links };
   const pending = where === 'pending' ? { pending: true } : {};
   const pullRequest = state.pullRequest === undefined ? {} : { pullRequest: state.pullRequest };
   const data = amend(state.data, found, now, {}, { kind: 'replied', ref, replyRef, ...pending, ...pullRequest });
-  return { ...state, data };
+  return { ...state, data, links };
 }
 
 // Connects the review to the pull request `url` (any accepted pull request URL; stored canonical). The same

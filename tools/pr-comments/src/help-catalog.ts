@@ -89,7 +89,8 @@ const REVISIONS =
   'A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the short hash (at least 8 characters) of the commit.';
 const FINDING = arg('<finding>', 'the finding, such as F7 (any case)');
 const COMMENT_ONLY_REF = arg('<ref>', 'the comment: r544830 or c623843');
-const COMMENT_REF = arg('<ref>', 'the comment or check annotation: r544830, c623843 or a3f9c2d1e');
+const COMMENT_OR_REVIEW_REF = arg('<ref>', 'the comment or review body: r544830, c623843 or v91204');
+const COMMENT_REF = arg('<ref>', 'the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e');
 const LOGGED = 'A change is logged under the Updates of the finding, with the time.';
 
 function spec(
@@ -129,7 +130,7 @@ export const GROUP_SPECS: GroupSpec[] = [
     title: 'Links',
     summary: 'the links between findings and the comments of the pull request',
     description:
-      'A link ties a comment or a check annotation of the pull request to the review. Its role is `own` (the comment of a finding, at most one per finding), `duplicate` (the same issue as a finding, any number) or `note` (a comment that is no finding, with the reason). A ref is linked once. Links are records in the database only. The refs must be in the downloaded pull request, so run `pr sync` first.',
+      'A link ties a comment, a nonempty submitted review body or a check annotation of the pull request to the review. Its role is `own` (the comment of a finding, at most one per finding; `r…` or `c…` only), `duplicate` (the same issue as a finding, any number) or `note` (a comment or review body that is no finding, with the reason). A ref is linked once. Links are records in the database only. The refs must be in the downloaded pull request, so run `pr sync` first.',
   },
   { name: 'report', title: 'Reports', summary: 'what is made from the database' },
 ];
@@ -290,11 +291,10 @@ export const COMMAND_SPECS: CommandSpec[] = [
   ),
   spec(
     'link pending',
-    'lists the comments and check annotations not linked yet',
-    'Prints one line per top-level comment or check annotation of the synced pull request that no link names: ref, author or app, place,\n' +
-      'state or level, and an excerpt. Nothing is printed when everything is processed (use "report comments" to inspect thread replies,\n' +
-      'edited comments, and submitted review bodies). Replies are not listed; their thread is the root comment.\n' +
-      'It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.',
+    'lists the comments, review bodies and check annotations not linked yet',
+    'Prints one line per comment (thread roots and replies), nonempty submitted review body or check annotation of the synced\n' +
+      'pull request that no link names: ref, author or app, place, state or level, and an excerpt. Nothing is printed when\n' +
+      'everything is processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.',
     { database: 'readonly' },
   ),
   spec(
@@ -305,29 +305,29 @@ export const COMMAND_SPECS: CommandSpec[] = [
   ),
   spec(
     'link duplicate',
-    'links a comment or check annotation about the same issue',
-    'Links a comment or a check annotation as a duplicate of the finding (a finding may have several).',
+    'links a comment, review body or check annotation about the same issue',
+    'Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have several).',
     { args: [FINDING, COMMENT_REF], options: [noteOption()], example: 'F7 c623843' },
   ),
   spec(
     'link note',
-    'records that a comment is not a finding, and why',
-    'Records that the comment is no finding, with the reason. A check annotation cannot be a note.',
-    { args: [COMMENT_ONLY_REF, arg('<text>', 'the reason, one line')], example: 'c623843 "a bot, not a finding"' },
+    'records that a comment or review body is not a finding, and why',
+    'Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note.',
+    { args: [COMMENT_OR_REVIEW_REF, arg('<text>', 'the reason, one line')], example: 'c623843 "a bot, not a finding"' },
   ),
   spec(
     'link remove',
-    'removes the link of a comment or check annotation',
-    'Removes the link of the comment, whatever its role; the comment is pending again.',
+    'removes the link of a comment, review body or check annotation',
+    'Removes the link of the comment, review body or check annotation, whatever its role; it is pending again.',
     { args: [COMMENT_REF], options: [noteOption()], example: 'r544861' },
   ),
   spec(
     'link reply',
     'answers a duplicate with "Duplicate of <link>."',
     'Answers a comment that is linked as a duplicate of a finding with "Duplicate of <link to the own comment of the finding>."\n' +
-      'in your pending review, and records the returned reply ref and update in the database (run "pr-comments pr sync --db <file.sqlite>"\n' +
-      'to refresh the full pull request snapshot). The finding must have an own comment. Needs a token with write permission.\n' +
-      'A conversation comment can only be answered at once, so it needs --now. The thread is never resolved by the tool.',
+      'in your pending review, and records the returned reply ref (linked as a note) and update in the database (run\n' +
+      '"pr-comments pr sync --db <file.sqlite>" to refresh the full pull request snapshot). The finding must have an own comment.\n' +
+      'Needs a token with write permission. A conversation comment can only be answered at once, so it needs --now. The thread is never resolved by the tool.',
     {
       args: [arg('<ref>', 'the comment that is linked as a duplicate: r544830 or c623843')],
       options: postOptions,
@@ -354,12 +354,12 @@ export const COMMAND_SPECS: CommandSpec[] = [
       'screen unless --out is given. Run "pr-comments pr sync --db <file.sqlite>" first.',
     {
       options: [
-        opt('ref', '<ref>', 'only these comments or check annotations (several refs comma-separated); a review comment includes its thread', { repeatable: true }),
-        flag('pending', 'only comments and check annotations that no link names yet'),
+        opt('ref', '<ref>', 'only these comments, review bodies or check annotations (several refs comma-separated); a review comment includes its thread', { repeatable: true }),
+        flag('pending', 'only comments, nonempty submitted review bodies and check annotations that no link names yet'),
         opt('out', '<file.md>', 'write the markdown to this file'),
       ],
       notes: [
-        'With `--ref` or `--pending`, review bodies are not shown. An unknown `--ref` gives a warning, and a malformed ref is an error.',
+        'With `--ref` or `--pending`, matching threads keep their non-matching comments marked `_(context)_`, and empty or pending review bodies are omitted. An unknown `--ref` gives a warning, and a malformed ref is an error.',
         'On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.',
       ],
       database: 'readonly',

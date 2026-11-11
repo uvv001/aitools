@@ -193,15 +193,21 @@ describe('refusals before anything is sent', () => {
     await sameBytes(db, before);
   });
 
-  it('refuses a check annotation before reading the database, even when linked as a duplicate', async () => {
+  it('refuses a check annotation or pull request review before reading the database, even when linked as a duplicate', async () => {
     const db = await startReview();
-    await syncReviewFile(db, snapshot([...BASE, 'a3f9c2d1e']));
-    await changeReviewState(db, (current) => ({ state: linkDuplicate(current, 'F1', 'a3f9c2d1e', NOW), result: undefined }));
+    await syncReviewFile(db, snapshot([...BASE, 'a3f9c2d1e', 'v91204']));
+    await changeReviewState(db, (current) => ({
+      state: linkDuplicate(linkDuplicate(current, 'F1', 'a3f9c2d1e', NOW), 'F1', 'v91204', NOW),
+      result: undefined,
+    }));
     const before = await readFile(db);
     const fake = engine(created());
 
     await expect(replyToDuplicate(db, 'a3f9c2d1e', OPTIONS, fake.deps)).rejects.toThrow(
       new Error('a3f9c2d1e is a check annotation; there is nothing to reply to'),
+    );
+    await expect(replyToDuplicate(db, 'v91204', OPTIONS, fake.deps)).rejects.toThrow(
+      new Error('v91204 is a pull request review, not a comment; only a comment (r… or c…) can be answered'),
     );
     expect(fake.calls).toEqual([]);
     await sameBytes(db, before);
@@ -299,7 +305,7 @@ describe('the request handed to the engine', () => {
 });
 
 describe('recording the reply', () => {
-  it('records a reply created in the pending review under the finding of the duplicate', async () => {
+  it('records a reply created in the pending review under the finding of the duplicate and auto-links the reply as a note', async () => {
     const db = await startReview();
     const before = await loadReviewFile(db);
 
@@ -314,7 +320,7 @@ describe('recording the reply', () => {
       pending: true,
       pullRequest: PR,
     });
-    expect(after.links).toEqual(before.links);
+    expect(after.links).toEqual([...before.links, { ref: 'r10', role: 'note', note: 'duplicate reply to r2' }]);
     expect(after.pullRequest).toBe(PR);
     expect(replied.result).toEqual({
       action: 'created',
@@ -325,6 +331,20 @@ describe('recording the reply', () => {
       target: { ref: 'r2', author: 'Reviewer', kind: 'review', resolved: false },
     });
     await expectSound(db);
+  });
+
+  it('re-links replyRef as a note on an idempotent rerun if its note link was removed, without duplicating the replied update', async () => {
+    const db = await startReview();
+    await reply(db, 'r2', created('r10'));
+    await changeReviewState(db, (state) => ({ state: unlink(state, 'r10', NOW), result: undefined }));
+    const updatesBefore = (await loadReviewFile(db)).data.findings.find((f) => f.id === 'F1')!.updates;
+
+    const { replied } = await reply(db, 'r2', unchanged('r10'));
+
+    expect(replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
+    const after = await loadReviewFile(db);
+    expect(after.links.at(-1)).toEqual({ ref: 'r10', role: 'note', note: 'duplicate reply to r2' });
+    expect(after.data.findings.find((f) => f.id === 'F1')!.updates).toStrictEqual(updatesBefore);
   });
 
   it('records an identical reply on the first run, and writes nothing on a second run or rerun', async () => {

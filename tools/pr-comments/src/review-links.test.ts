@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAnnotationRef, isLinkRef } from './comment-ref.ts';
+import { isAnnotationRef, isLinkRef, isReviewBodyRef } from './comment-ref.ts';
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, linksOf, recordPosted, recordReplied, unlink } from './review-links.ts';
 import type { CommentLink, PostedAction, ReviewState } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
@@ -17,11 +17,14 @@ const START = '2026-10-08 09:05';
 const PR = 'https://github.com/acme/widgets/pull/42';
 
 const REMOVE = 'pr-comments link remove --db <file.sqlite>';
-const FORMS = 'expected r544830, c623843 or a3f9c2d1e';
+const FORMS = 'expected r544830, c623843, v91204 or a3f9c2d1e';
 const ANNOTATION = 'a3f9c2d1e';
+const REVIEW_BODY = 'v91204';
 const ONLY_DUPLICATE = `${ANNOTATION} is a check annotation: it can only be linked as a duplicate of a finding (the tool does not publish it, and every check item has to be tied to a finding)`;
 const NOT_A_NOTE = `${ANNOTATION} is a check annotation: every check item has to be tied to a finding, so it cannot be recorded as a note; link it to a finding (add one with "pr-comments finding add --db <file.sqlite>" when none covers it)`;
 const NO_REPLY = `${ANNOTATION} is a check annotation; there is nothing to reply to`;
+const REVIEW_NOT_OWN = `pull request review ${REVIEW_BODY} cannot be the own comment of a finding; link it with "link duplicate" or "link note"`;
+const REVIEW_NO_REPLY = `${REVIEW_BODY} is a pull request review, not a comment; only a comment (r… or c…) can be answered`;
 const unknownRef = (ref: string): string => `${ref} is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id`;
 
 // `minutes` after the start of the test review: 2026-10-08 09:05, local time.
@@ -94,7 +97,12 @@ const KNOWN = [
   ...Array.from({ length: 30 }, (_, index) => `c${index + 1}`),
   'r544861',
   'r544900',
+  'r546201',
   'c623843',
+  'c623900',
+  'v1',
+  'v2',
+  'v91204',
   'a3f9c2d1e',
   'a1b2c3d4e',
 ];
@@ -540,7 +548,7 @@ describe('recordReplied', () => {
     ['pending', 'replied to duplicate r2 with r10 in the pending review'],
     ['posted', 'replied to duplicate r2 with r10'],
     [undefined, 'replied to duplicate r2 with r10'],
-  ] as const)('(%s) logs "%s" under the finding of the duplicate and changes nothing else', (where, text) => {
+  ] as const)('(%s) logs "%s" under the finding of the duplicate and auto-links the reply as a note', (where, text) => {
     const before = input();
     const result = changes(before, reply('r2', 'r10', where));
     expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — ${text}`);
@@ -548,20 +556,22 @@ describe('recordReplied', () => {
     expect(updatesOf(result, 'F2')).toStrictEqual(updatesOf(before, 'F2'));
     expect(updatesOf(result, 'F3')).toStrictEqual(updatesOf(before, 'F3'));
     expect(withoutUpdates(result.data)).toStrictEqual(withoutUpdates(before.data));
-    expect(result.links).toStrictEqual(links());
+    expect(result.links).toStrictEqual([...links(), note('r10', 'duplicate reply to r2')]);
   });
 
   it('logs the finding of the duplicate, for a conversation comment and a finding without an own comment too', () => {
     const result = changes(input(), reply('r4', 'c11', 'posted'));
     expect(updatesOf(result, 'F2').at(-1)).toBe(`${stamp(5)} — replied to duplicate r4 with c11`);
+    expect(result.links.at(-1)).toStrictEqual(note('c11', 'duplicate reply to r4'));
     const conversation = changes(input(), reply('c3', 'c12', 'posted'));
     expect(updatesOf(conversation, 'F1').at(-1)).toBe(`${stamp(5)} — replied to duplicate c3 with c12`);
+    expect(conversation.links.at(-1)).toStrictEqual(note('c12', 'duplicate reply to c3'));
   });
 
-  it('hands on the links and the pull request as they are', () => {
-    const before = { ...input(), pullRequest: PR };
-    reuses(before, reply('r2', 'r10', 'pending'), 'links');
-    expect(changes(before, reply('r2', 'r10', 'pending')).pullRequest).toBe(PR);
+  it('keeps an existing link on replyRef untouched and preserves pullRequest', () => {
+    const alreadyLinkedReply = { ...stateWith([...links(), note('r10', 'already noted')]), pullRequest: PR };
+    reuses(alreadyLinkedReply, reply('r2', 'r10', 'pending'), 'links');
+    expect(changes(alreadyLinkedReply, reply('r2', 'r10', 'pending')).pullRequest).toBe(PR);
   });
 
   it('writes no Round prefix and the time it is given', () => {
@@ -577,7 +587,7 @@ describe('recordReplied', () => {
     },
   );
 
-  it('finds an entry that carries a remark on its structured record', () => {
+  it('auto-links replyRef on an idempotent rerun when the replied update exists without a link on replyRef', () => {
     const base = input();
     const findings = base.data.findings.map((finding) =>
       finding.id === 'F1'
@@ -587,7 +597,11 @@ describe('recordReplied', () => {
           }
         : finding,
     );
-    stays({ ...base, data: { ...base.data, findings } }, reply('r2', 'r10', 'pending'));
+    const withoutReplyLink = { ...base, data: { ...base.data, findings } };
+    reuses(withoutReplyLink, reply('r2', 'r10', 'pending'), 'data');
+    const relinked = changes(withoutReplyLink, reply('r2', 'r10', 'pending'));
+    expect(relinked.links).toStrictEqual([...links(), note('r10', 'duplicate reply to r2')]);
+    stays(relinked, reply('r2', 'r10', 'pending'));
   });
 
   it('adds another entry for another reply, another duplicate, or the same words under another finding', () => {
@@ -643,15 +657,21 @@ describe('recordReplied', () => {
     refuses(input(), reply('r2', 'x10', 'pending'), `"x10" is not a PR comment ref; ${FORMS}`);
   });
 
-  it('does not ask the database for the reply: it is no link', () => {
-    const result = changes(input(), reply('r2', 'r999', 'pending'));
+  it('requires replyRef to be in known when creating its auto-note link, and allows an already-linked replyRef', () => {
+    refuses(input(), reply('r2', 'r999', 'pending'), unknownRef('r999'));
+    const alreadyLinkedGone = without(stateWith([...links(), note('r999', 'existing')]), 'r999');
+    const result = changes(alreadyLinkedGone, reply('r2', 'r999', 'pending'));
     expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — replied to duplicate r2 with r999 in the pending review`);
   });
 
-  it('refuses a ref that is no comment ref, and a reply that is none', () => {
+  it('refuses a ref that is no comment ref, and a reply that is none (including review bodies and annotations)', () => {
     refuses(input(), reply('2', 'r10', 'pending'), `"2" is not a PR comment ref; ${FORMS}`);
+    refuses(input(), reply(REVIEW_BODY, 'r10', 'pending'), REVIEW_NO_REPLY);
     for (const replyRef of ['', '10', 'R10', 'r10 ', 'x10', 'issuecomment-10']) {
       refuses(input(), reply('r2', replyRef, 'pending'), `"${replyRef}" is not a PR comment ref; ${FORMS}`);
+    }
+    for (const nonComment of [REVIEW_BODY, ANNOTATION]) {
+      refuses(input(), reply('r2', nonComment, 'pending'), `"${nonComment}" is not a comment id; expected r544830 or c623843`);
     }
   });
 });
@@ -1018,7 +1038,8 @@ describe('comment links in the Updates', () => {
             }
           : finding,
       );
-      stays({ ...base, data: { ...base.data, findings } }, reply('r544900', 'r546201', 'pending'));
+      const withReplyNote = { ...base, links: [...base.links, note('r546201', 'duplicate reply to r544900')], data: { ...base.data, findings } };
+      stays(withReplyNote, reply('r544900', 'r546201', 'pending'));
     });
 
     it('adds another entry for another reply or another duplicate', () => {
@@ -1053,6 +1074,38 @@ describe('comment links in the Updates', () => {
   });
 });
 
+describe('pull request review bodies', () => {
+  const PULL = 'https://ghe.example.com/acme/widgets/pull/157';
+  const LINKED_REVIEW = '[v91204](https://ghe.example.com/acme/widgets/pull/157#pullrequestreview-91204)';
+
+  it('refuses a review body as own in linkOwn and recordPosted', () => {
+    refuses(stateWith(), (state) => linkOwn(state, 'F1', REVIEW_BODY, at(5)), REVIEW_NOT_OWN);
+    refuses(stateWith(), (state) => linkOwn(state, 'F9', REVIEW_BODY, at(5)), REVIEW_NOT_OWN);
+    refuses(without(stateWith(), REVIEW_BODY), (state) => linkOwn(state, 'F1', REVIEW_BODY, at(5)), REVIEW_NOT_OWN);
+    for (const action of ['created', 'updated', 'unchanged'] as const) {
+      refuses(stateWith(), (state) => recordPosted(state, 'F1', REVIEW_BODY, action, 'posted', at(5)), REVIEW_NOT_OWN);
+    }
+  });
+
+  it('links and unlinks a review body as duplicate or note, formatting PR review links in Updates', () => {
+    const connected = { ...stateWith(), pullRequest: PULL };
+    const dup = changes(connected, (state) => linkDuplicate(state, 'F1', REVIEW_BODY, at(5), 'review summary'));
+    expect(dup.links).toStrictEqual([duplicate(REVIEW_BODY, 'F1')]);
+    expect(updatesOf(dup, 'F1').at(-1)).toBe(`${stamp(5)} — PR review ${LINKED_REVIEW} linked as a duplicate — review summary`);
+
+    const unlinked = changes(dup, (state) => unlink(state, REVIEW_BODY, at(6)));
+    expect(unlinked.links).toEqual([]);
+    expect(updatesOf(unlinked, 'F1').at(-1)).toBe(`${stamp(6)} — PR review ${LINKED_REVIEW} unlinked (was a duplicate)`);
+
+    const bareDup = changes(stateWith(), (state) => linkDuplicate(state, 'F1', REVIEW_BODY, at(5)));
+    expect(updatesOf(bareDup, 'F1').at(-1)).toBe(`${stamp(5)} — PR review ${REVIEW_BODY} linked as a duplicate`);
+
+    const noted = changes(connected, (state) => linkNote(state, REVIEW_BODY, 'overall LGTM'));
+    expect(noted.links).toStrictEqual([note(REVIEW_BODY, 'overall LGTM')]);
+    expect(changes(noted, (state) => unlink(state, REVIEW_BODY, at(6))).links).toEqual([]);
+  });
+});
+
 // A seeded walk over the link operations: every operation is either refused, with the state unchanged, or leaves a
 // state whose links keep their rules and whose review is otherwise untouched.
 describe('random walks over the link operations', () => {
@@ -1060,7 +1113,7 @@ describe('random walks over the link operations', () => {
   const pick = <Item>(random: Random, items: readonly Item[]): Item => items[Math.floor(random() * items.length)] as Item;
 
   const NOTES = ['plain', 'two words', 'a\nb', '  ', 'x\u0007y'];
-  const REFS = ['r1', 'r2', 'r3', 'r4', 'c1', 'c2', 'c3', 'a3f9c2d1e', 'a1b2c3d4e', 'r999', 'x1', ''];
+  const REFS = ['r1', 'r2', 'r3', 'r4', 'c1', 'c2', 'c3', 'v1', 'v2', 'a3f9c2d1e', 'a1b2c3d4e', 'r999', 'x1', ''];
   const PULL_REQUESTS = [PR, 'https://GitHub.com/Acme/Widgets/pull/42', 'https://github.com/acme/widgets/pull/43', 'https://github.com/acme/widgets/issues/1'];
   const WHERES = ['pending', 'posted', undefined] as const;
   const OPERATIONS = 8;
@@ -1099,6 +1152,7 @@ describe('random walks over the link operations', () => {
       expect(isLinkRef(link.ref), label).toBe(true);
       expect(state.known.has(link.ref), label).toBe(true);
       if (isAnnotationRef(link.ref)) expect(link.role, label).toBe('duplicate');
+      if (isReviewBodyRef(link.ref)) expect(link.role, label).not.toBe('own');
       if (link.role === 'note') {
         expect(Object.keys(link).sort(), label).toStrictEqual(['note', 'ref', 'role']);
         expect(link.note, label).toMatch(/^\S(?:.*\S)?$/u);

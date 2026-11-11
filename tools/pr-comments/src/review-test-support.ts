@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { commentUrl, isAnnotationRef } from './comment-ref.ts';
-import type { CheckRun, Comment, PullRequest, PullRequestData } from './model.ts';
+import { commentUrl, isAnnotationRef, isReviewBodyRef } from './comment-ref.ts';
+import type { CheckRun, Comment, PullRequest, PullRequestData, Review } from './model.ts';
 import type { ReviewData } from './review-model.ts';
 import { renderReport } from './review-render.ts';
 
@@ -20,13 +20,25 @@ export function removeScratch(dir: string): void {
 }
 
 // A downloaded pull request, as the snapshot of a review: the pull request https://github.com/owner/repo/pull/42 with
-// one comment or check annotation per ref (`r…` a review comment, `c…` a conversation comment, `a…` an annotation of
-// one check run). Everything else of it is fixed.
+// one comment, submitted review body or check annotation per ref (`r…` a review comment, `c…` a conversation comment,
+// `v…` a submitted review body, `a…` an annotation of one check run). Everything else of it is fixed.
 export function snapshotOf(refs: string[], pullRequest: Partial<PullRequest> = {}): PullRequestData {
   const url = 'https://github.com/owner/repo/pull/42';
   const stamp = '2026-10-08T09:05:00Z';
+  const reviews: Review[] = refs
+    .filter(isReviewBodyRef)
+    .map((ref, at) => ({
+      id: `rev-${ref}`,
+      author: 'carol',
+      state: 'CHANGES_REQUESTED',
+      body: `Review ${at}.`,
+      submittedAt: stamp,
+      editedAt: null,
+      commitSha: 'c'.repeat(40),
+      url: commentUrl(url, ref),
+    }));
   const comments: Comment[] = refs
-    .filter((ref) => !isAnnotationRef(ref))
+    .filter((ref) => !isAnnotationRef(ref) && !isReviewBodyRef(ref))
     .map((ref, at) => ({
       id: `id-${ref}`,
       kind: ref.startsWith('r') ? 'review' : 'issue',
@@ -77,7 +89,7 @@ export function snapshotOf(refs: string[], pullRequest: Partial<PullRequest> = {
       fetchedAt: stamp,
       ...pullRequest,
     },
-    reviews: [],
+    reviews,
     threads: [],
     comments,
     checkRuns,

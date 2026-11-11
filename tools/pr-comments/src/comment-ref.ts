@@ -1,11 +1,20 @@
 import { createHash } from 'node:crypto';
+import type { Review } from './model.ts';
 
 // The short id of a GitHub comment, taken from the numbers in its URL: "r544830" is a review comment
 // (`#discussion_r544830`), "c623843" a conversation comment (`#issuecomment-623843`).
 const REF_PATTERN = /^[rc]\d+$/;
 
+// The short id of a submitted pull request review body: "v91204" (`#pullrequestreview-91204`). Kept distinct from
+// `isCommentRef` because GitHub's comment publish/reply mutations work only on `r…` and `c…` comments.
+const REVIEW_BODY_PATTERN = /^v\d+$/;
+
 export function isCommentRef(value: string): boolean {
   return REF_PATTERN.test(value);
+}
+
+export function isReviewBodyRef(value: string): boolean {
+  return REVIEW_BODY_PATTERN.test(value);
 }
 
 export function commentRefFromUrl(url: string): string | undefined {
@@ -15,20 +24,37 @@ export function commentRefFromUrl(url: string): string | undefined {
   return conversation ? `c${conversation[1]}` : undefined;
 }
 
-// The link to a comment on its pull request: "<pull request url>#discussion_r544830" for a review comment,
-// "<pull request url>#issuecomment-623843" for a conversation comment. This is also the form of a comment that is
-// still in a pending review: it works for everybody once that review is submitted.
-export function commentUrl(pullRequestUrl: string, ref: string): string {
-  if (!isCommentRef(ref)) throw new Error(`"${ref}" is not a comment id; expected r544830 or c623843`);
-  const base = pullRequestUrl.replace(/#.*$/, '');
-  return ref.startsWith('r') ? `${base}#discussion_${ref}` : `${base}#issuecomment-${ref.slice(1)}`;
+export function reviewRefFromUrl(url: string): string | undefined {
+  const review = /#pullrequestreview-(\d+)$/.exec(url);
+  return review ? `v${review[1]}` : undefined;
 }
 
-// A comment id as a markdown link to the comment, "[r544830](<pull request url>#discussion_r544830)": the web UI cannot
-// search by id, so a report carries the URL next to every id. Anything that is not a comment id (a check annotation),
-// or a review that is not connected to a pull request, keeps the bare ref.
+// Only a submitted review (`state !== 'PENDING'`) with non-empty text has a linkable `v<id>` review-body ref.
+export function linkableReviewRef(review: Pick<Review, 'state' | 'body' | 'url'>): string | undefined {
+  return review.state !== 'PENDING' && review.body.trim() !== '' ? reviewRefFromUrl(review.url) : undefined;
+}
+
+// The link to a comment or pull request review on its pull request: "<pull request url>#discussion_r544830" for a
+// review comment, "<pull request url>#issuecomment-623843" for a conversation comment, or
+// "<pull request url>#pullrequestreview-91204" for a pull request review. This is also the form of a comment that is
+// still in a pending review: it works for everybody once that review is submitted.
+export function commentUrl(pullRequestUrl: string, ref: string): string {
+  if (!isCommentRef(ref) && !isReviewBodyRef(ref)) {
+    throw new Error(`"${ref}" is not a comment or pull request review id; expected r544830, c623843 or v91204`);
+  }
+  const base = pullRequestUrl.replace(/#.*$/, '');
+  if (ref.startsWith('r')) return `${base}#discussion_${ref}`;
+  if (ref.startsWith('c')) return `${base}#issuecomment-${ref.slice(1)}`;
+  return `${base}#pullrequestreview-${ref.slice(1)}`;
+}
+
+// A comment or review id as a markdown link, "[r544830](<pull request url>#discussion_r544830)": the web UI cannot
+// search by id, so a report carries the URL next to every id. Anything without a URL (a check annotation), or a review
+// that is not connected to a pull request, keeps the bare ref.
 export function commentLink(pullRequestUrl: string | undefined, ref: string): string {
-  return pullRequestUrl === undefined || !isCommentRef(ref) ? ref : `[${ref}](${commentUrl(pullRequestUrl, ref)})`;
+  return pullRequestUrl === undefined || (!isCommentRef(ref) && !isReviewBodyRef(ref))
+    ? ref
+    : `[${ref}](${commentUrl(pullRequestUrl, ref)})`;
 }
 
 // The id of a check annotation (the "Check failure on line 132" items of a check run, such as SonarQube's), which has
@@ -41,9 +67,9 @@ export function isAnnotationRef(value: string): boolean {
   return ANNOTATION_PATTERN.test(value);
 }
 
-// What a review links to: a comment ("r544830", "c623843") or a check annotation ("a3f9c2d1e").
+// What a review links to: a comment ("r544830", "c623843"), a pull request review body ("v91204") or a check annotation ("a3f9c2d1e").
 export function isLinkRef(value: string): boolean {
-  return isCommentRef(value) || isAnnotationRef(value);
+  return isCommentRef(value) || isReviewBodyRef(value) || isAnnotationRef(value);
 }
 
 export function annotationRef(app: string, path: string, startLine: number, endLine: number, message: string): string {

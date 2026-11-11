@@ -14,16 +14,17 @@ import type {
 } from './review-model.ts';
 import { PULL_REQUEST_SCHEMA } from './store.ts';
 
-export const REVIEW_SCHEMA_VERSION = 6;
+export const REVIEW_SCHEMA_VERSION = 7;
 
 // Every table of the review is STRICT (typed columns). Lists keep their order in `position`. Rounds and finding
 // updates are stored as structured columns (`intro_items` and `updates`), never as pre-rendered Markdown text.
 //
-// `linkable` holds the PR comments and check annotations that a link may point at (the tables `pr_*` hold the pull
-// request itself, see store.ts): `gone` marks one that the last sync no longer found but a link still names. The
-// foreign key from a link to its finding is deferred because `saveReview` deletes all findings and inserts them
-// again; it is checked when the transaction commits. The one to `linkable` is not: the snapshot is saved before the
-// links. Of the links, a check annotation (the ref starts with "a") is only ever a duplicate.
+// `linkable` holds the PR comments, nonempty submitted review bodies and check annotations that a link may point at
+// (the tables `pr_*` hold the pull request itself, see store.ts): `gone` marks one that the last sync no longer found
+// but a link still names. The foreign key from a link to its finding is deferred because `saveReview` deletes all
+// findings and inserts them again; it is checked when the transaction commits. The one to `linkable` is not: the
+// snapshot is saved before the links. Of the links, a check annotation (the ref starts with "a") is only ever a
+// duplicate, and a pull request review body (the ref starts with "v") is never an own comment.
 const SCHEMA = `
 CREATE TABLE review (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -86,10 +87,10 @@ CREATE TABLE meta (
 
 CREATE TABLE linkable (
   ref TEXT PRIMARY KEY CHECK (
-    (ref GLOB '[rc][0-9]*' AND substr(ref, 2) NOT GLOB '*[^0-9]*')
+    (ref GLOB '[rcv][0-9]*' AND substr(ref, 2) NOT GLOB '*[^0-9]*')
     OR (length(ref) = 9 AND ref GLOB 'a[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]')
   ),
-  kind TEXT NOT NULL CHECK (kind IN ('review_comment', 'conversation_comment', 'annotation')),
+  kind TEXT NOT NULL CHECK (kind IN ('review_comment', 'conversation_comment', 'review', 'annotation')),
   gone INTEGER NOT NULL DEFAULT 0 CHECK (gone IN (0, 1))
 ) STRICT;
 
@@ -101,7 +102,8 @@ CREATE TABLE comment_links (
   note TEXT,
   CHECK ((role = 'note') = (finding IS NULL)),
   CHECK ((role = 'note') = (note IS NOT NULL)),
-  CHECK (ref NOT GLOB 'a*' OR role = 'duplicate')
+  CHECK (ref NOT GLOB 'a*' OR role = 'duplicate'),
+  CHECK (ref NOT GLOB 'v*' OR role != 'own')
 ) STRICT;
 
 CREATE UNIQUE INDEX comment_links_own ON comment_links (finding) WHERE role = 'own';

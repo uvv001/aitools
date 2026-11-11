@@ -47,8 +47,8 @@ describe('openReviewDb', () => {
   it('creates the folders and a database at the current schema version', () => {
     const path = join(dir, 'a', 'b', 'r.sqlite');
     const db = openReviewDb(path, 'create');
-    expect(REVIEW_SCHEMA_VERSION).toBe(6);
-    expect(pragma(db, 'user_version')).toBe(6);
+    expect(REVIEW_SCHEMA_VERSION).toBe(7);
+    expect(pragma(db, 'user_version')).toBe(7);
     expect(pragma(db, 'journal_mode')).toBe('delete');
     expect(pragma(db, 'foreign_keys')).toBe(1);
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all();
@@ -293,12 +293,12 @@ describe('openReviewDb', () => {
 
       const bare = reviewFile('bare.sqlite');
       const other = new DatabaseSync(bare);
-      other.exec('PRAGMA user_version = 8');
+      other.exec('PRAGMA user_version = 9');
       other.close();
-      expect(() => openReviewDb(bare, mode)).toThrow(`${bare} was written by a newer pr-comments (schema 8); update the tool`);
+      expect(() => openReviewDb(bare, mode)).toThrow(`${bare} was written by a newer pr-comments (schema 9); update the tool`);
     });
 
-    it.each([1, 2, 3, 4, 5])('refuses a database of the older schema %i, and leaves it as it was', (version) => {
+    it.each([1, 2, 3, 4, 5, 6])('refuses a database of the older schema %i, and leaves it as it was', (version) => {
       const path = reviewFile();
       openReviewDb(path, 'create').close();
       const raw = new DatabaseSync(path);
@@ -628,8 +628,11 @@ function generated(seed: number): ReviewData {
       case 'note':
         return { kind, ...baseFields, note: text() };
       case 'linked':
-      case 'unlinked':
-        return { kind, ...baseFields, ref: pick(['r1', 'c2', 'a3f9c2d1e']), role: pick(['own', 'duplicate'] as const), ...part('pullRequest', text) };
+      case 'unlinked': {
+        const ref = pick(['r1', 'c2', 'v5', 'a3f9c2d1e']);
+        const role = ref === 'v5' || ref === 'a3f9c2d1e' ? 'duplicate' : pick(['own', 'duplicate'] as const);
+        return { kind, ...baseFields, ref, role, ...part('pullRequest', text) };
+      }
       case 'posted': {
         const action = pick(['created', 'updated', 'unchanged'] as const);
         return {
@@ -778,7 +781,7 @@ const WITH_ANNOTATIONS: CommentLink[] = [
 // annotation of the stored pull request: a link needs its row in `linkable`.
 const SNAPSHOT_REFS = [
   ...new Set([...LINKS, ...WITH_ANNOTATIONS].map((link) => link.ref)),
-  ...['r99', 'r100', 'r101', 'r102', 'c1', 'a00000000', 'aabcdef01', 'a12345678'],
+  ...['r99', 'r100', 'r101', 'r102', 'c1', 'v5', 'v91204', 'a00000000', 'aabcdef01', 'a12345678'],
 ];
 
 function openWithLinks(links: CommentLink[] = LINKS): DatabaseSync {
@@ -886,6 +889,7 @@ describe('the schema of the links rejects invalid states', () => {
     ['a role outside the three', insert("9, 'r99', 'other', 'F2', NULL")],
     ['a check annotation as an own link', insert("9, 'a00000000', 'own', 'F2', NULL")],
     ['a check annotation as a note', insert("9, 'a00000000', 'note', NULL, 'why'")],
+    ['a pull request review body as an own link', insert("9, 'v91204', 'own', 'F2', NULL")],
     ['a ref that no comment or check annotation of the pull request has', insert("9, 'r5555', 'duplicate', 'F2', NULL")],
     ['a link to a finding that does not exist', insert("9, 'r99', 'duplicate', 'F99', NULL")],
     ['deleting a finding that is linked', "DELETE FROM findings WHERE id = 'F2'"],
@@ -927,11 +931,21 @@ describe('the schema of the links rejects invalid states', () => {
     db.close();
   });
 
-  it('refuses an annotation that is not a duplicate with the check of its role', () => {
+  it('refuses an annotation that is not a duplicate and a review body that is own, while allowing review bodies as duplicate or note', () => {
     const db = openWithLinks();
     expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'own', finding: 'F1' }])).toThrow(/CHECK constraint failed/u);
     expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'note', note: 'why' }])).toThrow(/CHECK constraint failed/u);
-    saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' }]);
+    expect(() => saveLinks(db, [{ ref: 'v91204', role: 'own', finding: 'F1' }])).toThrow(/CHECK constraint failed/u);
+    saveLinks(db, [
+      { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' },
+      { ref: 'v91204', role: 'duplicate', finding: 'F1' },
+      { ref: 'v5', role: 'note', note: 'summary verdict' },
+    ]);
+    expect(loadLinks(db)).toStrictEqual([
+      { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' },
+      { ref: 'v91204', role: 'duplicate', finding: 'F1' },
+      { ref: 'v5', role: 'note', note: 'summary verdict' },
+    ]);
     db.close();
   });
 });
@@ -997,9 +1011,13 @@ describe('the schema of linkable', () => {
   it.each([
     ['a ref that starts with another letter', 'x99'],
     ['a ref with an upper-case letter', 'R99'],
+    ['a review ref with an upper-case letter', 'V99'],
     ['a ref without a number', 'r'],
+    ['a review ref without a number', 'v'],
     ['a ref with letters after the number', 'r99a'],
+    ['a review ref with letters after the number', 'v99a'],
     ['a ref with a sign', 'r-9'],
+    ['a review ref with a sign', 'v-9'],
     ['an empty ref', ''],
     ['an annotation ref that is too short', 'a123'],
     ['an annotation ref of seven hex digits (the whole ref is eight characters)', 'a3f9c2d1'],
@@ -1011,22 +1029,25 @@ describe('the schema of linkable', () => {
     ['an annotation ref with a sign', 'a3f9c2d1-'],
     ['a ref of hex digits without the letter in front', '03f9c2d1e'],
     ['a comment ref with hex letters', 'r3f9c2d1e'],
+    ['a review ref with hex letters', 'v3f9c2d1e'],
   ])('refuses %s', (_name, ref) => {
     const db = openNew();
     expect(() => db.exec(insert(ref))).toThrow(/CHECK constraint failed/u);
     db.close();
   });
 
-  it('accepts the three kinds of ref, present unless said otherwise', () => {
+  it('accepts the four kinds of ref, present unless said otherwise', () => {
     const db = openNew();
     db.exec(insert('r544830'));
     db.exec(insert('c623843', 'conversation_comment'));
+    db.exec(insert('v91204', 'review'));
     db.exec(insert('a3f9c2d1e', 'annotation'));
     const rows = db.prepare('SELECT ref, kind, gone FROM linkable ORDER BY ref').all();
     expect(rows.map((row) => ({ ...row }))).toEqual([
       { ref: 'a3f9c2d1e', kind: 'annotation', gone: 0 },
       { ref: 'c623843', kind: 'conversation_comment', gone: 0 },
       { ref: 'r544830', kind: 'review_comment', gone: 0 },
+      { ref: 'v91204', kind: 'review', gone: 0 },
     ]);
     db.close();
   });

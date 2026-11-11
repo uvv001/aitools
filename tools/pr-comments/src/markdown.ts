@@ -1,4 +1,4 @@
-import { commentRefFromUrl } from './comment-ref.ts';
+import { commentRefFromUrl, linkableReviewRef } from './comment-ref.ts';
 import { threadRange, type CheckAnnotation, type CheckRun, type Comment, type PullRequestData, type Review, type ReviewThread } from './model.ts';
 
 export interface RenderOptions {
@@ -67,17 +67,22 @@ type ConversationItem =
   | { at: string; kind: 'comment'; comment: Comment }
   | { at: string; kind: 'review'; review: Review };
 
-function renderConversationItem(item: ConversationItem): string {
-  if (item.kind === 'comment') {
-    return listItem(commentHeader(item.comment), bodyText(item.comment.body));
-  }
-  const { review } = item;
+function renderReview(review: Review): string {
+  const ref = linkableReviewRef(review);
   const parts = [`**@${review.author}** ${REVIEW_STATE_LABELS[review.state] ?? review.state.toLowerCase()}`];
+  if (ref) parts.push(`\`${ref}\``);
   if (review.submittedAt) parts.push(review.submittedAt);
   if (review.editedAt) parts.push(`edited ${review.editedAt}`);
   if (review.commitSha) parts.push(`commit \`${shortSha(review.commitSha)}\``);
   parts.push(`[link](${review.url})`);
   return listItem(parts.join(' · '), review.body.trim() ? bodyText(review.body) : undefined);
+}
+
+function renderConversationItem(item: ConversationItem): string {
+  if (item.kind === 'comment') {
+    return listItem(commentHeader(item.comment), bodyText(item.comment.body));
+  }
+  return renderReview(item.review);
 }
 
 // A reply is nested under the comment it answers. GitHub points every reply at the first comment of the thread,
@@ -166,11 +171,15 @@ function renderCheckRun(run: CheckRun): string {
   return [`### ${oneLine(run.name)} — ${state}`, info.join(' · '), items.join(isTight ? '\n' : '\n\n')].join('\n\n');
 }
 
-// Requested comment or annotation refs that do not exist in the pull request.
+// Requested comment, review body or annotation refs that do not exist in the pull request.
 export function findUnknownRefs(data: PullRequestData, refs: string[]): string[] {
   const known = new Set<string>();
   for (const comment of data.comments) {
     const ref = commentRefFromUrl(comment.url);
+    if (ref !== undefined) known.add(ref);
+  }
+  for (const review of data.reviews) {
+    const ref = linkableReviewRef(review);
     if (ref !== undefined) known.add(ref);
   }
   for (const run of data.checkRuns ?? []) {
@@ -183,6 +192,7 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
   const { pullRequest: pr } = data;
   const wantedRefs = options.refs ? new Set(options.refs.map((r) => r.toLowerCase())) : undefined;
   const pending = options.pendingRefs;
+  const filtered = wantedRefs !== undefined || pending !== undefined;
   const matchesRef = (ref: string | undefined) =>
     (wantedRefs === undefined || (ref !== undefined && wantedRefs.has(ref))) &&
     (pending === undefined || (ref !== undefined && pending.has(ref)));
@@ -198,19 +208,19 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
     `- Synced: ${pr.fetchedAt}`,
   ];
   if (options.refs) meta.push(`- Filter: only refs ${options.refs.map((r) => `\`${r.toLowerCase()}\``).join(', ')}`);
-  if (options.pendingRefs) meta.push('- Filter: only pending comments and check annotations');
+  if (options.pendingRefs) meta.push('- Filter: only pending comments, reviews and check annotations');
   out.push(meta.join('\n'));
 
   const conversation: ConversationItem[] = [
     ...data.comments
       .filter((c) => c.kind === 'issue' && matchesRef(commentRefFromUrl(c.url)))
       .map((comment): ConversationItem => ({ at: comment.createdAt, kind: 'comment', comment })),
-    // A COMMENTED review without text only wraps inline comments, which appear under "Review threads".
-    ...(wantedRefs === undefined && pending === undefined
-      ? data.reviews
-          .filter((r) => r.state !== 'COMMENTED' || r.body.trim() !== '')
-          .map((review): ConversationItem => ({ at: review.submittedAt ?? '', kind: 'review', review }))
-      : []),
+    // Without a filter, a COMMENTED review without text only wraps inline comments, which appear under "Review threads".
+    // With a filter, only linkable submitted review bodies that match are shown.
+    ...(filtered
+      ? data.reviews.filter((r) => matchesRef(linkableReviewRef(r)))
+      : data.reviews.filter((r) => r.state !== 'COMMENTED' || r.body.trim() !== '')
+    ).map((review): ConversationItem => ({ at: review.submittedAt ?? '', kind: 'review', review })),
   ].sort((a, b) => a.at.localeCompare(b.at));
 
   const threadComments = (thread: ReviewThread) =>
@@ -220,20 +230,7 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
 
   const threads = data.threads
     .map((thread) => ({ thread, comments: threadComments(thread) }))
-    .filter((t) => {
-      if (t.comments.length === 0) return false;
-      if (wantedRefs !== undefined && !t.comments.some((c) => {
-        const ref = commentRefFromUrl(c.url);
-        return ref !== undefined && wantedRefs.has(ref);
-      })) {
-        return false;
-      }
-      if (pending !== undefined) {
-        const rootRef = t.comments[0] ? commentRefFromUrl(t.comments[0].url) : undefined;
-        if (rootRef === undefined || !pending.has(rootRef)) return false;
-      }
-      return true;
-    })
+    .filter((t) => t.comments.length > 0 && (!filtered || t.comments.some((c) => matchesRef(commentRefFromUrl(c.url)))))
     .sort(
       (a, b) =>
         a.thread.path.localeCompare(b.thread.path) ||
@@ -242,12 +239,8 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
     );
 
   const checkRuns = (data.checkRuns ?? [])
-    .map((run) =>
-      wantedRefs === undefined && pending === undefined
-        ? run
-        : { ...run, annotations: run.annotations.filter((a) => matchesRef(a.ref)) },
-    )
-    .filter((run) => (wantedRefs === undefined && pending === undefined) || run.annotations.length > 0)
+    .map((run) => (!filtered ? run : { ...run, annotations: run.annotations.filter((a) => matchesRef(a.ref)) }))
+    .filter((run) => !filtered || run.annotations.length > 0)
     .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
 
   if (conversation.length > 0) {
@@ -255,14 +248,8 @@ export function renderMarkdown(data: PullRequestData, options: RenderOptions = {
   }
 
   if (threads.length > 0) {
-    // With a ref filter, the other messages of a matching thread stay as context.
-    const isContext = (comment: Comment) => {
-      if (wantedRefs !== undefined) {
-        const ref = commentRefFromUrl(comment.url);
-        if (ref === undefined || !wantedRefs.has(ref)) return true;
-      }
-      return false;
-    };
+    // With a filter, non-matching messages of a matching thread stay as context.
+    const isContext = (comment: Comment) => filtered && !matchesRef(commentRefFromUrl(comment.url));
     out.push('## Review threads');
     let currentPath: string | undefined;
     for (const { thread, comments } of threads) {

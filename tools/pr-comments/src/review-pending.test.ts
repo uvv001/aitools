@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CheckAnnotation, CheckRun, Comment, PullRequestData, ReviewThread } from './model.ts';
+import type { CheckAnnotation, CheckRun, Comment, PullRequestData, Review, ReviewThread } from './model.ts';
 import type { CommentLink } from './review-links.ts';
 import { pendingItems, pendingLines } from './review-pending.ts';
 
@@ -86,7 +86,33 @@ function checkRun(annotations: CheckAnnotation[], overrides: Partial<CheckRun> =
   };
 }
 
-function pullRequestData(threads: ReviewThread[], comments: Comment[], checkRuns?: CheckRun[]): PullRequestData {
+function pullReview(
+  n: number,
+  author: string,
+  state: string,
+  body: string,
+  submittedAt: string | null = '2026-10-09T10:00:00Z',
+  overrides: Partial<Review> = {},
+): Review {
+  return {
+    id: `rev-${n}`,
+    author,
+    state,
+    body,
+    submittedAt,
+    editedAt: null,
+    commitSha: 'a'.repeat(40),
+    url: `${PR_URL}#pullrequestreview-${n}`,
+    ...overrides,
+  };
+}
+
+function pullRequestData(
+  threads: ReviewThread[],
+  comments: Comment[],
+  checkRuns?: CheckRun[],
+  reviews: Review[] = [],
+): PullRequestData {
   return {
     pullRequest: {
       id: 'PR_173',
@@ -105,7 +131,7 @@ function pullRequestData(threads: ReviewThread[], comments: Comment[], checkRuns
       createdAt: '2026-10-01T09:00:00Z',
       fetchedAt: '2026-10-10T09:12:00Z',
     },
-    reviews: [],
+    reviews,
     threads,
     comments,
     ...(checkRuns === undefined ? {} : { checkRuns }),
@@ -116,8 +142,14 @@ const own = (ref: string, findingId: string): CommentLink => ({ ref, role: 'own'
 const duplicate = (ref: string, findingId: string): CommentLink => ({ ref, role: 'duplicate', finding: findingId });
 const note = (ref: string, text: string): CommentLink => ({ ref, role: 'note', note: text });
 
-function pending(comments: Comment[], threads: ReviewThread[] = [], links: CommentLink[] = [], runs?: CheckRun[]) {
-  return pendingItems({ links, data: pullRequestData(threads, comments, runs) });
+function pending(
+  comments: Comment[],
+  threads: ReviewThread[] = [],
+  links: CommentLink[] = [],
+  runs?: CheckRun[],
+  reviews: Review[] = [],
+) {
+  return pendingItems({ links, data: pullRequestData(threads, comments, runs, reviews) });
 }
 
 // A thread of three comments on lines 22-32: the root, a reply and the last reply.
@@ -135,7 +167,7 @@ describe('pendingItems: comments', () => {
     expect(pending([])).toEqual([]);
   });
 
-  it('lists a thread by its root, with the number of its replies, and never lists the replies', () => {
+  it('lists both thread roots (with reply count) and unlinked replies (with reply: true, replies: 0)', () => {
     const comments = [
       ...RETRY_COMMENTS,
       reviewComment(110, 'carol', 'Why not use Polly here?', 't-other', 0, '2026-10-09T12:00:00Z'),
@@ -154,6 +186,19 @@ describe('pendingItems: comments', () => {
         excerpt: 'Icon-only button has no name',
       },
       {
+        ref: 'r102',
+        author: 'bob',
+        kind: 'review',
+        reply: true,
+        path: PATH,
+        lines: '22-32',
+        resolved: false,
+        outdated: false,
+        replies: 0,
+        createdAt: '2026-10-09T11:00:00Z',
+        excerpt: 'Agreed',
+      },
+      {
         ref: 'r110',
         author: 'carol',
         kind: 'review',
@@ -165,28 +210,48 @@ describe('pendingItems: comments', () => {
         createdAt: '2026-10-09T12:00:00Z',
         excerpt: 'Why not use Polly here?',
       },
+      {
+        ref: 'r103',
+        author: 'alice',
+        kind: 'review',
+        reply: true,
+        path: PATH,
+        lines: '22-32',
+        resolved: false,
+        outdated: false,
+        replies: 0,
+        createdAt: '2026-10-10T08:00:00Z',
+        excerpt: 'Good catch, fixing',
+      },
     ]);
   });
 
-  it('does not list a thread whose root is linked, whatever the role, and whatever happens to its replies', () => {
-    expect(pending(RETRY_COMMENTS, threads, [duplicate('r101', 'F1')])).toEqual([]);
-    expect(pending(RETRY_COMMENTS, threads, [own('r101', 'F1')])).toEqual([]);
-    expect(pending(RETRY_COMMENTS, threads, [note('r101', 'praise')])).toEqual([]);
+  it('still lists unlinked replies when the thread root is already linked, and becomes empty once all replies are linked too', () => {
+    expect(pending(RETRY_COMMENTS, threads, [duplicate('r101', 'F1')]).map(({ ref, reply }) => [ref, reply])).toEqual([
+      ['r102', true],
+      ['r103', true],
+    ]);
+    expect(pending(RETRY_COMMENTS, threads, [own('r101', 'F1'), note('r102', 'ack')]).map(({ ref }) => ref)).toEqual(['r103']);
+    expect(pending(RETRY_COMMENTS, threads, [note('r101', 'praise'), note('r102', 'ack'), note('r103', 'fix note')])).toEqual([]);
   });
 
-  it('lists the root of a thread whose reply is linked, counting the linked reply', () => {
-    const items = pending(RETRY_COMMENTS, threads, [own('r102', 'F1')]);
+  it('lists the root of a thread whose reply is linked, counting the linked reply on the root while omitting the linked reply item', () => {
+    const items = pending(RETRY_COMMENTS, threads, [own('r102', 'F1'), note('r103', 'ack')]);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ ref: 'r101', replies: 2 });
   });
 
   it('orders a thread by position, not by the order of the data', () => {
     const shuffled = [RETRY_COMMENTS[2]!, RETRY_COMMENTS[0]!, RETRY_COMMENTS[1]!];
-    expect(pending(shuffled, threads).map(({ ref, replies }) => [ref, replies])).toEqual([['r101', 2]]);
+    expect(pending(shuffled, threads).map(({ ref, reply, replies }) => [ref, reply, replies])).toEqual([
+      ['r101', undefined, 2],
+      ['r102', true, 0],
+      ['r103', true, 0],
+    ]);
   });
 
   it('is not changed by a link to a comment that is not in the data', () => {
-    expect(pending(RETRY_COMMENTS, threads, [own('r999', 'F1'), duplicate('c999', 'F9')])).toHaveLength(1);
+    expect(pending(RETRY_COMMENTS, threads, [own('r999', 'F1'), duplicate('c999', 'F9')])).toHaveLength(3);
   });
 
   it('lists a conversation comment that is not linked, without a place', () => {
@@ -330,21 +395,87 @@ describe('pendingItems: comments without a readable id', () => {
     expect(pending(comments).map(({ ref }) => ref)).toEqual(['c3']);
   });
 
-  it('does not list the thread of a root that has none, nor its replies', () => {
+  it('omits an unreadable root while still listing its readable reply', () => {
     const comments = [
       reviewComment(1, 'bob', 'Root', 't', 0, undefined, { url: `${PR_URL}#discussion_x1` }),
       reviewComment(2, 'alice', 'Reply', 't', 1),
     ];
-    expect(pending(comments, [thread('t')])).toEqual([]);
+    expect(pending(comments, [thread('t')])).toMatchObject([{ ref: 'r2', reply: true, replies: 0 }]);
   });
 
-  it('still counts as a reply', () => {
+  it('still counts an unreadable reply in the root reply count without listing the unreadable reply itself', () => {
     const comments = [
       reviewComment(1, 'bob', 'Root', 't', 0),
       reviewComment(2, 'alice', 'Reply', 't', 1),
       reviewComment(3, 'carol', 'Hidden', 't', 2, undefined, { url: 'https://example.com/elsewhere' }),
     ];
-    expect(pending(comments, [thread('t')]).map(({ ref, replies }) => [ref, replies])).toEqual([['r1', 2]]);
+    expect(pending(comments, [thread('t')]).map(({ ref, reply, replies }) => [ref, reply, replies])).toEqual([
+      ['r1', undefined, 2],
+      ['r2', true, 0],
+    ]);
+  });
+});
+
+describe('pendingItems: pull request review bodies', () => {
+  it('lists nonempty submitted review bodies with their state, and skips pending, empty or linked ones', () => {
+    const reviews = [
+      pullReview(10, 'carol', 'CHANGES_REQUESTED', 'Please cap the retry count.\nSecond line.', '2026-10-09T09:00:00Z'),
+      pullReview(11, 'dave', 'APPROVED', 'Ship once the cap is added.', '2026-10-09T11:00:00Z'),
+      pullReview(12, 'erin', 'COMMENTED', 'General architecture note.', '2026-10-09T12:00:00Z'),
+      pullReview(13, 'frank', 'DISMISSED', 'Superseded review.', '2026-10-09T13:00:00Z'),
+      pullReview(14, 'grace', 'APPROVED', '   \n  ', '2026-10-09T14:00:00Z'),
+      pullReview(15, 'vufimtsev', 'PENDING', 'Draft summary', null),
+      pullReview(16, 'heidi', 'CHANGES_REQUESTED', 'Already linked.', '2026-10-09T15:00:00Z'),
+      pullReview(17, 'ivan', 'CHANGES_REQUESTED', 'No numeric id.', '2026-10-09T16:00:00Z', { url: PR_URL }),
+    ];
+    expect(pending([], [], [duplicate('v16', 'F1')], undefined, reviews)).toStrictEqual([
+      {
+        ref: 'v10',
+        author: 'carol',
+        kind: 'pull_review',
+        reviewState: 'changes requested',
+        replies: 0,
+        createdAt: '2026-10-09T09:00:00Z',
+        excerpt: 'Please cap the retry count.',
+      },
+      {
+        ref: 'v11',
+        author: 'dave',
+        kind: 'pull_review',
+        reviewState: 'approved',
+        replies: 0,
+        createdAt: '2026-10-09T11:00:00Z',
+        excerpt: 'Ship once the cap is added.',
+      },
+      {
+        ref: 'v12',
+        author: 'erin',
+        kind: 'pull_review',
+        reviewState: 'commented',
+        replies: 0,
+        createdAt: '2026-10-09T12:00:00Z',
+        excerpt: 'General architecture note.',
+      },
+      {
+        ref: 'v13',
+        author: 'frank',
+        kind: 'pull_review',
+        reviewState: 'review dismissed',
+        replies: 0,
+        createdAt: '2026-10-09T13:00:00Z',
+        excerpt: 'Superseded review.',
+      },
+    ]);
+  });
+
+  it('sorts review bodies chronologically alongside comments, ahead of check annotations', () => {
+    const comments = [conversation(1, 'alice', 'Middle', '2026-10-09T10:00:00Z')];
+    const reviews = [
+      pullReview(2, 'bob', 'CHANGES_REQUESTED', 'Later', '2026-10-09T11:00:00Z'),
+      pullReview(1, 'carol', 'COMMENTED', 'Earlier', '2026-10-09T09:00:00Z'),
+    ];
+    const runs = [checkRun([annotation('a3f9c2d1')])];
+    expect(pending(comments, [], [], runs, reviews).map(({ ref }) => ref)).toEqual(['v1', 'c1', 'v2', 'a3f9c2d1']);
   });
 });
 
@@ -474,14 +605,29 @@ describe('pendingLines', () => {
       app: 'github-actions',
     }),
   ];
-  const links = [own('r544830', 'F4'), own('r544861', 'F7'), duplicate('r544900', 'F7'), note('r545002', 'praise'), duplicate('a0000000', 'F4')];
+  const reviews = [
+    pullReview(91204, 'carol', 'CHANGES_REQUESTED', 'Please cap the retries in Retry.cs.', '2026-10-09T09:00:00Z'),
+  ];
+  const links = [
+    own('r544830', 'F4'),
+    note('r544831', 'ack'),
+    own('r544861', 'F7'),
+    duplicate('r544900', 'F7'),
+    note('r545002', 'praise'),
+    note('r545004', 'ack'),
+    note('r545005', 'ack'),
+    duplicate('a0000000', 'F4'),
+  ];
 
-  it('prints one line per item: the comments, then the annotations in a table of their own', () => {
-    const items = pendingItems({ links, data: pullRequestData(threads, comments, runs) });
+  it('prints one line per item: comments (roots, replies) and review bodies, then the annotations in a table of their own', () => {
+    const items = pendingItems({ links, data: pullRequestData(threads, comments, runs, reviews) });
     expect(pendingLines(items)).toEqual([
       '  c623843  erin   conversation              "Looks good to me"',
+      '  v91204   carol  review                    changes requested — "Please cap the retries in Retry.cs."',
       '  r545020  bob    Server/Pay.cs:9           thread resolved, outdated, 0 replies — "Stale remark"',
       '  r545001  carol  Server/Orders/Retry.cs:7  thread open, 3 replies — "Why not use Polly here?"',
+      '  r544862  bob    Server/Orders/Retry.cs:7  reply, thread resolved — "Done in 1a2b3c4"',
+      '  r545003  alice  Server/Orders/Retry.cs:7  reply, thread open — "Because of the budget"',
       '  a9e8d7c6  github-actions              notice   Server/Orders/Retry.cs:40',
       '  a3f9c2d1  sq-community-pr-decoration  failure  Server/Orders/Retry.cs:132  "Refactor this function to reduce its Cognitive Complexity"',
       '  a1b2c3d4  sq-community-pr-decoration  warning  Server/Pay.cs:5-8           "Remove this unused import"',
@@ -493,14 +639,19 @@ describe('pendingLines', () => {
     expect(pendingLines(pending([conversation(1, 'carol', 'Thanks!')], [], [own('c1', 'F1')]))).toEqual([]);
   });
 
-  it('says 1 reply, 0 replies, and adds outdated to the thread state', () => {
+  it('says 1 reply, 0 replies for roots, reply for non-roots, and adds outdated to the thread state', () => {
     const data = pullRequestData(
       [thread('t-a', { isOutdated: true, line: null, originalLine: 9 }), thread('t-b', { isResolved: true, isOutdated: true })],
-      [reviewComment(1, 'bob', 'Root', 't-a', 0), reviewComment(2, 'alice', 'Reply', 't-a', 1), reviewComment(3, 'carol', 'Alone', 't-b', 0)],
+      [
+        reviewComment(1, 'bob', 'Root', 't-a', 0),
+        reviewComment(2, 'alice', 'Reply', 't-a', 1),
+        reviewComment(3, 'carol', 'Alone', 't-b', 0),
+        reviewComment(4, 'dave', 'Late reply', 't-b', 1, '2026-10-09T11:00:00Z'),
+      ],
     );
-    expect(pendingLines(pendingItems({ links: [duplicate('r2', 'F1')], data }))).toEqual([
-      `  r1  bob    ${PATH}:9   thread open, outdated, 1 reply — "Root"`,
-      `  r3  carol  ${PATH}:22  thread resolved, outdated, 0 replies — "Alone"`,
+    expect(pendingLines(pendingItems({ links: [duplicate('r2', 'F1'), own('r3', 'F2')], data }))).toEqual([
+      `  r1  bob   ${PATH}:9   thread open, outdated, 1 reply — "Root"`,
+      `  r4  dave  ${PATH}:22  reply, thread resolved, outdated — "Late reply"`,
     ]);
   });
 
@@ -528,8 +679,8 @@ describe('pendingLines', () => {
 
   it('has no line break in any line and no trailing space', () => {
     const run = checkRun([annotation('a000000a', { message: 'x\ny' }), annotation('a000000b', { message: '', startLine: 2, endLine: 2 })]);
-    const lines = pendingLines(pendingItems({ links, data: pullRequestData(threads, comments, [run, ...runs]) }));
-    expect(lines).toHaveLength(8);
+    const lines = pendingLines(pendingItems({ links, data: pullRequestData(threads, comments, [run, ...runs], reviews) }));
+    expect(lines).toHaveLength(11);
     for (const line of lines) {
       expect(line).not.toMatch(/[\r\n]/u);
       expect(line).toBe(line.trimEnd());

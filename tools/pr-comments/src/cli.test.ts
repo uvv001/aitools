@@ -420,9 +420,9 @@ describe('cli', () => {
       }
 
       expect(command('link own').args[1]?.description).toBe('the comment: r544830 or c623843');
-      expect(command('link note').args[0]?.description).toBe('the comment: r544830 or c623843');
-      expect(command('link duplicate').args[1]?.description).toBe('the comment or check annotation: r544830, c623843 or a3f9c2d1e');
-      expect(command('link remove').args[0]?.description).toBe('the comment or check annotation: r544830, c623843 or a3f9c2d1e');
+      expect(command('link note').args[0]?.description).toBe('the comment or review body: r544830, c623843 or v91204');
+      expect(command('link duplicate').args[1]?.description).toBe('the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e');
+      expect(command('link remove').args[0]?.description).toBe('the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e');
 
       const proseOutsideCode = expected
         .replace(/```[\s\S]*?```/g, '')
@@ -497,8 +497,8 @@ describe('cli', () => {
       expect(printed).not.toContain('downloaded pull request is\nrefreshed');
 
       await step('link', 'reply', '--help');
-      expect(printed).toContain('records the returned reply ref and update in the database');
-      expect(printed).toContain('run "pr-comments pr sync --db <file.sqlite>"');
+      expect(printed).toContain('records the returned reply ref (linked as a note) and update in the database');
+      expect(printed).toContain('run\n"pr-comments pr sync --db <file.sqlite>"');
     });
 
     it.each([[['--help']], [['-h']], [['help']]])('%j prints the overview: the groups and one line per command, without the options', async (argv) => {
@@ -1522,30 +1522,30 @@ describe('cli', () => {
   });
 
   describe('link pending', () => {
-    const REFS = ['r1001', 'r1004', 'c2001', COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF];
+    const REFS = ['r1001', 'r1002', 'r1003', 'r1004', 'c2001', 'v1', COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF];
 
-    it('prints the comments and check annotations that are not linked yet, one line each, and nothing else', async () => {
+    it('prints the comments (roots and replies), nonempty review bodies and check annotations that are not linked yet', async () => {
       expect(await step('link', 'pending')).toBe(0);
 
       const expected = pendingLines(pendingItems({ links: [], data: withChecks() }));
       expect(printed).toBe(`${expected.join('\n')}\n`);
-      expect(expected.length).toBeGreaterThanOrEqual(REFS.length);
+      expect(expected).toHaveLength(REFS.length);
       for (const ref of REFS) expect(printed, ref).toContain(ref);
-      // The replies of a thread are not listed: the root stands for it.
-      expect(printed).not.toContain('r1002');
-      expect(printed).not.toContain('r1003');
+      // Empty-body approval review rev-2 (v2) is not linkable and is not listed.
+      expect(printed).not.toContain('v2');
       expect(warned).toBe('');
     });
 
     it('lists what is not linked yet, and prints nothing at all when everything is processed, with exit 0', async () => {
       await step('link', 'own', 'F1', 'r1001');
+      await step('link', 'note', 'r1002', 'author ack');
+      await step('link', 'note', 'r1003', 'reviewer follow-up');
       await step('link', 'note', 'r1004', 'a bot');
+      await step('link', 'duplicate', 'F1', 'v1');
       await step('link', 'duplicate', 'F1', COMPLEXITY_REF);
 
       expect(await step('link', 'pending')).toBe(0);
-      expect(printed).not.toContain('r1001');
-      expect(printed).not.toContain('r1004');
-      expect(printed).not.toContain(COMPLEXITY_REF);
+      for (const done of ['r1001', 'r1002', 'r1003', 'r1004', 'v1', COMPLEXITY_REF]) expect(printed).not.toContain(done);
       for (const ref of ['c2001', ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) expect(printed, ref).toContain(ref);
 
       await step('link', 'note', 'c2001', 'a thank you');
@@ -1637,36 +1637,43 @@ describe('cli', () => {
 
       it('filters by --ref and --pending, and validates ref format', async () => {
         await step('link', 'note', 'r1001', 'handled');
+        await step('link', 'note', 'r1002', 'handled');
+        await step('link', 'note', 'r1003', 'handled');
         await step('report', 'comments', '--pending');
-        expect(printed).toContain('- Filter: only pending comments and check annotations');
+        expect(printed).toContain('- Filter: only pending comments, reviews and check annotations');
         expect(printed).toContain('`r1004`');
+        expect(printed).toContain('`v1`');
         expect(printed).not.toContain('`r1001`');
 
-        await step('report', 'comments', '--ref', `r1001,${COMPLEXITY_REF},r9999`);
-        expect(warned).toBe('Warning: no comment or check annotation r9999 in this pull request\n');
-        expect(printed).toContain(`- Filter: only refs \`r1001\`, \`${COMPLEXITY_REF}\`, \`r9999\``);
+        await step('report', 'comments', '--ref', `r1001,v1,${COMPLEXITY_REF},r9999`);
+        expect(warned).toBe('Warning: no comment, review or check annotation r9999 in this pull request\n');
+        expect(printed).toContain(`- Filter: only refs \`r1001\`, \`v1\`, \`${COMPLEXITY_REF}\`, \`r9999\``);
         expect(printed).toContain('`r1001`');
+        expect(printed).toContain('`v1`');
         expect(printed).toContain(`\`${COMPLEXITY_REF}\``);
         expect(printed).not.toContain('`r1004`');
 
         await expect(step('report', 'comments', '--ref', ' , ')).rejects.toThrow('--ref needs at least one ref');
         await expect(step('report', 'comments', '--ref', 'bogus')).rejects.toThrow(
-          '"bogus" is not a comment or check annotation id; expected r544830, c623843 or a3f9c2d1e',
+          '"bogus" is not a comment, review or check annotation id; expected r544830, c623843, v91204 or a3f9c2d1e',
         );
       });
 
-      it('shows a newly synced reply in a linked thread via unfiltered or --ref reads while --pending omits the linked root', async () => {
+      it('surfaces a newly synced reply on an already-linked thread in link pending and report comments --pending with _(context)_ on linked comments', async () => {
         await step('link', 'duplicate', 'F1', 'r1001');
+        await step('link', 'note', 'r1002', 'author ack');
+        await step('link', 'note', 'r1003', 'reviewer ack');
         const current = withChecks();
         const root = current.comments.find((comment) => comment.url.endsWith('#discussion_r1001'))!;
         snapshot = {
           ...current,
+          pullRequest: { ...current.pullRequest, fetchedAt: '2026-01-06T12:05:00Z' },
           comments: [
             ...current.comments,
             {
               ...root,
               id: 'id-r1005',
-              threadPosition: 2,
+              threadPosition: 3,
               replyToId: root.id,
               author: 'erin',
               body: 'Follow-up reply with new counter-evidence.',
@@ -1678,18 +1685,75 @@ describe('cli', () => {
         };
         await step('pr', 'sync');
 
+        await step('link', 'pending');
+        expect(printed).toContain('r1005');
+        expect(printed).toContain('reply, thread resolved');
+        expect(printed).not.toContain('r1001');
+
+        await step('report', 'comments', '--pending');
+        expect(printed).toContain('- **@bob** _(context)_ · `r1001`');
+        expect(printed).toContain('  - ↳ **@alice** _(context)_ · `r1002`');
+        expect(printed).toContain('  - ↳ **@bob** _(context)_ · `r1003`');
+        expect(printed).toContain('  - ↳ **@erin** · `r1005`');
+        expect(printed).toContain('Follow-up reply with new counter-evidence.');
+
+        await step('link', 'note', 'r1005', 'counter-evidence recorded');
         await step('report', 'comments', '--pending');
         expect(printed).not.toContain('`r1001`');
         expect(printed).not.toContain('`r1005`');
+      });
 
-        await step('report', 'comments', '--ref', 'r1001');
-        expect(printed).toContain('`r1001`');
-        expect(printed).toContain('`r1005`');
-        expect(printed).toContain('Follow-up reply with new counter-evidence.');
+      it('surfaces and clears a substantive CHANGES_REQUESTED review body v<id> on a PR with zero comments', async () => {
+        const db = join(docs, 'reviews_only_review.sqlite');
+        await step('init', 'Reviews only', '--db', db, '--pr', prUrl);
+        await step('round', 'open', '--no-base', '--db', db);
+        stdin = 'Cap retries.\n\n`src/retry.ts:42`\n';
+        await step('finding', 'add', '--severity', 'high', '--title', 'Cap retries', '--description-file', '-', '--db', db);
 
-        await step('report', 'comments');
-        expect(printed).toContain('`r1005`');
-        expect(printed).toContain('Follow-up reply with new counter-evidence.');
+        const base = samplePullRequest();
+        snapshot = {
+          ...base,
+          threads: [],
+          comments: [],
+          checkRuns: [],
+          reviews: [
+            {
+              id: 'rev-91204',
+              author: 'carol',
+              state: 'CHANGES_REQUESTED',
+              body: 'Please cap retries before merging.',
+              submittedAt: '2026-01-05T10:00:00Z',
+              editedAt: null,
+              commitSha: 'a'.repeat(40),
+              url: `${prUrl}#pullrequestreview-91204`,
+            },
+          ],
+        };
+        await step('pr', 'sync', '--db', db);
+
+        await step('link', 'pending', '--db', db);
+        expect(printed).toBe('  v91204  carol  review  changes requested — "Please cap retries before merging."\n');
+
+        await step('report', 'comments', '--pending', '--db', db);
+        expect(printed).toContain('**@carol** requested changes · `v91204`');
+        expect(printed).toContain('Please cap retries before merging.');
+
+        await step('report', 'comments', '--ref', 'V91204', '--db', db);
+        expect(printed).toContain('**@carol** requested changes · `v91204`');
+        expect(warned).toBe('');
+
+        await expect(step('link', 'own', 'F1', 'v91204', '--db', db)).rejects.toThrow(
+          'pull request review v91204 cannot be the own comment of a finding; link it with "link duplicate" or "link note"',
+        );
+        await expect(step('link', 'reply', 'v91204', '--db', db)).rejects.toThrow(
+          'v91204 is a pull request review, not a comment; only a comment (r… or c…) can be answered',
+        );
+
+        await step('link', 'duplicate', 'F1', 'V91204', '--db', db);
+        expect(printed).toBe('F1: duplicate v91204 linked\n');
+
+        await step('link', 'pending', '--db', db);
+        expect(printed).toBe('');
       });
 
       it('writes the markdown to a file, creating the folder, and refuses to overwrite a database', async () => {
@@ -1978,6 +2042,41 @@ describe('cli', () => {
       expect(warned).toBe('');
       expect(downloads).toEqual([]);
       expect((await bytes()).equals(before)).toBe(true);
+    });
+
+    it('auto-links the posted reply as a note so link pending stays empty after pr sync', async () => {
+      for (const ref of ['r1002', 'r1003', 'v1']) await step('link', 'note', ref, 'handled');
+      for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'F2', ref);
+      await step('link', 'pending');
+      expect(printed).toBe('');
+
+      engine(made('r546201', THREAD, 'pending'));
+      expect(await reply('r1004')).toBe(0);
+
+      const current = withChecks();
+      const target = current.comments.find((c) => c.url.endsWith('#discussion_r1004'))!;
+      snapshot = {
+        ...current,
+        pullRequest: { ...current.pullRequest, fetchedAt: '2026-01-06T12:10:00Z' },
+        comments: [
+          ...current.comments,
+          {
+            ...target,
+            id: 'rc-reply-546201',
+            threadPosition: 1,
+            replyToId: target.id,
+            author: 'alice',
+            body: TEXT,
+            createdAt: '2026-01-06T12:09:00Z',
+            updatedAt: '2026-01-06T12:09:00Z',
+            url: `${prUrl}#discussion_r546201`,
+          },
+        ],
+      };
+      await step('pr', 'sync');
+
+      await step('link', 'pending');
+      expect(printed).toBe('');
     });
 
     it('lets a refusal of the review through before it asks GitHub for anything, and changes nothing', async () => {

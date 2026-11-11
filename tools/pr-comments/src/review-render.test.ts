@@ -199,6 +199,8 @@ describe('renderReport', () => {
       [{ kind: 'description', at: '2026-10-05 11:35', note: 'expanded' }, '2026-10-05 11:35 — description revised — expanded'],
       [{ kind: 'note', at: '2026-10-05 11:40', round: 1, note: 'checked' }, '2026-10-05 11:40 — Round 1: checked'],
       [{ kind: 'linked', at: '2026-10-05 11:45', ref: 'r1', role: 'own', pullRequest: pr }, '2026-10-05 11:45 — PR comment [r1](https://github.com/acme/widgets/pull/42#discussion_r1) linked as its own'],
+      [{ kind: 'linked', at: '2026-10-05 11:46', ref: 'v91204', role: 'duplicate', pullRequest: pr }, '2026-10-05 11:46 — PR review [v91204](https://github.com/acme/widgets/pull/42#pullrequestreview-91204) linked as a duplicate'],
+      [{ kind: 'unlinked', at: '2026-10-05 11:47', ref: 'v91204', role: 'duplicate' }, '2026-10-05 11:47 — PR review v91204 unlinked (was a duplicate)'],
       [{ kind: 'unlinked', at: '2026-10-05 11:50', ref: 'a3f9c2d1e', role: 'duplicate' }, '2026-10-05 11:50 — check annotation a3f9c2d1e unlinked (was a duplicate)'],
       [{ kind: 'posted', at: '2026-10-05 11:55', ref: 'r2', action: 'created', pending: true }, '2026-10-05 11:55 — posted PR comment r2 to the pending review'],
       [{ kind: 'replied', at: '2026-10-05 12:00', ref: 'r2', replyRef: 'r3', pending: true }, '2026-10-05 12:00 — replied to duplicate r2 with r3 in the pending review'],

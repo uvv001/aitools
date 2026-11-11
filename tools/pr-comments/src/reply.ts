@@ -54,7 +54,7 @@ export interface ReplyTarget {
 
 export interface ReplyResult {
   // `created`: the reply is there (or, in a dry run, would be); `unchanged`: an identical reply of the viewer exists
-  // in that thread (or after that conversation comment) already, so nothing is written; `error`: see `message`.
+  // after that comment in its thread (or after that conversation comment) already, so nothing is written; `error`: see `message`.
   action: 'created' | 'unchanged' | 'error';
   dryRun: boolean;
   // Where the reply lives: `pending` (in the viewer's pending review, visible to nobody else until it is submitted)
@@ -102,13 +102,17 @@ interface Written {
   url: string;
 }
 
+const positionOf = (comment: Comment) =>
+  comment.threadPosition ?? (comment.replyToId === null ? 0 : Number.MAX_SAFE_INTEGER);
+
+const threadComments = (data: PullRequestData, threadId: string): Comment[] =>
+  data.comments.filter((c) => c.threadId === threadId).sort((a, b) => positionOf(a) - positionOf(b));
+
 // The place of a review comment from its thread, as the pending list shows it (review-pending.ts): the line, or the
 // original one of an outdated thread; GitHub gives a file-level thread a line but no diff hunk.
 function placeOf(data: PullRequestData, thread: ReviewThread | undefined): Partial<ReplyTarget> {
   if (!thread) return {};
-  const root = data.comments
-    .filter((c) => c.threadId === thread.id)
-    .sort((a, b) => (a.threadPosition ?? 0) - (b.threadPosition ?? 0))[0];
+  const root = threadComments(data, thread.id)[0];
   const range = threadRange(thread);
   const wholeFile = range === undefined || root?.diffHunk === '';
   return { path: thread.path, ...(wholeFile ? {} : { lines: range }), resolved: thread.isResolved };
@@ -118,10 +122,6 @@ function targetOf(data: PullRequestData, comment: Comment, ref: string): ReplyTa
   const thread = comment.kind === 'review' ? data.threads.find((t) => t.id === comment.threadId) : undefined;
   return { ref, author: comment.author, kind: comment.kind, ...placeOf(data, thread) };
 }
-
-// What a reply is: a later comment of the thread (GitHub flattens a reply to a reply into the thread).
-const isReplyOf = (comment: Comment, threadId: string) =>
-  comment.threadId === threadId && ((comment.threadPosition ?? 0) > 0 || comment.replyToId !== null);
 
 function unchanged(run: Run, existing: Comment, target: ReplyTarget): ReplyResult {
   const comment = commentRefFromUrl(existing.url);
@@ -172,8 +172,10 @@ async function writeThreadReply(run: Run, threadId: string, target: ReplyTarget)
 async function replyInThread(run: Run, answered: Comment, target: ReplyTarget): Promise<ReplyResult> {
   const { threadId } = answered;
   if (threadId === null) throw new Error(`comment ${target.ref} is not part of a review thread`);
-  const identical = run.data.comments.find(
-    (c) => isReplyOf(c, threadId) && sameLogin(c.author, run.viewer) && sameText(c.body, run.body),
+  const comments = threadComments(run.data, threadId);
+  const targetIndex = comments.indexOf(answered);
+  const identical = comments.find(
+    (c, index) => index > targetIndex && sameLogin(c.author, run.viewer) && sameText(c.body, run.body),
   );
   if (identical) return unchanged(run, identical, target);
   if (run.options.dryRun) return created(run, target, 'pending');
@@ -186,7 +188,7 @@ async function replyInConversation(run: Run, answered: Comment, target: ReplyTar
   const identical = run.data.comments.find((c, index) => {
     const createdAt = Date.parse(c.createdAt);
     const after = createdAt > answeredAt || (createdAt === answeredAt && index > answeredIndex);
-    return c.kind === 'issue' && sameLogin(c.author, run.viewer) && sameText(c.body, run.body) && after;
+    return c.kind === 'issue' && c.id !== answered.id && sameLogin(c.author, run.viewer) && sameText(c.body, run.body) && after;
   });
   if (identical) return unchanged(run, identical, target);
   if (!run.options.now) throw new Error(NEEDS_NOW);
@@ -202,8 +204,8 @@ async function replyInConversation(run: Run, answered: Comment, target: ReplyTar
 //    the answered comment as `target`): the reply would link to a comment that is gone (a discarded or edited pending
 //    review). This is checked before anything else that can write, and in a dry run too, so nothing is written.
 // 2. Review comment (`r…`): the answered thread is the one of the comment (`threadId`). Finds out whether the viewer
-//    already has an identical reply (same text after trimming and normalising line breaks, written by the viewer, in
-//    that thread: pending replies of the viewer are part of the data): then `unchanged`.
+//    already has an identical reply after the answered comment in that thread (same text after trimming and
+//    normalising line breaks, written by the viewer: pending replies of the viewer are part of the data): then `unchanged`.
 //    Otherwise, outside a dry run, the reply is written with the GraphQL mutation `addPullRequestReviewThreadReply`
 //    (read how src/publish.ts makes its requests and how its mutations are shaped; the live findings are in the
 //    task notes below) into the viewer's PENDING review:

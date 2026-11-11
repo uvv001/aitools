@@ -477,6 +477,66 @@ describe('an identical reply', () => {
 
     expect(result.action).toBe('unchanged');
   });
+
+  it('ignores an identical reply of the viewer that precedes the target in the thread', async () => {
+    const laterDuplicate = inThread(12, { author: 'bob', threadPosition: 2 });
+    const earlierViewerReply = ownReply(11, { threadPosition: 1 });
+    const { result, mutations } = await reply({
+      data: threadData({ reviews: [pendingReview], more: [laterDuplicate, earlierViewerReply] }),
+      commentRef: 'r12',
+    });
+
+    expect(result).toEqual({
+      action: 'created',
+      dryRun: false,
+      state: 'pending',
+      comment: 'r900',
+      url: `${PR_URL}#discussion_r900`,
+      target: { ...target, ref: 'r12', author: 'bob' },
+    });
+    expect(mutations).toEqual([replyInput('REV_PENDING')]);
+  });
+
+  it('ignores the target itself when the viewer wrote that reply with the same text', async () => {
+    const { result, mutations } = await reply({
+      data: threadData({ reviews: [pendingReview], more: [ownReply(11, { threadPosition: 1 })] }),
+      commentRef: 'r11',
+    });
+
+    expect(result).toEqual({
+      action: 'created',
+      dryRun: false,
+      state: 'pending',
+      comment: 'r900',
+      url: `${PR_URL}#discussion_r900`,
+      target: { ...target, ref: 'r11', author: 'Viewer' },
+    });
+    expect(mutations).toEqual([replyInput('REV_PENDING')]);
+  });
+
+  it('recognizes an identical reply of the viewer that follows a non-root target', async () => {
+    const earlierViewerReply = ownReply(11, { threadPosition: 1 });
+    const laterDuplicate = inThread(12, { author: 'bob', threadPosition: 2 });
+    const followingViewerReply = ownReply(13, { threadPosition: 3 });
+    const { result, mutations } = await reply({
+      data: threadData({
+        reviews: [pendingReview],
+        more: [earlierViewerReply, followingViewerReply, laterDuplicate],
+      }),
+      commentRef: 'r12',
+    });
+
+    expect(result).toEqual({
+      action: 'unchanged',
+      dryRun: false,
+      state: 'pending',
+      comment: 'r13',
+      url: `${PR_URL}#discussion_r13`,
+      target: { ...target, ref: 'r12', author: 'bob' },
+      message: IDENTICAL,
+    });
+    expect(mutations).toEqual([]);
+  });
 });
 
 describe('a dry run', () => {
@@ -594,6 +654,21 @@ describe('a conversation comment', () => {
 
     expect(result.action).toBe('created');
     expect(mutations.map((m) => m.op)).toEqual(['addComment']);
+  });
+
+  it('is not answered by the target comment itself when the viewer wrote it with the same text', async () => {
+    const data = pullRequestData({ comments: [issueComment(5, { author: 'Viewer', body: TEXT })] });
+    const { result, mutations } = await reply({ data, commentRef: 'c5', options: { now: true } });
+
+    expect(result).toEqual({
+      action: 'created',
+      dryRun: false,
+      state: 'posted',
+      comment: 'c901',
+      url: `${PR_URL}#issuecomment-901`,
+      target: { ref: 'c5', author: 'Viewer', kind: 'issue' },
+    });
+    expect(mutations).toEqual([{ op: 'addComment', input: { subjectId: 'PR_1', body: TEXT } }]);
   });
 
   it('is not answered by a review comment with the same text', async () => {

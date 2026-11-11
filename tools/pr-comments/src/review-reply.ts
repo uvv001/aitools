@@ -1,4 +1,4 @@
-import { commentUrl, isAnnotationRef } from './comment-ref.ts';
+import { commentUrl, isAnnotationRef, isReviewBodyRef } from './comment-ref.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { composeBody } from './publish.ts';
 import type { ReplyOptions, ReplyRequest, ReplyResult } from './reply.ts';
@@ -61,6 +61,9 @@ export async function replyToDuplicate(
   deps: ReplyDuplicateDeps,
 ): Promise<RepliedDuplicate> {
   if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation; there is nothing to reply to`);
+  if (isReviewBodyRef(ref)) {
+    throw new Error(`${ref} is a pull request review, not a comment; only a comment (r… or c…) can be answered`);
+  }
   const { links, pullRequest, ref: pullRequestRef, quotedDb } = await requireConnectedReview(dbPath);
   const linked = links.find((link) => link.ref === ref);
   if (linked === undefined) {

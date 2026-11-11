@@ -1,17 +1,20 @@
-import { commentRefFromUrl } from './comment-ref.ts';
+import { commentRefFromUrl, linkableReviewRef } from './comment-ref.ts';
 import { threadRange, type AnnotationLevel, type CheckAnnotation, type CheckRun, type Comment, type PullRequestData } from './model.ts';
 import type { CommentLink } from './review-links.ts';
 
-// A comment that nothing in the review links to yet: the root of a thread whose root is not linked, or a
-// conversation comment that is not linked; or any check annotation that is not linked. A check annotation (the
-// "Check failure on line 132" items of a tool such as SonarQube) has the kind 'check': the app that published it is
-// the author, and it has no thread.
+// A comment, nonempty submitted pull request review body or check annotation that nothing in the review links to yet.
+// A check annotation (the "Check failure on line 132" items of a tool such as SonarQube) has the kind 'check': the app
+// that published it is the author, and it has no thread.
 export interface PendingItem {
   ref: string;
   author: string;
-  kind: 'issue' | 'review' | 'check';
-  // The place of a review comment: "Server/Orders/Retry.cs" and "22-32" (or "22"); absent for a conversation comment
-  // and for a comment on a whole file. An annotation always has both.
+  kind: 'issue' | 'review' | 'pull_review' | 'check';
+  // True when a review comment is a non-root reply in its thread.
+  reply?: boolean;
+  // Only for a pull request review body (`pull_review`): e.g. "changes requested", "approved", "commented", "review dismissed".
+  reviewState?: string;
+  // The place of a review comment: "Server/Orders/Retry.cs" and "22-32" (or "22"); absent for a conversation comment,
+  // a pull request review body, and a comment on a whole file. An annotation always has both.
   path?: string;
   lines?: string;
   // The state of the thread; only for a review comment.
@@ -20,15 +23,22 @@ export interface PendingItem {
   // Only for an annotation: its level and the name of its check run.
   level?: AnnotationLevel;
   check?: string;
-  // How many replies follow the comment in its thread (0 for a conversation comment and an annotation).
+  // How many replies follow a root review comment in its thread (0 for a reply, a conversation comment, a review body, and an annotation).
   replies: number;
-  // Absent for an annotation, which has no time.
+  // Absent for an annotation, which has no time, and for a review without submittedAt.
   createdAt?: string;
   // The first non-empty line of the text, at most 80 characters (longer ends in "…").
   excerpt: string;
 }
 
 const EXCERPT_LIMIT = 80;
+
+const PULL_REVIEW_STATES: Record<string, string> = {
+  APPROVED: 'approved',
+  CHANGES_REQUESTED: 'changes requested',
+  COMMENTED: 'commented',
+  DISMISSED: 'review dismissed',
+};
 
 type Place = Pick<PendingItem, 'path' | 'lines' | 'resolved' | 'outdated'>;
 
@@ -102,11 +112,12 @@ function annotationItem({ annotation, run }: Annotated): PendingItem {
   };
 }
 
-// The comments and check annotations of the synced pull request that no link of the review names: a comment's ref is
-// read from its url, as comment-ref.ts does, and an annotation has its own (`ref`; the same ref in the data counts
-// once). Nothing is filtered out: bots and the pull request author's comments are listed like any other, and so is
-// every annotation, whatever its level. A comment whose url has no readable ref cannot be linked, so it is not listed.
-// The comments come in the order they were written, then the annotations by path, first line and ref.
+// The comments, nonempty submitted review bodies and check annotations of the synced pull request that no link of the
+// review names: a comment's or review's ref is read from its url, as comment-ref.ts does, and an annotation has its own
+// (`ref`; the same ref in the data counts once). Nothing is filtered out: thread replies, bots and the pull request
+// author's comments are listed like any other, and so is every annotation, whatever its level. An item whose url has no
+// readable ref (or a pending or empty review) cannot be linked, so it is not listed. The comments and review bodies
+// come in the order they were written, then the annotations by path, first line and ref.
 export function pendingItems({ links, data }: { links: CommentLink[]; data: PullRequestData }): PendingItem[] {
   const threads = indexThreads(data);
   const linkedRefs = new Set(links.map(({ ref }) => ref));
@@ -114,10 +125,34 @@ export function pendingItems({ links, data }: { links: CommentLink[]; data: Pull
   const items: PendingItem[] = [];
   for (const comment of data.comments) {
     const ref = commentRefFromUrl(comment.url);
-    if (ref === undefined || linkedRefs.has(ref) || !threads.isRoot(comment)) continue;
+    if (ref === undefined || linkedRefs.has(ref)) continue;
     const { author, kind, createdAt } = comment;
-    const replies = threads.repliesTo(comment);
-    items.push({ ref, author, kind, ...threads.placeOf(comment), replies, createdAt, excerpt: excerptOf(comment.body) });
+    const isRoot = threads.isRoot(comment);
+    const replies = isRoot ? threads.repliesTo(comment) : 0;
+    items.push({
+      ref,
+      author,
+      kind,
+      ...(isRoot ? {} : { reply: true }),
+      ...threads.placeOf(comment),
+      replies,
+      createdAt,
+      excerpt: excerptOf(comment.body),
+    });
+  }
+  for (const review of data.reviews) {
+    const ref = linkableReviewRef(review);
+    if (ref === undefined || linkedRefs.has(ref)) continue;
+    const reviewState = PULL_REVIEW_STATES[review.state] ?? review.state.toLowerCase().replaceAll('_', ' ');
+    items.push({
+      ref,
+      author: review.author,
+      kind: 'pull_review',
+      reviewState,
+      replies: 0,
+      ...(review.submittedAt === null ? {} : { createdAt: review.submittedAt }),
+      excerpt: excerptOf(review.body),
+    });
   }
   items.sort((a, b) => compare(a.createdAt ?? '', b.createdAt ?? '') || compare(a.ref, b.ref));
 
@@ -135,14 +170,24 @@ export function pendingItems({ links, data }: { links: CommentLink[]; data: Pull
   return [...items, ...pendingAnnotations.map(annotationItem)];
 }
 
-const placeText = ({ kind, path, lines }: PendingItem) =>
-  kind === 'issue' ? 'conversation' : path === undefined ? '' : lines === undefined ? path : `${path}:${lines}`;
+function placeText({ kind, path, lines }: PendingItem): string {
+  if (kind === 'issue') return 'conversation';
+  if (kind === 'pull_review') return 'review';
+  if (path === undefined) return '';
+  return lines === undefined ? path : `${path}:${lines}`;
+}
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-// "thread open, outdated, 2 replies"; nothing for a conversation comment, which has no thread.
-function stateText({ kind, resolved, outdated, replies }: PendingItem): string {
-  if (kind === 'issue' || resolved === undefined) return '';
+// "thread open, outdated, 2 replies" for a root, "reply, thread open" for a reply, or the review state for a review body;
+// nothing for a conversation comment, which has no thread.
+function stateText({ kind, reply, reviewState, resolved, outdated, replies }: PendingItem): string {
+  if (kind === 'pull_review') return reviewState ?? '';
+  if (kind === 'issue') return '';
+  if (resolved === undefined) return reply ? 'reply' : '';
+  if (reply) {
+    return ['reply', `thread ${resolved ? 'resolved' : 'open'}`, ...(outdated ? ['outdated'] : [])].join(', ');
+  }
   return [`thread ${resolved ? 'resolved' : 'open'}`, ...(outdated ? ['outdated'] : []), plural(replies, 'reply', 'replies')].join(', ');
 }
 

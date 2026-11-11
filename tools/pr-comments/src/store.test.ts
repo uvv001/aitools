@@ -96,7 +96,7 @@ describe('store', () => {
     expect(loadPullRequest(openNew())).toBeUndefined();
   });
 
-  it('keeps the ref of each comment, taken from its url', () => {
+  it('keeps the ref of each comment and review, taken from its url', () => {
     const db = openNew();
     savePullRequest(db, samplePullRequest());
     const rows = db.prepare('SELECT id, ref FROM pr_comments ORDER BY rowid').all();
@@ -106,6 +106,11 @@ describe('store', () => {
       ['rc-2', 'r1002'],
       ['rc-3', 'r1003'],
       ['rc-4', 'r1004'],
+    ]);
+    const reviewRows = db.prepare('SELECT id, ref FROM pr_reviews ORDER BY rowid').all();
+    expect(reviewRows.map((row) => [row.id, row.ref])).toEqual([
+      ['rev-1', 'v1'],
+      ['rev-2', 'v2'],
     ]);
   });
 
@@ -185,7 +190,7 @@ describe('store', () => {
       expect(loadPullRequest(db)).toEqual(stored(odd()));
     });
 
-    it('gets no linkable row, as it can never be linked, and the known refs are those of the other comments', () => {
+    it('gets no linkable row, as it can never be linked, and the known refs are those of the other comments and nonempty reviews', () => {
       const db = openNew();
       savePullRequest(db, withChecks([sonarRun()]));
       const before = linkable(db);
@@ -193,7 +198,7 @@ describe('store', () => {
       savePullRequest(db, { ...odd(), checkRuns: [sonarRun()] });
 
       expect(linkable(db)).toEqual(before.filter((row) => row.ref !== 'r1001' && row.ref !== 'r1003'));
-      expect([...loadKnownRefs(db)].sort()).toEqual(['a1b2c3d4e', 'a3f9c2d1e', 'a5e6f7081', 'c2001', 'r1002', 'r1004']);
+      expect([...loadKnownRefs(db)].sort()).toEqual(['a1b2c3d4e', 'a3f9c2d1e', 'a5e6f7081', 'c2001', 'r1002', 'r1004', 'v1']);
     });
 
     it('does not stop the pull request from being saved again, with it or without it', () => {
@@ -205,10 +210,10 @@ describe('store', () => {
 
       savePullRequest(db, samplePullRequest());
       expect(loadPullRequest(db)).toEqual(stored());
-      expect(linkable(db)).toHaveLength(5);
+      expect(linkable(db)).toHaveLength(6);
 
       savePullRequest(db, odd());
-      expect(linkable(db)).toHaveLength(3);
+      expect(linkable(db)).toHaveLength(4);
       expect(count(db, 'pr_comments')).toBe(5);
     });
 
@@ -284,7 +289,7 @@ describe('store', () => {
     const readOnly = new DatabaseSync(join(dir, 'r.sqlite'), { readOnly: true });
     opened.push(readOnly);
     expect(loadPullRequest(readOnly)).toEqual(withChecks([sonarRun()]));
-    expect(loadKnownRefs(readOnly).size).toBe(8);
+    expect(loadKnownRefs(readOnly).size).toBe(9);
   });
 });
 
@@ -367,7 +372,7 @@ describe('linkable', () => {
     return db;
   }
 
-  it('has a row per comment and per check annotation, by kind, none of them gone', () => {
+  it('has a row per comment, nonempty submitted review body and check annotation, by kind, none of them gone', () => {
     const db = openNew();
     savePullRequest(db, withChecks([sonarRun()]));
     expect(linkable(db)).toEqual([
@@ -379,8 +384,74 @@ describe('linkable', () => {
       { ref: 'r1002', kind: 'review_comment', gone: 0 },
       { ref: 'r1003', kind: 'review_comment', gone: 0 },
       { ref: 'r1004', kind: 'review_comment', gone: 0 },
+      { ref: 'v1', kind: 'review', gone: 0 },
     ]);
     expect([...loadKnownRefs(db)].sort()).toEqual(linkable(db).map((row) => row.ref));
+  });
+
+  it('adds only nonempty submitted review bodies with a readable URL ref to linkable, even when the PR has zero comments', () => {
+    const db = openNew();
+    saveReview(db, review());
+    const base = samplePullRequest();
+    const reviewsOnly: PullRequestData = {
+      ...base,
+      threads: [],
+      comments: [],
+      reviews: [
+        {
+          id: 'rev-1',
+          author: 'carol',
+          state: 'CHANGES_REQUESTED',
+          body: 'Please cap retries.',
+          submittedAt: '2026-01-02T12:00:00Z',
+          editedAt: null,
+          commitSha: 'a'.repeat(40),
+          url: `${base.pullRequest.url}#pullrequestreview-91204`,
+        },
+        {
+          id: 'rev-2',
+          author: 'dave',
+          state: 'APPROVED',
+          body: '   ',
+          submittedAt: '2026-01-03T12:00:00Z',
+          editedAt: null,
+          commitSha: 'b'.repeat(40),
+          url: `${base.pullRequest.url}#pullrequestreview-91205`,
+        },
+        {
+          id: 'rev-3',
+          author: 'alice',
+          state: 'PENDING',
+          body: 'Draft summary not submitted yet.',
+          submittedAt: null,
+          editedAt: null,
+          commitSha: 'c'.repeat(40),
+          url: `${base.pullRequest.url}#pullrequestreview-91206`,
+        },
+        {
+          id: 'rev-4',
+          author: 'erin',
+          state: 'COMMENTED',
+          body: 'Url without review id.',
+          submittedAt: '2026-01-04T12:00:00Z',
+          editedAt: null,
+          commitSha: 'c'.repeat(40),
+          url: base.pullRequest.url,
+        },
+      ],
+    };
+    savePullRequest(db, reviewsOnly);
+    expect(linkable(db)).toEqual([{ ref: 'v91204', kind: 'review', gone: 0 }]);
+    expect([...loadKnownRefs(db)]).toEqual(['v91204']);
+
+    saveLinks(db, [{ ref: 'v91204', role: 'duplicate', finding: 'F1' }]);
+    const clearedBody: PullRequestData = {
+      ...reviewsOnly,
+      reviews: reviewsOnly.reviews.map((r) => (r.id === 'rev-1' ? { ...r, body: '' } : r)),
+    };
+    savePullRequest(db, clearedBody);
+    expect(linkable(db)).toEqual([{ ref: 'v91204', kind: 'review', gone: 1 }]);
+    expect(loadKnownRefs(db).has('v91204')).toBe(false);
   });
 
   it('is empty before the first save, and its known refs too', () => {
@@ -412,7 +483,7 @@ describe('linkable', () => {
   it('deletes a row that is not in the data any more when no link points at it', () => {
     const db = openLinked({ ref: 'r1001', finding: 'F1' });
     savePullRequest(db, { ...without('rc-2', 'ic-1'), checkRuns: [sonarRun()] });
-    expect(linkable(db).map((row) => row.ref)).toEqual(['a1b2c3d4e', 'a3f9c2d1e', 'a5e6f7081', 'r1001', 'r1003', 'r1004']);
+    expect(linkable(db).map((row) => row.ref)).toEqual(['a1b2c3d4e', 'a3f9c2d1e', 'a5e6f7081', 'r1001', 'r1003', 'r1004', 'v1']);
   });
 
   it('keeps a row that is not in the data any more as gone when a link points at it, and not the others', () => {
@@ -428,8 +499,9 @@ describe('linkable', () => {
       { ref: 'r1001', kind: 'review_comment', gone: 1 },
       { ref: 'r1003', kind: 'review_comment', gone: 0 },
       { ref: 'r1004', kind: 'review_comment', gone: 0 },
+      { ref: 'v1', kind: 'review', gone: 0 },
     ]);
-    expect([...loadKnownRefs(db)].sort()).toEqual(['a5e6f7081', 'c2001', 'r1003', 'r1004']);
+    expect([...loadKnownRefs(db)].sort()).toEqual(['a5e6f7081', 'c2001', 'r1003', 'r1004', 'v1']);
     expect(loadLinks(db).map((link) => link.ref)).toEqual(['r1001', 'a1b2c3d4e']);
   });
 
@@ -440,7 +512,7 @@ describe('linkable', () => {
 
     savePullRequest(db, withChecks([sonarRun()]));
     expect(linkable(db).every((row) => row.gone === 0)).toBe(true);
-    expect(linkable(db)).toHaveLength(8);
+    expect(linkable(db)).toHaveLength(9);
     expect(loadKnownRefs(db).has('r1001')).toBe(true);
     expect(loadLinks(db).map((link) => link.ref)).toEqual(['r1001', 'a1b2c3d4e']);
   });
@@ -536,6 +608,7 @@ describe('recordKnownCommentRef', () => {
   it('refuses a value that is not a comment ref', () => {
     const db = openNew();
     expect(() => recordKnownCommentRef(db, 'a3f9c2d1e')).toThrow('"a3f9c2d1e" is not a comment id; expected r544830 or c623843');
+    expect(() => recordKnownCommentRef(db, 'v91204')).toThrow('"v91204" is not a comment id; expected r544830 or c623843');
     expect(() => recordKnownCommentRef(db, 'bogus')).toThrow('"bogus" is not a comment id; expected r544830 or c623843');
   });
 });

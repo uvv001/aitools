@@ -35,7 +35,7 @@ describe('renderMarkdown', () => {
       '',
       '## Conversation',
       '',
-      `- **@carol** requested changes · 2026-01-02T12:00:00Z · commit \`aaaaaaa\` · [link](${url}#pullrequestreview-1)`,
+      `- **@carol** requested changes · \`v1\` · 2026-01-02T12:00:00Z · commit \`aaaaaaa\` · [link](${url}#pullrequestreview-1)`,
       '',
       '  Please address the inline comments.',
       '',
@@ -133,7 +133,7 @@ describe('renderMarkdown', () => {
     );
     const markdown = renderMarkdown(data);
     expect(markdown).not.toContain('@erin');
-    expect(markdown).toContain('- **@frank** commented');
+    expect(markdown).toContain('- **@frank** commented · `v4` · 2026-01-05T09:00:00Z');
     expect(markdown).toContain('\n  General remark');
   });
 
@@ -144,7 +144,7 @@ describe('renderMarkdown', () => {
     const markdown = renderMarkdown(data);
 
     expect(markdown).toContain(`- **@alice** · \`c2001\` · 2026-01-03T08:00:00Z · edited 2026-01-03T08:15:00Z · [link](${url}#issuecomment-2001)`);
-    expect(markdown).toContain('**@carol** requested changes · 2026-01-02T12:00:00Z · edited 2026-01-02T12:30:00Z · commit');
+    expect(markdown).toContain('**@carol** requested changes · `v1` · 2026-01-02T12:00:00Z · edited 2026-01-02T12:30:00Z · commit');
     expect(markdown.match(/edited/g)).toHaveLength(3);
   });
 
@@ -178,12 +178,26 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown(data)).toContain('#### Line 42 · resolved');
   });
 
-  it('shows the ref of conversation and review comments after the author, and none for reviews', () => {
-    const markdown = renderMarkdown(samplePullRequest());
+  it('shows the ref of comments and nonempty submitted reviews after the author/state, and none for empty or pending reviews', () => {
+    const data = samplePullRequest();
+    data.reviews.push({
+      id: 'rev-pending',
+      author: 'alice',
+      state: 'PENDING',
+      body: 'Draft summary',
+      submittedAt: null,
+      editedAt: null,
+      commitSha: null,
+      url: `${url}#pullrequestreview-99`,
+    });
+    const markdown = renderMarkdown(data);
     expect(markdown).toContain('- **@alice** · `c2001` · ');
     expect(markdown).toContain('- **@bob** · `r1001` · ');
-    expect(markdown).toContain('**@carol** requested changes · 2026-01-02T12:00:00Z');
-    expect(markdown.match(/ · `[rc]\d+` · /g)).toHaveLength(5);
+    expect(markdown).toContain('**@carol** requested changes · `v1` · 2026-01-02T12:00:00Z');
+    expect(markdown).toContain('**@dave** approved · 2026-01-04T12:00:00Z');
+    expect(markdown).not.toContain('`v2`');
+    expect(markdown).not.toContain('`v99`');
+    expect(markdown.match(/ · `[rcv]\d+` · /g)).toHaveLength(6);
   });
 
   it('omits the ref of a comment whose link has no numeric id', () => {
@@ -424,7 +438,7 @@ describe('renderMarkdown check annotations', () => {
     expect(loose).toContain('Message\n\n- `e0000002`');
   });
 
-  it('filters by refs', () => {
+  it('filters by refs, including nonempty submitted review bodies', () => {
     const data = withChecks(checkRun([annotation({ ref: 'a3f9c2d1' }), annotation({ ref: 'b7c8d9e0', startLine: 10, endLine: 10 })]));
     const byRef = renderMarkdown(data, { refs: ['r1001', 'a3f9c2d1'] });
     expect(byRef).toContain('- Filter: only refs `r1001`, `a3f9c2d1`');
@@ -434,25 +448,49 @@ describe('renderMarkdown check annotations', () => {
     expect(byRef).not.toContain('b7c8d9e0');
     expect(byRef).not.toContain('r1004');
     expect(byRef).not.toContain('## Conversation');
+
+    const byReviewRef = renderMarkdown(data, { refs: ['v1'] });
+    expect(byReviewRef).toContain('## Conversation');
+    expect(byReviewRef).toContain('**@carol** requested changes · `v1`');
+    expect(byReviewRef).toContain('Please address the inline comments.');
+    expect(byReviewRef).not.toContain('## Review threads');
+    expect(byReviewRef).not.toContain('## Checks');
+    expect(renderMarkdown(data, { refs: ['v2'] })).toContain('_No comments._');
   });
 
-  it('filters by pending items', () => {
+  it('filters by pending items, surfacing pending review bodies and pending replies with linked thread comments marked _(context)_', () => {
     const data = withChecks(checkRun([annotation({ ref: 'a3f9c2d1' }), annotation({ ref: 'b7c8d9e0', startLine: 10, endLine: 10 })]));
-    const byPending = renderMarkdown(data, { pendingRefs: new Set(['c2001', 'r1004', 'b7c8d9e0']) });
-    expect(byPending).toContain('- Filter: only pending comments and check annotations');
+    const byPending = renderMarkdown(data, { pendingRefs: new Set(['v1', 'c2001', 'r1003', 'r1004', 'b7c8d9e0']) });
+    expect(byPending).toContain('- Filter: only pending comments, reviews and check annotations');
+    expect(byPending).toContain('**@carol** requested changes · `v1`');
     expect(byPending).toContain('`c2001`');
     expect(byPending).toContain('`r1004`');
     expect(byPending).toContain('`b7c8d9e0`');
-    expect(byPending).not.toContain('`r1001`');
+    expect(byPending).toContain('- **@bob** _(context)_ · `r1001`');
+    expect(byPending).toContain('  - ↳ **@alice** _(context)_ · `r1002`');
+    expect(byPending).toContain('  - ↳ **@bob** · `r1003`');
     expect(byPending).not.toContain('`a3f9c2d1`');
+
+    // Intersecting --ref and --pending per comment: a linked root does not match --pending even when a reply in its thread is pending.
+    const linkedRootRef = renderMarkdown(data, { refs: ['r1001'], pendingRefs: new Set(['r1003']) });
+    expect(linkedRootRef).toContain('_No comments._');
+
+    const pendingReplyRef = renderMarkdown(data, { refs: ['r1003'], pendingRefs: new Set(['r1003']) });
+    expect(pendingReplyRef).toContain('- **@bob** _(context)_ · `r1001`');
+    expect(pendingReplyRef).toContain('  - ↳ **@bob** · `r1003`');
   });
 });
 
 describe('findUnknownRefs', () => {
   const data = withChecks(checkRun([annotation({ ref: 'a3f9c2d1' })]));
 
-  it('knows review comments, conversation comments and check annotations, case-insensitively', () => {
-    expect(findUnknownRefs(data, ['r1001', 'R1002', 'c2001', 'A3F9C2D1', 'r9999', 'a00000000'])).toEqual(['r9999', 'a00000000']);
+  it('knows review comments, conversation comments, nonempty submitted review bodies and check annotations, case-insensitively', () => {
+    expect(findUnknownRefs(data, ['r1001', 'R1002', 'c2001', 'v1', 'V1', 'v2', 'v9999', 'A3F9C2D1', 'r9999', 'a00000000'])).toEqual([
+      'v2',
+      'v9999',
+      'r9999',
+      'a00000000',
+    ]);
   });
 
   it('reports annotation refs as unknown when there are no check runs', () => {

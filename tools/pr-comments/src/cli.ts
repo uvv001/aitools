@@ -538,7 +538,7 @@ async function renderComments({ env, values }: Context, db: string): Promise<num
   const refs = rawRefs?.map((ref) => {
     const normalized = ref.toLowerCase();
     if (!isLinkRef(normalized)) {
-      throw new Error(`"${ref}" is not a comment or check annotation id; expected r544830, c623843 or a3f9c2d1e`);
+      throw new Error(`"${ref}" is not a comment, review or check annotation id; expected r544830, c623843, v91204 or a3f9c2d1e`);
     }
     return normalized;
   });
@@ -549,7 +549,7 @@ async function renderComments({ env, values }: Context, db: string): Promise<num
     ? new Set(pendingItems({ links: (await loadReviewFile(db)).links, data }).map((item) => item.ref))
     : undefined;
   for (const ref of findUnknownRefs(data, refs ?? [])) {
-    env.warn(`Warning: no comment or check annotation ${ref} in this pull request\n`);
+    env.warn(`Warning: no comment, review or check annotation ${ref} in this pull request\n`);
   }
   const markdown = renderMarkdown(data, { refs, pendingRefs });
   if (values.out) {

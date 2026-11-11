@@ -1,5 +1,5 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
-import { commentRefFromUrl, isCommentRef } from './comment-ref.ts';
+import { commentRefFromUrl, isCommentRef, linkableReviewRef, reviewRefFromUrl } from './comment-ref.ts';
 import type {
   AnnotationLevel,
   CheckRun,
@@ -11,10 +11,12 @@ import type {
 } from './model.ts';
 import { inTransaction } from './review-store.ts';
 
+export { linkableReviewRef } from './comment-ref.ts';
+
 // The pull request the review is about, inside the review database (review-store.ts creates these tables with the
-// rest of its schema). At most one pull request is stored: the connected one. `pr_comments.ref` is the short id of
-// the comment, which is what a link names; it is NULL for a comment whose url holds none (that comment can never be
-// linked, and has no row in `linkable`).
+// rest of its schema). At most one pull request is stored: the connected one. `pr_comments.ref` and `pr_reviews.ref`
+// hold the short ids read from their URLs (`NULL` when a URL holds none; a review is added to `linkable` only when it
+// is submitted and has non-empty text).
 export const PULL_REQUEST_SCHEMA = `
 CREATE TABLE pr_pull_requests (
   id TEXT PRIMARY KEY,
@@ -38,6 +40,7 @@ CREATE TABLE pr_pull_requests (
 CREATE TABLE pr_reviews (
   id TEXT PRIMARY KEY,
   pull_request_id TEXT NOT NULL REFERENCES pr_pull_requests(id),
+  ref TEXT UNIQUE,
   author TEXT NOT NULL,
   state TEXT NOT NULL,
   body TEXT NOT NULL,
@@ -178,9 +181,12 @@ export function savePullRequest(db: DatabaseSync, data: PullRequestData): void {
       fetched_at: pr.fetchedAt,
     });
     for (const r of reviews) {
+      const linkableRef = linkableReviewRef(r);
+      if (linkableRef !== undefined) present.set(linkableRef, 'review');
       insert('pr_reviews', {
         id: r.id,
         pull_request_id: pr.id,
+        ref: reviewRefFromUrl(r.url) ?? null,
         author: r.author,
         state: r.state,
         body: r.body,

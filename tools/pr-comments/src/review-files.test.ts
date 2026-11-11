@@ -1281,7 +1281,7 @@ describe('syncReviewFile', () => {
     expect(await syncReviewFile(db, data)).toEqual({ db, reviews: 2, threads: 2, comments: 2, annotations: 2 });
 
     expect(await loadSnapshot(db)).toEqual(data);
-    expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c2', 'a00000001', 'a00000002']));
+    expect((await loadReviewFile(db)).known).toEqual(new Set(['r1', 'c2', 'v1', 'a00000001', 'a00000002']));
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 
