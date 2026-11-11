@@ -11,8 +11,12 @@ import { execFile } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 //#region src/comment-ref.ts
 const REF_PATTERN = /^[rc]\d+$/;
+const REVIEW_BODY_PATTERN = /^v\d+$/;
 function isCommentRef(value) {
 	return REF_PATTERN.test(value);
+}
+function isReviewBodyRef(value) {
+	return REVIEW_BODY_PATTERN.test(value);
 }
 function commentRefFromUrl(url) {
 	const review = /#discussion_r(\d+)$/.exec(url);
@@ -20,20 +24,29 @@ function commentRefFromUrl(url) {
 	const conversation = /#issuecomment-(\d+)$/.exec(url);
 	return conversation ? `c${conversation[1]}` : void 0;
 }
+function reviewRefFromUrl(url) {
+	const review = /#pullrequestreview-(\d+)$/.exec(url);
+	return review ? `v${review[1]}` : void 0;
+}
+function linkableReviewRef(review) {
+	return review.state !== "PENDING" && review.body.trim() !== "" ? reviewRefFromUrl(review.url) : void 0;
+}
 function commentUrl(pullRequestUrl, ref) {
-	if (!isCommentRef(ref)) throw new Error(`"${ref}" is not a comment id; expected r544830 or c623843`);
+	if (!isCommentRef(ref) && !isReviewBodyRef(ref)) throw new Error(`"${ref}" is not a comment or pull request review id; expected r544830, c623843 or v91204`);
 	const base = pullRequestUrl.replace(/#.*$/, "");
-	return ref.startsWith("r") ? `${base}#discussion_${ref}` : `${base}#issuecomment-${ref.slice(1)}`;
+	if (ref.startsWith("r")) return `${base}#discussion_${ref}`;
+	if (ref.startsWith("c")) return `${base}#issuecomment-${ref.slice(1)}`;
+	return `${base}#pullrequestreview-${ref.slice(1)}`;
 }
 function commentLink(pullRequestUrl, ref) {
-	return pullRequestUrl === void 0 || !isCommentRef(ref) ? ref : `[${ref}](${commentUrl(pullRequestUrl, ref)})`;
+	return pullRequestUrl === void 0 || !isCommentRef(ref) && !isReviewBodyRef(ref) ? ref : `[${ref}](${commentUrl(pullRequestUrl, ref)})`;
 }
 const ANNOTATION_PATTERN = /^a[0-9a-f]{8}$/;
 function isAnnotationRef(value) {
 	return ANNOTATION_PATTERN.test(value);
 }
 function isLinkRef(value) {
-	return isCommentRef(value) || isAnnotationRef(value);
+	return isCommentRef(value) || isReviewBodyRef(value) || isAnnotationRef(value);
 }
 function annotationRef(app, path, startLine, endLine, message) {
 	const text = [
@@ -584,7 +597,8 @@ const DB_OPTION = reqOpt("db", "<file.sqlite>", "the review database");
 const REVISIONS = "A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the short hash (at least 8 characters) of the commit.";
 const FINDING = arg("<finding>", "the finding, such as F7 (any case)");
 const COMMENT_ONLY_REF = arg("<ref>", "the comment: r544830 or c623843");
-const COMMENT_REF = arg("<ref>", "the comment or check annotation: r544830, c623843 or a3f9c2d1e");
+const COMMENT_OR_REVIEW_REF = arg("<ref>", "the comment or review body: r544830, c623843 or v91204");
+const COMMENT_REF = arg("<ref>", "the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e");
 const LOGGED = "A change is logged under the Updates of the finding, with the time.";
 function spec(words, summary, description, extra = {}) {
 	const { args = [], options = [], notes, oneOf, database = "change", example } = extra;
@@ -621,7 +635,7 @@ const GROUPS = Object.fromEntries([
 		name: "link",
 		title: "Links",
 		summary: "the links between findings and the comments of the pull request",
-		description: "A link ties a comment or a check annotation of the pull request to the review. Its role is `own` (the comment of a finding, at most one per finding), `duplicate` (the same issue as a finding, any number) or `note` (a comment that is no finding, with the reason). A ref is linked once. Links are records in the database only. The refs must be in the downloaded pull request, so run `pr sync` first."
+		description: "A link ties a comment, a nonempty submitted review body or a check annotation of the pull request to the review. Its role is `own` (the comment of a finding, at most one per finding; `r…` or `c…` only), `duplicate` (the same issue as a finding, any number) or `note` (a comment or review body that is no finding, with the reason). A ref is linked once. Links are records in the database only. The refs must be in the downloaded pull request, so run `pr sync` first."
 	},
 	{
 		name: "report",
@@ -729,27 +743,27 @@ const COMMAND_SPECS = [
 		],
 		example: "F7 --dry-run"
 	}),
-	spec("link pending", "lists the comments and check annotations not linked yet", "Prints one line per top-level comment or check annotation of the synced pull request that no link names: ref, author or app, place,\nstate or level, and an excerpt. Nothing is printed when everything is processed (use \"report comments\" to inspect thread replies,\nedited comments, and submitted review bodies). Replies are not listed; their thread is the root comment.\nIt exits with 0 whenever it ran: pending work is not a failure. Before the first \"pr sync\" it exits with 1.", { database: "readonly" }),
+	spec("link pending", "lists the comments, review bodies and check annotations not linked yet", "Prints one line per comment (thread roots and replies), nonempty submitted review body or check annotation of the synced\npull request that no link names: ref, author or app, place, state or level, and an excerpt. Nothing is printed when\neverything is processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first \"pr sync\" it exits with 1.", { database: "readonly" }),
 	spec("link own", "links a comment as the own comment of a finding", "Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.", {
 		args: [FINDING, COMMENT_ONLY_REF],
 		options: [noteOption()],
 		example: "F7 r544861"
 	}),
-	spec("link duplicate", "links a comment or check annotation about the same issue", "Links a comment or a check annotation as a duplicate of the finding (a finding may have several).", {
+	spec("link duplicate", "links a comment, review body or check annotation about the same issue", "Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have several).", {
 		args: [FINDING, COMMENT_REF],
 		options: [noteOption()],
 		example: "F7 c623843"
 	}),
-	spec("link note", "records that a comment is not a finding, and why", "Records that the comment is no finding, with the reason. A check annotation cannot be a note.", {
-		args: [COMMENT_ONLY_REF, arg("<text>", "the reason, one line")],
+	spec("link note", "records that a comment or review body is not a finding, and why", "Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note.", {
+		args: [COMMENT_OR_REVIEW_REF, arg("<text>", "the reason, one line")],
 		example: "c623843 \"a bot, not a finding\""
 	}),
-	spec("link remove", "removes the link of a comment or check annotation", "Removes the link of the comment, whatever its role; the comment is pending again.", {
+	spec("link remove", "removes the link of a comment, review body or check annotation", "Removes the link of the comment, review body or check annotation, whatever its role; it is pending again.", {
 		args: [COMMENT_REF],
 		options: [noteOption()],
 		example: "r544861"
 	}),
-	spec("link reply", "answers a duplicate with \"Duplicate of <link>.\"", "Answers a comment that is linked as a duplicate of a finding with \"Duplicate of <link to the own comment of the finding>.\"\nin your pending review, and records the returned reply ref and update in the database (run \"pr-comments pr sync --db <file.sqlite>\"\nto refresh the full pull request snapshot). The finding must have an own comment. Needs a token with write permission.\nA conversation comment can only be answered at once, so it needs --now. The thread is never resolved by the tool.", {
+	spec("link reply", "answers a duplicate with \"Duplicate of <link>.\"", "Answers a comment that is linked as a duplicate of a finding with \"Duplicate of <link to the own comment of the finding>.\"\nin your pending review, and records the returned reply ref (linked as a note) and update in the database (run\n\"pr-comments pr sync --db <file.sqlite>\" to refresh the full pull request snapshot). The finding must have an own comment.\nNeeds a token with write permission. A conversation comment can only be answered at once, so it needs --now. The thread is never resolved by the tool.", {
 		args: [arg("<ref>", "the comment that is linked as a duplicate: r544830 or c623843")],
 		options: postOptions,
 		notes: [
@@ -762,11 +776,11 @@ const COMMAND_SPECS = [
 	spec("report render", "writes the review report", "Writes the markdown report of the review, made from the database, and says whether the file was created, updated or\nleft unchanged. It overwrites the report each time (change the review with the commands, never in the markdown).\nIt writes the report only, never the database, and never over a SQLite file.", { database: "readonly" }),
 	spec("report comments", "writes the pull request conversation as markdown", "Writes the downloaded pull request (reviews, threads, comments and the Checks section) as markdown, to the\nscreen unless --out is given. Run \"pr-comments pr sync --db <file.sqlite>\" first.", {
 		options: [
-			opt("ref", "<ref>", "only these comments or check annotations (several refs comma-separated); a review comment includes its thread", { repeatable: true }),
-			flag("pending", "only comments and check annotations that no link names yet"),
+			opt("ref", "<ref>", "only these comments, review bodies or check annotations (several refs comma-separated); a review comment includes its thread", { repeatable: true }),
+			flag("pending", "only comments, nonempty submitted review bodies and check annotations that no link names yet"),
 			opt("out", "<file.md>", "write the markdown to this file")
 		],
-		notes: ["With `--ref` or `--pending`, review bodies are not shown. An unknown `--ref` gives a warning, and a malformed ref is an error.", "On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16."],
+		notes: ["With `--ref` or `--pending`, matching threads keep their non-matching comments marked `_(context)_`, and empty or pending review bodies are omitted. An unknown `--ref` gives a warning, and a malformed ref is an error.", "On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16."],
 		database: "readonly",
 		example: "--pending --out pr-42.md"
 	})
@@ -963,15 +977,19 @@ function commentHeader(comment, isContext = false) {
 	parts.push(`[link](${comment.url})`);
 	return parts.join(" · ");
 }
-function renderConversationItem(item) {
-	if (item.kind === "comment") return listItem(commentHeader(item.comment), bodyText(item.comment.body));
-	const { review } = item;
+function renderReview$1(review) {
+	const ref = linkableReviewRef(review);
 	const parts = [`**@${review.author}** ${REVIEW_STATE_LABELS[review.state] ?? review.state.toLowerCase()}`];
+	if (ref) parts.push(`\`${ref}\``);
 	if (review.submittedAt) parts.push(review.submittedAt);
 	if (review.editedAt) parts.push(`edited ${review.editedAt}`);
 	if (review.commitSha) parts.push(`commit \`${shortSha(review.commitSha)}\``);
 	parts.push(`[link](${review.url})`);
 	return listItem(parts.join(" · "), review.body.trim() ? bodyText(review.body) : void 0);
+}
+function renderConversationItem(item) {
+	if (item.kind === "comment") return listItem(commentHeader(item.comment), bodyText(item.comment.body));
+	return renderReview$1(item.review);
 }
 function renderThreadComments(comments, isContext) {
 	const children = /* @__PURE__ */ new Map();
@@ -1046,6 +1064,10 @@ function findUnknownRefs(data, refs) {
 		const ref = commentRefFromUrl(comment.url);
 		if (ref !== void 0) known.add(ref);
 	}
+	for (const review of data.reviews) {
+		const ref = linkableReviewRef(review);
+		if (ref !== void 0) known.add(ref);
+	}
 	for (const run of data.checkRuns ?? []) for (const annotation of run.annotations) known.add(annotation.ref);
 	return refs.filter((ref) => !known.has(ref.toLowerCase()));
 }
@@ -1053,6 +1075,7 @@ function renderMarkdown(data, options = {}) {
 	const { pullRequest: pr } = data;
 	const wantedRefs = options.refs ? new Set(options.refs.map((r) => r.toLowerCase())) : void 0;
 	const pending = options.pendingRefs;
+	const filtered = wantedRefs !== void 0 || pending !== void 0;
 	const matchesRef = (ref) => (wantedRefs === void 0 || ref !== void 0 && wantedRefs.has(ref)) && (pending === void 0 || ref !== void 0 && pending.has(ref));
 	const out = [`# ${pr.title}`];
 	const meta = [
@@ -1065,46 +1088,29 @@ function renderMarkdown(data, options = {}) {
 		`- Synced: ${pr.fetchedAt}`
 	];
 	if (options.refs) meta.push(`- Filter: only refs ${options.refs.map((r) => `\`${r.toLowerCase()}\``).join(", ")}`);
-	if (options.pendingRefs) meta.push("- Filter: only pending comments and check annotations");
+	if (options.pendingRefs) meta.push("- Filter: only pending comments, reviews and check annotations");
 	out.push(meta.join("\n"));
 	const conversation = [...data.comments.filter((c) => c.kind === "issue" && matchesRef(commentRefFromUrl(c.url))).map((comment) => ({
 		at: comment.createdAt,
 		kind: "comment",
 		comment
-	})), ...wantedRefs === void 0 && pending === void 0 ? data.reviews.filter((r) => r.state !== "COMMENTED" || r.body.trim() !== "").map((review) => ({
+	})), ...(filtered ? data.reviews.filter((r) => matchesRef(linkableReviewRef(r))) : data.reviews.filter((r) => r.state !== "COMMENTED" || r.body.trim() !== "")).map((review) => ({
 		at: review.submittedAt ?? "",
 		kind: "review",
 		review
-	})) : []].sort((a, b) => a.at.localeCompare(b.at));
+	}))].sort((a, b) => a.at.localeCompare(b.at));
 	const threadComments = (thread) => data.comments.filter((c) => c.threadId === thread.id).sort((a, b) => (a.threadPosition ?? 0) - (b.threadPosition ?? 0));
 	const threads = data.threads.map((thread) => ({
 		thread,
 		comments: threadComments(thread)
-	})).filter((t) => {
-		if (t.comments.length === 0) return false;
-		if (wantedRefs !== void 0 && !t.comments.some((c) => {
-			const ref = commentRefFromUrl(c.url);
-			return ref !== void 0 && wantedRefs.has(ref);
-		})) return false;
-		if (pending !== void 0) {
-			const rootRef = t.comments[0] ? commentRefFromUrl(t.comments[0].url) : void 0;
-			if (rootRef === void 0 || !pending.has(rootRef)) return false;
-		}
-		return true;
-	}).sort((a, b) => a.thread.path.localeCompare(b.thread.path) || (a.thread.line ?? a.thread.originalLine ?? 0) - (b.thread.line ?? b.thread.originalLine ?? 0) || (a.comments[0]?.createdAt ?? "").localeCompare(b.comments[0]?.createdAt ?? ""));
-	const checkRuns = (data.checkRuns ?? []).map((run) => wantedRefs === void 0 && pending === void 0 ? run : {
+	})).filter((t) => t.comments.length > 0 && (!filtered || t.comments.some((c) => matchesRef(commentRefFromUrl(c.url))))).sort((a, b) => a.thread.path.localeCompare(b.thread.path) || (a.thread.line ?? a.thread.originalLine ?? 0) - (b.thread.line ?? b.thread.originalLine ?? 0) || (a.comments[0]?.createdAt ?? "").localeCompare(b.comments[0]?.createdAt ?? ""));
+	const checkRuns = (data.checkRuns ?? []).map((run) => !filtered ? run : {
 		...run,
 		annotations: run.annotations.filter((a) => matchesRef(a.ref))
-	}).filter((run) => wantedRefs === void 0 && pending === void 0 || run.annotations.length > 0).sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
+	}).filter((run) => !filtered || run.annotations.length > 0).sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
 	if (conversation.length > 0) out.push("## Conversation", conversation.map(renderConversationItem).join("\n\n"));
 	if (threads.length > 0) {
-		const isContext = (comment) => {
-			if (wantedRefs !== void 0) {
-				const ref = commentRefFromUrl(comment.url);
-				if (ref === void 0 || !wantedRefs.has(ref)) return true;
-			}
-			return false;
-		};
+		const isContext = (comment) => filtered && !matchesRef(commentRefFromUrl(comment.url));
 		out.push("## Review threads");
 		let currentPath;
 		for (const { thread, comments } of threads) {
@@ -1567,9 +1573,11 @@ mutation($input: AddPullRequestReviewThreadReplyInput!) {
 const REJECTED = "GitHub rejected the reply (is the thread still there?)";
 const NEEDS_NOW = "a conversation comment can only be answered with a new conversation comment, which is visible at once; add --now to do that";
 const IDENTICAL = "an identical reply of yours already exists";
+const positionOf = (comment) => comment.threadPosition ?? (comment.replyToId === null ? 0 : Number.MAX_SAFE_INTEGER);
+const threadComments = (data, threadId) => data.comments.filter((c) => c.threadId === threadId).sort((a, b) => positionOf(a) - positionOf(b));
 function placeOf(data, thread) {
 	if (!thread) return {};
-	const root = data.comments.filter((c) => c.threadId === thread.id).sort((a, b) => (a.threadPosition ?? 0) - (b.threadPosition ?? 0))[0];
+	const root = threadComments(data, thread.id)[0];
 	const range = threadRange(thread);
 	const wholeFile = range === void 0 || root?.diffHunk === "";
 	return {
@@ -1587,7 +1595,6 @@ function targetOf(data, comment, ref) {
 		...placeOf(data, thread)
 	};
 }
-const isReplyOf = (comment, threadId) => comment.threadId === threadId && ((comment.threadPosition ?? 0) > 0 || comment.replyToId !== null);
 function unchanged(run, existing, target) {
 	const comment = commentRefFromUrl(existing.url);
 	return {
@@ -1636,7 +1643,9 @@ async function writeThreadReply(run, threadId, target) {
 async function replyInThread(run, answered, target) {
 	const { threadId } = answered;
 	if (threadId === null) throw new Error(`comment ${target.ref} is not part of a review thread`);
-	const identical = run.data.comments.find((c) => isReplyOf(c, threadId) && sameLogin(c.author, run.viewer) && sameText(c.body, run.body));
+	const comments = threadComments(run.data, threadId);
+	const targetIndex = comments.indexOf(answered);
+	const identical = comments.find((c, index) => index > targetIndex && sameLogin(c.author, run.viewer) && sameText(c.body, run.body));
 	if (identical) return unchanged(run, identical, target);
 	if (run.options.dryRun) return created(run, target, "pending");
 	return writeThreadReply(run, threadId, target);
@@ -1647,7 +1656,7 @@ async function replyInConversation(run, answered, target) {
 	const identical = run.data.comments.find((c, index) => {
 		const createdAt = Date.parse(c.createdAt);
 		const after = createdAt > answeredAt || createdAt === answeredAt && index > answeredIndex;
-		return c.kind === "issue" && sameLogin(c.author, run.viewer) && sameText(c.body, run.body) && after;
+		return c.kind === "issue" && c.id !== answered.id && sameLogin(c.author, run.viewer) && sameText(c.body, run.body) && after;
 	});
 	if (identical) return unchanged(run, identical, target);
 	if (!run.options.now) throw new Error(NEEDS_NOW);
@@ -1752,7 +1761,11 @@ function formatRoundItem({ round, revision, base, notes = [] }) {
 	const [head = "", ...rest] = first.split("\n");
 	return [`${prefix}; ${[head, ...more].join("; ")}`, ...rest].join("\n");
 }
-const formatCommentSubject = (pullRequest, ref) => isAnnotationRef(ref) ? `check annotation ${ref}` : `PR comment ${commentLink(pullRequest, ref)}`;
+function formatCommentSubject(pullRequest, ref) {
+	if (isAnnotationRef(ref)) return `check annotation ${ref}`;
+	if (isReviewBodyRef(ref)) return `PR review ${commentLink(pullRequest, ref)}`;
+	return `PR comment ${commentLink(pullRequest, ref)}`;
+}
 const formatRole = (role) => role === "own" ? "its own" : "a duplicate";
 function formatUpdateEvent(item) {
 	switch (item.kind) {
@@ -2125,7 +2138,7 @@ function addUpdate(data, id, input, now) {
 const DB_HINT_PLACEHOLDER = "--db <file.sqlite>";
 const REMOVE = `pr-comments link remove ${DB_HINT_PLACEHOLDER}`;
 function checkedRef(ref) {
-	if (!isLinkRef(ref)) throw new Error(`"${ref}" is not a PR comment ref; expected r544830, c623843 or a3f9c2d1e`);
+	if (!isLinkRef(ref)) throw new Error(`"${ref}" is not a PR comment ref; expected r544830, c623843, v91204 or a3f9c2d1e`);
 }
 function knownRef(state, ref) {
 	if (!state.known.has(ref)) throw new Error(`${ref} is not in the database; run "pr-comments pr sync ${DB_HINT_PLACEHOLDER}" first, or check the id`);
@@ -2135,6 +2148,9 @@ const NOT_A_NOTE = `: every check item has to be tied to a finding, so it cannot
 const NOTHING_TO_REPLY = "; there is nothing to reply to";
 function refuseAnnotation(ref, why) {
 	if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation${why}`);
+}
+function refuseReviewBodyAsOwn(ref) {
+	if (isReviewBodyRef(ref)) throw new Error(`pull request review ${ref} cannot be the own comment of a finding; link it with "link duplicate" or "link note"`);
 }
 const linkOf = (links, ref) => links.find((link) => link.ref === ref);
 const ownOf = (links, findingId) => links.find((link) => link.role === "own" && link.finding === findingId);
@@ -2171,6 +2187,7 @@ function linkToFinding(state, findingId, ref, role, now, note) {
 }
 function linkOwn(state, findingId, ref, now, note) {
 	refuseAnnotation(ref, ONLY_DUPLICATE);
+	refuseReviewBodyAsOwn(ref);
 	return linkToFinding(state, findingId, ref, "own", now, note);
 }
 function linkDuplicate(state, findingId, ref, now, note) {
@@ -2223,6 +2240,7 @@ function unlink$1(state, ref, now, note) {
 }
 function recordPosted(state, findingId, ref, action, where, now) {
 	refuseAnnotation(ref, ONLY_DUPLICATE);
+	refuseReviewBodyAsOwn(ref);
 	const found = findFinding(state.data, findingId);
 	checkedRef(ref);
 	knownRef(state, ref);
@@ -2252,14 +2270,28 @@ function recordPosted(state, findingId, ref, action, where, now) {
 }
 function recordReplied(state, ref, replyRef, where, now) {
 	refuseAnnotation(ref, NOTHING_TO_REPLY);
+	if (isReviewBodyRef(ref)) throw new Error(`${ref} is a pull request review, not a comment; only a comment (r… or c…) can be answered`);
 	checkedRef(ref);
 	checkedRef(replyRef);
+	if (!isCommentRef(replyRef)) throw new Error(`"${replyRef}" is not a comment id; expected r544830 or c623843`);
 	knownRef(state, ref);
+	const replyLinked = state.links.some((item) => item.ref === replyRef);
+	if (!replyLinked) knownRef(state, replyRef);
 	const link = linkOf(state.links, ref);
 	if (link === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate ${DB_HINT_PLACEHOLDER} <finding> ${ref}"`);
 	if (link.role !== "duplicate") throw new Error(link.role === "note" ? `${ref} is recorded as a note, not as a duplicate of a finding` : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`);
 	const found = findFinding(state.data, link.finding);
-	if (found.updates.some((entry) => entry.kind === "replied" && entry.ref === ref && entry.replyRef === replyRef && entry.pullRequest === state.pullRequest)) return state;
+	const alreadyRecorded = found.updates.some((entry) => entry.kind === "replied" && entry.ref === ref && entry.replyRef === replyRef && entry.pullRequest === state.pullRequest);
+	if (alreadyRecorded && replyLinked) return state;
+	const links = replyLinked ? state.links : [...state.links, {
+		ref: replyRef,
+		role: "note",
+		note: `duplicate reply to ${ref}`
+	}];
+	if (alreadyRecorded) return {
+		...state,
+		links
+	};
 	const pending = where === "pending" ? { pending: true } : {};
 	const pullRequest = state.pullRequest === void 0 ? {} : { pullRequest: state.pullRequest };
 	const data = amend(state.data, found, now, {}, {
@@ -2271,7 +2303,8 @@ function recordReplied(state, ref, replyRef, where, now) {
 	});
 	return {
 		...state,
-		data
+		data,
+		links
 	};
 }
 function connectPullRequest(state, url) {
@@ -2337,6 +2370,7 @@ CREATE TABLE pr_pull_requests (
 CREATE TABLE pr_reviews (
   id TEXT PRIMARY KEY,
   pull_request_id TEXT NOT NULL REFERENCES pr_pull_requests(id),
+  ref TEXT UNIQUE,
   author TEXT NOT NULL,
   state TEXT NOT NULL,
   body TEXT NOT NULL,
@@ -2464,17 +2498,22 @@ function savePullRequest(db, data) {
 			created_at: pr.createdAt,
 			fetched_at: pr.fetchedAt
 		});
-		for (const r of reviews) insert("pr_reviews", {
-			id: r.id,
-			pull_request_id: pr.id,
-			author: r.author,
-			state: r.state,
-			body: r.body,
-			submitted_at: r.submittedAt,
-			edited_at: r.editedAt,
-			commit_sha: r.commitSha,
-			url: r.url
-		});
+		for (const r of reviews) {
+			const linkableRef = linkableReviewRef(r);
+			if (linkableRef !== void 0) present.set(linkableRef, "review");
+			insert("pr_reviews", {
+				id: r.id,
+				pull_request_id: pr.id,
+				ref: reviewRefFromUrl(r.url) ?? null,
+				author: r.author,
+				state: r.state,
+				body: r.body,
+				submitted_at: r.submittedAt,
+				edited_at: r.editedAt,
+				commit_sha: r.commitSha,
+				url: r.url
+			});
+		}
 		for (const t of threads) insert("pr_threads", {
 			id: t.id,
 			pull_request_id: pr.id,
@@ -2698,10 +2737,10 @@ CREATE TABLE meta (
 
 CREATE TABLE linkable (
   ref TEXT PRIMARY KEY CHECK (
-    (ref GLOB '[rc][0-9]*' AND substr(ref, 2) NOT GLOB '*[^0-9]*')
+    (ref GLOB '[rcv][0-9]*' AND substr(ref, 2) NOT GLOB '*[^0-9]*')
     OR (length(ref) = 9 AND ref GLOB 'a[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]')
   ),
-  kind TEXT NOT NULL CHECK (kind IN ('review_comment', 'conversation_comment', 'annotation')),
+  kind TEXT NOT NULL CHECK (kind IN ('review_comment', 'conversation_comment', 'review', 'annotation')),
   gone INTEGER NOT NULL DEFAULT 0 CHECK (gone IN (0, 1))
 ) STRICT;
 
@@ -2713,7 +2752,8 @@ CREATE TABLE comment_links (
   note TEXT,
   CHECK ((role = 'note') = (finding IS NULL)),
   CHECK ((role = 'note') = (note IS NOT NULL)),
-  CHECK (ref NOT GLOB 'a*' OR role = 'duplicate')
+  CHECK (ref NOT GLOB 'a*' OR role = 'duplicate'),
+  CHECK (ref NOT GLOB 'v*' OR role != 'own')
 ) STRICT;
 
 CREATE UNIQUE INDEX comment_links_own ON comment_links (finding) WHERE role = 'own';
@@ -2741,13 +2781,13 @@ function hasReviewTables(db) {
 }
 function configure(db, path, mode) {
 	const version = userVersion(db, path);
-	if (version > 6) throw new Error(`${path} was written by a newer pr-comments (schema ${version}); update the tool`);
+	if (version > 7) throw new Error(`${path} was written by a newer pr-comments (schema ${version}); update the tool`);
 	if (mode !== "create") {
 		if (version === 0 || !hasReviewTables(db)) throw new Error(`${path} is not a review database`);
-		if (version < 6) throw new Error(`${path} was written by an older pr-comments (schema ${version}); start again with "pr-comments init"`);
+		if (version < 7) throw new Error(`${path} was written by an older pr-comments (schema ${version}); start again with "pr-comments init"`);
 	}
 	if (mode !== "readonly") {
-		if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}${PULL_REQUEST_SCHEMA}PRAGMA user_version = 6`));
+		if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}${PULL_REQUEST_SCHEMA}PRAGMA user_version = 7`));
 		db.exec("PRAGMA journal_mode = DELETE");
 	}
 	db.exec("PRAGMA foreign_keys = ON");
@@ -3346,6 +3386,12 @@ async function syncReviewFile(dbPath, data) {
 //#endregion
 //#region src/review-pending.ts
 const EXCERPT_LIMIT = 80;
+const PULL_REVIEW_STATES = {
+	APPROVED: "approved",
+	CHANGES_REQUESTED: "changes requested",
+	COMMENTED: "commented",
+	DISMISSED: "review dismissed"
+};
 function excerptOf(body) {
 	const text = (body.split(/\r\n|\r|\n/u).find((text) => text.trim() !== "") ?? "").trim().replace(/\s+/gu, " ");
 	const chars = [...text];
@@ -3399,17 +3445,33 @@ function pendingItems({ links, data }) {
 	const items = [];
 	for (const comment of data.comments) {
 		const ref = commentRefFromUrl(comment.url);
-		if (ref === void 0 || linkedRefs.has(ref) || !threads.isRoot(comment)) continue;
+		if (ref === void 0 || linkedRefs.has(ref)) continue;
 		const { author, kind, createdAt } = comment;
-		const replies = threads.repliesTo(comment);
+		const isRoot = threads.isRoot(comment);
+		const replies = isRoot ? threads.repliesTo(comment) : 0;
 		items.push({
 			ref,
 			author,
 			kind,
+			...isRoot ? {} : { reply: true },
 			...threads.placeOf(comment),
 			replies,
 			createdAt,
 			excerpt: excerptOf(comment.body)
+		});
+	}
+	for (const review of data.reviews) {
+		const ref = linkableReviewRef(review);
+		if (ref === void 0 || linkedRefs.has(ref)) continue;
+		const reviewState = PULL_REVIEW_STATES[review.state] ?? review.state.toLowerCase().replaceAll("_", " ");
+		items.push({
+			ref,
+			author: review.author,
+			kind: "pull_review",
+			reviewState,
+			replies: 0,
+			...review.submittedAt === null ? {} : { createdAt: review.submittedAt },
+			excerpt: excerptOf(review.body)
 		});
 	}
 	items.sort((a, b) => compare(a.createdAt ?? "", b.createdAt ?? "") || compare(a.ref, b.ref));
@@ -3421,10 +3483,22 @@ function pendingItems({ links, data }) {
 	const pendingAnnotations = [...annotations.values()].filter(({ annotation }) => !linkedRefs.has(annotation.ref)).sort(({ annotation: a }, { annotation: b }) => compare(a.path, b.path) || a.startLine - b.startLine || compare(a.ref, b.ref));
 	return [...items, ...pendingAnnotations.map(annotationItem)];
 }
-const placeText = ({ kind, path, lines }) => kind === "issue" ? "conversation" : path === void 0 ? "" : lines === void 0 ? path : `${path}:${lines}`;
+function placeText({ kind, path, lines }) {
+	if (kind === "issue") return "conversation";
+	if (kind === "pull_review") return "review";
+	if (path === void 0) return "";
+	return lines === void 0 ? path : `${path}:${lines}`;
+}
 const plural$1 = (count, one, many) => `${count} ${count === 1 ? one : many}`;
-function stateText({ kind, resolved, outdated, replies }) {
-	if (kind === "issue" || resolved === void 0) return "";
+function stateText({ kind, reply, reviewState, resolved, outdated, replies }) {
+	if (kind === "pull_review") return reviewState ?? "";
+	if (kind === "issue") return "";
+	if (resolved === void 0) return reply ? "reply" : "";
+	if (reply) return [
+		"reply",
+		`thread ${resolved ? "resolved" : "open"}`,
+		...outdated ? ["outdated"] : []
+	].join(", ");
 	return [
 		`thread ${resolved ? "resolved" : "open"}`,
 		...outdated ? ["outdated"] : [],
@@ -3807,6 +3881,7 @@ async function postFinding(dbPath, findingId, options, deps) {
 //#region src/review-reply.ts
 async function replyToDuplicate(dbPath, ref, options, deps) {
 	if (isAnnotationRef(ref)) throw new Error(`${ref} is a check annotation; there is nothing to reply to`);
+	if (isReviewBodyRef(ref)) throw new Error(`${ref} is a pull request review, not a comment; only a comment (r… or c…) can be answered`);
 	const { links, pullRequest, ref: pullRequestRef, quotedDb } = await requireConnectedReview(dbPath);
 	const linked = links.find((link) => link.ref === ref);
 	if (linked === void 0) throw new Error(`${ref} is not linked in this review; link it first with "pr-comments link duplicate --db ${quotedDb} <finding> ${ref}"`);
@@ -3855,7 +3930,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+8c28f1e`;
+	return `pr-comments ${VERSION}+2a4cf58`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4269,7 +4344,7 @@ async function renderComments({ env, values }, db) {
 	if (rawRefs?.length === 0) throw new Error("--ref needs at least one ref");
 	const refs = rawRefs?.map((ref) => {
 		const normalized = ref.toLowerCase();
-		if (!isLinkRef(normalized)) throw new Error(`"${ref}" is not a comment or check annotation id; expected r544830, c623843 or a3f9c2d1e`);
+		if (!isLinkRef(normalized)) throw new Error(`"${ref}" is not a comment, review or check annotation id; expected r544830, c623843, v91204 or a3f9c2d1e`);
 		return normalized;
 	});
 	if (values.out) refuseDatabase(values.out, db);
@@ -4278,7 +4353,7 @@ async function renderComments({ env, values }, db) {
 		links: (await loadReviewFile(db)).links,
 		data
 	}).map((item) => item.ref)) : void 0;
-	for (const ref of findUnknownRefs(data, refs ?? [])) env.warn(`Warning: no comment or check annotation ${ref} in this pull request\n`);
+	for (const ref of findUnknownRefs(data, refs ?? [])) env.warn(`Warning: no comment, review or check annotation ${ref} in this pull request\n`);
 	const markdown = renderMarkdown(data, {
 		refs,
 		pendingRefs
