@@ -11,6 +11,7 @@ import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutate
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
 import type { ReviewState } from './review-links.ts';
 import { addFinding, formatStamp, openRound } from './review-ops.ts';
+import { pendingItems } from './review-pending.ts';
 import { replyToDuplicate } from './review-reply.ts';
 import type { ReplyDuplicateDeps, ReplyDuplicateOptions } from './review-reply.ts';
 import { renderReport } from './review-render.ts';
@@ -451,7 +452,7 @@ describe('recording the reply ref locally', () => {
     expect(stored!.comments.map(({ url }) => commentRefFromUrl(url)).sort()).toEqual([...BASE].sort());
   });
 
-  it('restores a gone = 1 target duplicate ref when recording the reply', async () => {
+  it('restores a gone = 1 target duplicate ref when recording the reply, preserves seenDigest when unlinking unsynced links, and requires pr sync for a ref without a digest', async () => {
     const db = await startReview();
     await syncReviewFile(db, snapshot(BASE.filter((ref) => ref !== 'r2')));
     expect((await loadReviewFile(db)).known.has('r2')).toBe(false);
@@ -462,6 +463,29 @@ describe('recording the reply ref locally', () => {
     const { known } = await loadReviewFile(db);
     expect(known.has('r2')).toBe(true);
     expect(known.has('r10')).toBe(true);
+
+    // Unlinking and relinking the newly created reply r10 before pr sync preserves its seenDigest.
+    await changeReviewState(db, (state) => ({ state: unlink(state, 'r10', NOW), result: undefined }));
+    await changeReviewState(db, (state) => ({ state: linkNote(state, 'r10', 'custom duplicate reply note'), result: undefined }));
+    expect((await loadReviewFile(db)).links.find(({ ref }) => ref === 'r10')?.seenDigest).toBe(digestBody(replied.text));
+
+    // Unlinking r2 (which had seen_digest on comment_links and no posted_digest:r2 in meta) backfills meta and preserves seenDigest on relink.
+    await changeReviewState(db, (state) => ({ state: unlink(state, 'r2', NOW), result: undefined }));
+    await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'F2', 'r2', NOW), result: undefined }));
+    expect((await loadReviewFile(db)).links.find(({ ref }) => ref === 'r2')?.seenDigest).toBe(digestBody('Comment 1.'));
+
+    // A known ref in linkable with neither pr_comments nor a baseline digest refuses linking until pr sync runs.
+    await expect(
+      changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'F1', 'r11', NOW), result: undefined }), { knownRef: 'r11' }),
+    ).rejects.toThrow(`r11 is not in the synced pull request yet; run "pr-comments pr sync --db ${db}" first`);
+
+    // Once pr sync brings r2 and an edited r10 in, r10 surfaces as edited while unchanged r2 stays clean.
+    const synced = snapshot([...BASE, 'r10'], { fetchedAt: '2026-10-08T11:00:00Z' });
+    synced.comments = synced.comments.map((c) => (c.id === 'id-r10' ? { ...c, body: 'Edited reply on GitHub.' } : c));
+    await syncReviewFile(db, synced);
+    const pending = pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! });
+    expect(pending.find(({ ref }) => ref === 'r10')).toMatchObject({ ref: 'r10', edited: true });
+    expect(pending.find(({ ref }) => ref === 'r2')).toBeUndefined();
   });
 
   it('sends the reply outside the database transaction: a writer can change the review meanwhile, and the reply keeps that change', async () => {

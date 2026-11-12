@@ -12,7 +12,7 @@ import type {
   ReviewedItem,
   UpdateItem,
 } from './review-model.ts';
-import { PULL_REQUEST_SCHEMA } from './store.ts';
+import { POSTED_DIGEST_PREFIX, PULL_REQUEST_SCHEMA } from './store.ts';
 
 export const REVIEW_SCHEMA_VERSION = 8;
 
@@ -383,9 +383,28 @@ export function loadLinks(db: DatabaseSync): CommentLink[] {
 }
 
 // Replaces all links, in order, in one transaction (or the one it is called in). Every ref must be in `linkable`
-// already: the pull request is saved before the links.
+// already: the pull request is saved before the links. Unlinking an unsynced row preserves its `seen_digest` in `meta`
+// until `pr sync` stores or drops the item.
 export function saveLinks(db: DatabaseSync, links: CommentLink[]): void {
   inTransaction(db, () => {
+    const kept = new Set(links.map((link) => link.ref));
+    const unsynced = db
+      .prepare(
+        `SELECT cl.ref, cl.seen_digest
+         FROM comment_links cl
+         JOIN linkable l ON l.ref = cl.ref
+         WHERE cl.seen_digest IS NOT NULL
+           AND l.gone = 0
+           AND NOT EXISTS (SELECT 1 FROM pr_comments pc WHERE pc.ref = cl.ref)
+           AND NOT EXISTS (SELECT 1 FROM pr_reviews pr WHERE pr.ref = cl.ref AND pr.state != 'PENDING')`,
+      )
+      .all() as { ref: string; seen_digest: string }[];
+    if (unsynced.length > 0) {
+      const preserve = db.prepare('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)');
+      for (const { ref, seen_digest } of unsynced) {
+        if (!kept.has(ref)) preserve.run(`${POSTED_DIGEST_PREFIX}${ref}`, seen_digest);
+      }
+    }
     db.exec('DELETE FROM comment_links');
     const insert = db.prepare(
       'INSERT INTO comment_links (position, ref, role, finding, note, seen_digest) VALUES (?, ?, ?, ?, ?, ?)',

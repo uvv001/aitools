@@ -8,7 +8,8 @@ import type { PullRequestRef } from './pr-url.ts';
 import { AGENT_DISCLAIMER, composeBody } from './publish.ts';
 import type { OwnCommentReason, PublishComment, PublishOptions, PublishResult } from './publish.ts';
 import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
-import { connectPullRequest, linkOwn, unlink } from './review-links.ts';
+import { connectPullRequest, linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
+import type { ReviewState } from './review-links.ts';
 import { addFinding, formatStamp, openRound, setDescription, setState } from './review-ops.ts';
 import { pendingItems } from './review-pending.ts';
 import { postFinding } from './review-post.ts';
@@ -465,7 +466,8 @@ describe('recording the comment ref locally', () => {
 });
 
 describe('a comment that could not be recorded', () => {
-  const LINK_OWN = (db: string, ref: string) => `record it with "pr-comments link own --db ${db} F1 ${ref}"`;
+  const LINK_OWN = (db: string, ref: string) =>
+    `run "pr-comments pr sync --db ${db}", then record it with "pr-comments link own --db ${db} F1 ${ref}"`;
 
   it('is an error that names the ref and how to record it, and nothing is saved', async () => {
     const db = await startReview();
@@ -500,7 +502,9 @@ describe('a comment that could not be recorded', () => {
 
     expect(posted.result).toMatchObject({ action: 'error', comment: 'r8' });
     expect(posted.result.message).toMatch(/^the comment is r8 on GitHub, but it could not be recorded in the review \(r8 is already linked/);
-    expect(posted.result.message).toMatch(/; record it with "pr-comments link own --db .* F1 r8"$/);
+    expect(posted.result.message).toMatch(
+      /; run "pr-comments pr sync --db .*", then record it with "pr-comments link own --db .* F1 r8"$/,
+    );
   });
 
   it('is an error too when the comment was linked elsewhere while it was being posted, and nothing is saved on top of that', async () => {
@@ -635,6 +639,41 @@ describe('a posted comment cannot move', () => {
       await syncReviewFile(db, syncedEdited);
       const pendingAfterExternalEdit = pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! });
       expect(pendingAfterExternalEdit.find(({ ref }) => ref === 'r1')).toMatchObject({ ref: 'r1', edited: true });
+    },
+  );
+
+  it.each([
+    ['own', (state: ReviewState) => linkOwn(state, 'F1', 'c3', NOW)],
+    ['duplicate', (state: ReviewState) => linkDuplicate(state, 'F4', 'c3', NOW)],
+    ['note', (state: ReviewState) => linkNote(state, 'c3', 'kept as context')],
+  ] as const)(
+    'preserves seenDigest when a newly posted comment is unlinked and relinked as %s before pr sync, surfacing remote edits on sync',
+    async (_role, relink) => {
+      const db = await startReview();
+
+      const { posted } = await post(db, 'F2', created('c3'), { now: true });
+      expect(posted.result).toMatchObject({ action: 'created', comment: 'c3' });
+
+      await changeReviewState(db, (state) => ({ state: unlink(state, 'c3', NOW), result: undefined }));
+      await changeReviewState(db, (state) => ({ state: relink(state), result: undefined }));
+
+      const relinked = await loadReviewFile(db);
+      expect(relinked.links.find(({ ref }) => ref === 'c3')?.seenDigest).toBe(digestBody(posted.body));
+
+      // Syncing the exact posted body does not report c3 as edited.
+      const syncedSame = snapshot([...BASE, 'c3'], { fetchedAt: '2026-10-08T11:00:00Z' });
+      syncedSame.comments = syncedSame.comments.map((c) => (c.id === 'id-c3' ? { ...c, body: posted.body } : c));
+      await syncReviewFile(db, syncedSame);
+      expect(pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! }).map(({ ref }) => ref)).not.toContain('c3');
+
+      // Syncing a remotely edited body surfaces c3 with edited: true.
+      const syncedEdited = snapshot([...BASE, 'c3'], { fetchedAt: '2026-10-08T11:05:00Z' });
+      syncedEdited.comments = syncedEdited.comments.map((c) =>
+        c.id === 'id-c3' ? { ...c, body: 'edited remotely to add concern' } : c,
+      );
+      await syncReviewFile(db, syncedEdited);
+      const pending = pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! });
+      expect(pending.find(({ ref }) => ref === 'c3')).toMatchObject({ ref: 'c3', edited: true });
     },
   );
 });

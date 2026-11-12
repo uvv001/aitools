@@ -58,7 +58,7 @@ function linkAdvice(reason: OwnCommentReason, ref: string, quotedDb: string): st
 // 3. When the result is not an error, has a `comment` and is not a dry run, `recordAfterWrite` records the comment
 //    ref in `linkable` (`knownRef`) and records the link with `recordPosted`, in one transaction under the write
 //    lock. When that fails the transaction is rolled back and the result becomes an error that names the ref and
-//    tells how to record it (`link own`).
+//    tells how to sync and record it (`pr sync`, then `link own`).
 // Nothing is written in a dry run, or when the result is an error. The rerun of a post finds its comment `unchanged`
 // and records nothing twice.
 export async function postFinding(
@@ -104,6 +104,7 @@ export async function postFinding(
     return { ...base, result: published };
   }
   const action: PostedAction = published.action;
+  const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
   const recorded = await recordAfterWrite(
     dbPath,
     published,
@@ -113,7 +114,7 @@ export async function postFinding(
       knownRef: posted,
       updatedComment: { ref: posted, body },
       was: action === 'created' ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`,
-      advice: `record it with "pr-comments link own --db ${quotedDb} ${id} ${posted}"`,
+      advice: `run "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}`,
     },
   );
   return { ...base, ...recorded };

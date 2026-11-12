@@ -9,7 +9,7 @@ import type {
   Review,
   ReviewThread,
 } from './model.ts';
-import { inTransaction } from './review-store.ts';
+import { getMeta, inTransaction, setMeta } from './review-store.ts';
 
 // The pull request the review is about, inside the review database (review-store.ts creates these tables with the
 // rest of its schema). At most one pull request is stored: the connected one. `pr_comments.ref` and `pr_reviews.ref`
@@ -118,6 +118,9 @@ CREATE INDEX pr_check_annotations_by_ref ON pr_check_annotations (ref);
 type Row = Record<string, unknown>;
 
 const COMMENT_KINDS: Record<Comment['kind'], string> = { issue: 'conversation_comment', review: 'review_comment' };
+export const POSTED_DIGEST_PREFIX = 'posted_digest:';
+const POSTED_DIGEST_GLOB = `${POSTED_DIGEST_PREFIX}*`;
+const POSTED_DIGEST_REF_OFFSET = POSTED_DIGEST_PREFIX.length + 1;
 
 // What a link may point at is whatever `linkable` holds. A row that is not in the data any more is kept (as gone)
 // while a link points at it and deleted otherwise; one that is in the data is there, and not gone.
@@ -142,6 +145,7 @@ export function clearPullRequest(db: DatabaseSync): void {
   inTransaction(db, () => {
     clearRows(db);
     reconcileLinkable(db, new Map());
+    db.prepare('DELETE FROM meta WHERE key GLOB ?').run(POSTED_DIGEST_GLOB);
   });
 }
 
@@ -259,6 +263,15 @@ export function savePullRequest(db: DatabaseSync, data: PullRequestData): void {
       });
     }
     reconcileLinkable(db, present);
+    db.prepare(
+      `DELETE FROM meta
+       WHERE key GLOB ?
+         AND (
+           substr(key, ?) IN (SELECT ref FROM pr_comments WHERE ref IS NOT NULL)
+           OR substr(key, ?) IN (SELECT ref FROM pr_reviews WHERE ref IS NOT NULL AND state != 'PENDING')
+           OR substr(key, ?) NOT IN (SELECT ref FROM linkable)
+         )`,
+    ).run(POSTED_DIGEST_GLOB, POSTED_DIGEST_REF_OFFSET, POSTED_DIGEST_REF_OFFSET, POSTED_DIGEST_REF_OFFSET);
   });
 }
 
@@ -378,21 +391,43 @@ export function recordKnownCommentRef(db: DatabaseSync, ref: string): void {
   ).run(ref, kind);
 }
 
-// SHA-256 digests of the stored comment and submitted review bodies, keyed by ref.
+// SHA-256 digests of the stored comment and submitted review bodies (plus newly published comments awaiting `pr sync`), keyed by ref.
 export function loadCurrentDigests(db: DatabaseSync): Map<string, string> {
+  const digests = new Map<string, string>();
+  const posted = db
+    .prepare(
+      `SELECT substr(m.key, ?) AS ref, m.value AS digest
+       FROM meta m
+       JOIN linkable l ON l.ref = substr(m.key, ?)
+       WHERE m.key GLOB ? AND l.gone = 0`,
+    )
+    .all(POSTED_DIGEST_REF_OFFSET, POSTED_DIGEST_REF_OFFSET, POSTED_DIGEST_GLOB) as { ref: string; digest: string }[];
+  for (const { ref, digest } of posted) digests.set(ref, digest);
   const rows = db
     .prepare(
       "SELECT ref, body FROM pr_comments WHERE ref IS NOT NULL UNION ALL SELECT ref, body FROM pr_reviews WHERE ref IS NOT NULL AND state != 'PENDING'",
     )
     .all() as { ref: string; body: string }[];
-  const digests = new Map<string, string>();
   for (const { ref, body } of rows) digests.set(ref, digestBody(body));
   return digests;
 }
 
-// Updates the stored body of an already-synced comment when `finding post` updates it before the next `pr sync`.
+// Updates the stored body of an already-synced comment, or records the baseline digest of a newly published comment
+// in `meta` until `pr sync` stores it.
 export function updateStoredCommentBody(db: DatabaseSync, ref: string, body: string): void {
+  const digest = digestBody(body);
+  const metaKey = `${POSTED_DIGEST_PREFIX}${ref}`;
   const existing = db.prepare('SELECT body FROM pr_comments WHERE ref = ?').get(ref) as { body: string } | undefined;
-  if (existing === undefined || digestBody(existing.body) === digestBody(body)) return;
-  db.prepare('UPDATE pr_comments SET body = ? WHERE ref = ?').run(body, ref);
+  if (existing !== undefined) {
+    if (digestBody(existing.body) !== digest) {
+      db.prepare('UPDATE pr_comments SET body = ? WHERE ref = ?').run(body, ref);
+    }
+    if (getMeta(db, metaKey) !== undefined) {
+      db.prepare('DELETE FROM meta WHERE key = ?').run(metaKey);
+    }
+    return;
+  }
+  const known = db.prepare('SELECT gone FROM linkable WHERE ref = ?').get(ref) as { gone: number } | undefined;
+  if (known?.gone !== 0) return;
+  setMeta(db, metaKey, digest);
 }

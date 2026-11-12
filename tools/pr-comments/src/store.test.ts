@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { digestBody } from './comment-ref.ts';
 import { samplePullRequest } from './fixtures.ts';
 import type { CheckRun, PullRequestData } from './model.ts';
-import { inTransaction, loadLinks, openReviewDb, saveLinks, saveReview } from './review-store.ts';
+import { getMeta, inTransaction, loadLinks, openReviewDb, saveLinks, saveReview } from './review-store.ts';
 import { removeScratch, sampleReview, scratchDir } from './review-test-support.ts';
 import {
   clearPullRequest,
@@ -663,5 +663,85 @@ describe('loadCurrentDigests and updateStoredCommentBody', () => {
     // Unknown ref is a no-op.
     updateStoredCommentBody(db, 'r9999', 'Ignored.');
     expect(loadCurrentDigests(db).has('r9999')).toBe(false);
+  });
+
+  it('persists posted digests in meta for unsynced comments in linkable and cleans them up on sync or clear', () => {
+    const db = openNew();
+    saveReview(db, sampleReview());
+    savePullRequest(db, samplePullRequest());
+
+    recordKnownCommentRef(db, 'c9001');
+    recordKnownCommentRef(db, 'r9002');
+    updateStoredCommentBody(db, 'c9001', 'First posted body.');
+    updateStoredCommentBody(db, 'r9002', 'Pending inline body.');
+    expect(getMeta(db, 'posted_digest:c9001')).toBe(digestBody('First posted body.'));
+    expect(loadCurrentDigests(db).get('c9001')).toBe(digestBody('First posted body.'));
+    expect(loadCurrentDigests(db).get('r9002')).toBe(digestBody('Pending inline body.'));
+
+    updateStoredCommentBody(db, 'c9001', 'Revised posted body.');
+    updateStoredCommentBody(db, 'c9001', 'Revised posted body.');
+    expect(loadCurrentDigests(db).get('c9001')).toBe(digestBody('Revised posted body.'));
+
+    // r9002 is linked while c9001 is unlinked; simulate a sync where c9001 arrives (edited) and r9002 is delayed on GitHub.
+    saveLinks(db, [{ ref: 'r9002', role: 'own', finding: 'F1', seenDigest: digestBody('Pending inline body.') }]);
+    const synced = samplePullRequest();
+    synced.comments.push({
+      ...synced.comments[0]!,
+      id: 'ic-9001',
+      body: 'Edited on GitHub.',
+      url: `${synced.pullRequest.url}#issuecomment-9001`,
+    });
+    savePullRequest(db, synced);
+
+    // c9001 is now in pr_comments, so its meta digest is deleted and pr_comments wins.
+    expect(getMeta(db, 'posted_digest:c9001')).toBeUndefined();
+    expect(loadCurrentDigests(db).get('c9001')).toBe(digestBody('Edited on GitHub.'));
+
+    // r9002 is gone = 1 in linkable: hidden from loadCurrentDigests while gone, yet retained in meta if restored.
+    expect(loadCurrentDigests(db).has('r9002')).toBe(false);
+    expect(getMeta(db, 'posted_digest:r9002')).toBe(digestBody('Pending inline body.'));
+    recordKnownCommentRef(db, 'r9002');
+    expect(loadCurrentDigests(db).get('r9002')).toBe(digestBody('Pending inline body.'));
+
+    // Unlinking r9002 and syncing without it drops both linkable and posted_digest:r9002.
+    saveLinks(db, []);
+    savePullRequest(db, synced);
+    expect(getMeta(db, 'posted_digest:r9002')).toBeUndefined();
+
+    // clearPullRequest deletes all remaining posted_digest:* entries.
+    recordKnownCommentRef(db, 'c9003');
+    updateStoredCommentBody(db, 'c9003', 'Before reconnect.');
+    expect(getMeta(db, 'posted_digest:c9003')).toBe(digestBody('Before reconnect.'));
+    clearPullRequest(db);
+    expect(getMeta(db, 'posted_digest:c9003')).toBeUndefined();
+    expect(loadCurrentDigests(db)).toEqual(new Map());
+  });
+
+  it('backfills posted_digest:<ref> in meta when saveLinks unlinks a legacy unsynced comment_links row before pr sync', () => {
+    const db = openNew();
+    saveReview(db, sampleReview());
+    const prData = samplePullRequest();
+    // Include a comment whose URL yields ref = NULL in pr_comments to exercise NULL-safe SQL checks.
+    prData.comments.push({ ...prData.comments[0]!, id: 'ic-noref', url: `${prData.pullRequest.url}/files` });
+    savePullRequest(db, prData);
+
+    // Simulate a pre-F39 schema-v8 database: c9010 is in linkable (gone = 0) and comment_links has seen_digest,
+    // while meta has no posted_digest:c9010 yet; r1001 is already synced in pr_comments.
+    recordKnownCommentRef(db, 'c9010');
+    saveLinks(db, [
+      { ref: 'c9010', role: 'own', finding: 'F1', seenDigest: digestBody('Legacy posted body.') },
+      { ref: 'r1001', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Should this be configurable?') },
+    ]);
+    expect(getMeta(db, 'posted_digest:c9010')).toBeUndefined();
+
+    // Unlinking r1001 alone keeps c9010 linked and does not write posted_digest:r1001 (since r1001 is in pr_comments).
+    saveLinks(db, [{ ref: 'c9010', role: 'own', finding: 'F1', seenDigest: digestBody('Legacy posted body.') }]);
+    expect(getMeta(db, 'posted_digest:r1001')).toBeUndefined();
+    expect(getMeta(db, 'posted_digest:c9010')).toBeUndefined();
+
+    // Unlinking c9010 before pr sync backfills posted_digest:c9010 in meta so relinking preserves seenDigest.
+    saveLinks(db, []);
+    expect(getMeta(db, 'posted_digest:c9010')).toBe(digestBody('Legacy posted body.'));
+    expect(loadCurrentDigests(db).get('c9010')).toBe(digestBody('Legacy posted body.'));
   });
 });

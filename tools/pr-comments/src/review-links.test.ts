@@ -11,7 +11,8 @@ import {
   openRound,
 } from './review-ops.ts';
 import { formatUpdateItem, renderReport } from './review-render.ts';
-import { seeded } from './review-test-support.ts';
+import { pendingItems } from './review-pending.ts';
+import { seeded, snapshotOf } from './review-test-support.ts';
 
 const START = '2026-10-08 09:05';
 const PR = 'https://github.com/acme/widgets/pull/42';
@@ -1188,29 +1189,123 @@ describe('seenDigest and re-confirming edited links', () => {
   it('preserves seenDigest and refuses re-confirmation when currentDigest is undefined on unsynced comments', () => {
     let state: ReviewState = {
       ...withDigests({ r2: 'Duplicate body' }),
-      known: new Set(['r2', 'r2001', 'r2002', 'r2003']),
+      known: new Set(['r2', 'r2001', 'r2002', 'r2003', 'r2004']),
     };
     state = recordPosted(state, 'F1', 'r2001', 'created', 'pending', at(1), 'Posted own');
     state = linkDuplicate(state, 'F1', 'r2', at(2));
     state = recordReplied(state, 'r2', 'r2002', 'pending', at(3), 'Duplicate of r2001.');
     state = {
       ...state,
-      links: [...state.links, { ref: 'r2003', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Unsynced dup') }],
+      links: [
+        ...state.links,
+        { ref: 'r2003', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Unsynced dup') },
+        { ref: 'r2004', role: 'note', note: 'unsynced note', seenDigest: digestBody('Unsynced note') },
+      ],
     };
 
-    // Unsynced links (currentDigest === undefined) have not been edited locally: re-running refuses instead of wiping seenDigest.
+    // Unchanged or unsynced links have not been edited locally: re-running refuses instead of wiping seenDigest.
     refuses(state, (current) => linkOwn(current, 'F1', 'r2001', at(4)), `r2001 is already linked as the own comment of F1; remove that link first with "${REMOVE} r2001"`);
     refuses(state, (current) => linkDuplicate(current, 'F1', 'r2003', at(4)), `r2003 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2003"`);
     refuses(state, (current) => linkNote(current, 'r2002', 'duplicate reply to r2'), `r2002 is already linked as a note (duplicate reply to r2); remove that link first with "${REMOVE} r2002"`);
+    refuses(state, (current) => linkNote(current, 'r2004', 'unsynced note'), `r2004 is already linked as a note (unsynced note); remove that link first with "${REMOVE} r2004"`);
 
-    // Updating the note text on an unsynced reply note preserves its existing seenDigest.
-    const renoted = changes(state, (current) => linkNote(current, 'r2002', 'custom reply note'));
-    expect(renoted.links.find(({ ref }) => ref === 'r2002')).toStrictEqual({
-      ref: 'r2002',
+    // Updating the note text on an unsynced note preserves its existing seenDigest.
+    const renoted = changes(state, (current) => linkNote(current, 'r2004', 'custom unsynced note'));
+    expect(renoted.links.find(({ ref }) => ref === 'r2004')).toStrictEqual({
+      ref: 'r2004',
       role: 'note',
-      note: 'custom reply note',
-      seenDigest: digestBody('Duplicate of r2001.'),
+      note: 'custom unsynced note',
+      seenDigest: digestBody('Unsynced note'),
     });
+  });
+
+  it('preserves seenDigest when an unsynced comment from recordPosted or recordReplied is unlinked and relinked before pr sync', () => {
+    for (const initial of [withDigests({ r2: 'Duplicate body' }), { ...stateWith(), pullRequest: PR }]) {
+      const posted = changes(initial, (current) =>
+        recordPosted(current, 'F1', 'c3', 'created', 'posted', at(1), 'Initial posted body'),
+      );
+      const unlinked = changes(posted, (current) => unlink(current, 'c3', at(2)));
+
+      for (const relinked of [
+        changes(unlinked, (current) => linkOwn(current, 'F1', 'c3', at(3))),
+        changes(unlinked, (current) => linkDuplicate(current, 'F2', 'c3', at(3))),
+        changes(unlinked, (current) => linkNote(current, 'c3', 'reclassified before sync')),
+      ]) {
+        expect(relinked.links.find(({ ref }) => ref === 'c3')?.seenDigest).toBe(digestBody('Initial posted body'));
+
+        const unchangedSync = snapshotOf(['c3'], { owner: 'acme', repo: 'widgets', url: PR });
+        unchangedSync.comments[0]!.body = 'Initial posted body';
+        expect(pendingItems({ links: relinked.links, data: unchangedSync })).toEqual([]);
+
+        const editedSync = snapshotOf(['c3'], { owner: 'acme', repo: 'widgets', url: PR });
+        editedSync.comments[0]!.body = 'edited remotely to add concern';
+        expect(pendingItems({ links: relinked.links, data: editedSync })).toMatchObject([{ ref: 'c3', edited: true }]);
+      }
+    }
+
+    let state = withDigests({ r2: 'Duplicate body' });
+    state = linkDuplicate(state, 'F1', 'r2', at(1));
+    state = recordReplied(state, 'r2', 'r11', 'pending', at(2), 'Duplicate of r1.');
+    state = unlink(state, 'r11', at(3));
+    state = linkDuplicate(state, 'F2', 'r11', at(4));
+    expect(state.links.find(({ ref }) => ref === 'r11')?.seenDigest).toBe(digestBody('Duplicate of r1.'));
+
+    const editedReplySync = snapshotOf(['r2', 'r11'], { owner: 'acme', repo: 'widgets', url: PR });
+    editedReplySync.comments = editedReplySync.comments.map((comment) =>
+      comment.id === 'id-r2' ? { ...comment, body: 'Duplicate body' } : { ...comment, body: 'Edited reply body.' },
+    );
+    expect(pendingItems({ links: state.links, data: editedReplySync })).toMatchObject([{ ref: 'r11', edited: true }]);
+  });
+
+  it('keeps currentDigests undefined via postedDigests so other knownRefs are not rejected, and preserves pre-existing seenDigest on unlink', () => {
+    const withoutDigests: ReviewState = { ...stateWith(), pullRequest: PR };
+    const posted = changes(withoutDigests, (current) =>
+      recordPosted(current, 'F1', 'c3', 'created', 'posted', at(1), 'Posted without snapshot'),
+    );
+    expect(posted.currentDigests).toBeUndefined();
+    expect(posted.postedDigests?.get('c3')).toBe(digestBody('Posted without snapshot'));
+
+    // Linking another ref in known succeeds without falsely requiring currentDigests.
+    const withDup = changes(posted, (current) => linkDuplicate(current, 'F1', 'r2', at(2)));
+    expect(withDup.links.find(({ ref }) => ref === 'r2')).toStrictEqual({ ref: 'r2', role: 'duplicate', finding: 'F1' });
+
+    // Unlinking and relinking c3 with currentDigests: undefined still preserves seenDigest.
+    const unlinked = changes(withDup, (current) => unlink(current, 'c3', at(3)));
+    const relinked = changes(unlinked, (current) => linkOwn(current, 'F1', 'c3', at(4)));
+    expect(relinked.currentDigests).toBeUndefined();
+    expect(relinked.links.find(({ ref }) => ref === 'c3')?.seenDigest).toBe(digestBody('Posted without snapshot'));
+
+    // Unlinking a pre-existing unsynced link with seenDigest preserves it on relink (with or without currentDigests),
+    // while never overwriting an already-synced currentDigests entry.
+    const legacyUnsynced: ReviewState = {
+      ...withDigests({ r1: 'Edited on GitHub v2' }),
+      links: [
+        { ref: 'r1', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Original v1') },
+        { ref: 'c4', role: 'own', finding: 'F1', seenDigest: digestBody('Legacy unsynced body') },
+      ],
+    };
+    const afterUnlink = unlink(unlink(legacyUnsynced, 'c4', at(5)), 'r1', at(6));
+    const relinkedLegacy = linkOwn(linkDuplicate(afterUnlink, 'F2', 'r1', at(7)), 'F1', 'c4', at(8));
+    expect(relinkedLegacy.links.find(({ ref }) => ref === 'c4')?.seenDigest).toBe(digestBody('Legacy unsynced body'));
+    expect(relinkedLegacy.links.find(({ ref }) => ref === 'r1')?.seenDigest).toBe(digestBody('Edited on GitHub v2'));
+
+    // Reconnecting to another pull request clears postedDigests once links are removed.
+    const clearedLinks = unlink(posted, 'c3', at(9));
+    const reconnected = connectPullRequest(clearedLinks, 'https://github.com/acme/widgets/pull/43');
+    expect(reconnected.postedDigests).toBeUndefined();
+  });
+
+  it('refuses linking a known non-annotation ref without a stored digest when currentDigests is active', () => {
+    const unsynced = (ref: string) =>
+      `${ref} is not in the synced pull request yet; run "pr-comments pr sync --db <file.sqlite>" first`;
+    let state = withDigests({ r2: 'Duplicate body' });
+    state = linkDuplicate(state, 'F1', 'r2', at(1));
+
+    refuses(state, (current) => linkOwn(current, 'F1', 'c3', at(2)), unsynced('c3'));
+    refuses(state, (current) => linkDuplicate(current, 'F1', 'c3', at(2)), unsynced('c3'));
+    refuses(state, (current) => linkNote(current, 'c3', 'why'), unsynced('c3'));
+    refuses(state, (current) => recordPosted(current, 'F1', 'c3', 'created', 'posted', at(2)), unsynced('c3'));
+    refuses(state, (current) => recordReplied(current, 'r2', 'r11', 'pending', at(2)), unsynced('r11'));
   });
 
   it('sets seenDigest in recordPosted and recordReplied without overwriting an existing manual reply link', () => {

@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { digestBody } from './comment-ref.ts';
 import { samplePullRequest } from './fixtures.ts';
 import {
   changeReviewState,
@@ -18,7 +19,7 @@ import {
   syncReviewFile,
 } from './review-files.ts';
 import type { CommentLink, ReviewState } from './review-links.ts';
-import { linkDuplicate, linkNote } from './review-links.ts';
+import { linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
 import { newReview } from './review-ops.ts';
 import { formatUpdateItem, renderReport } from './review-render.ts';
@@ -1223,6 +1224,30 @@ describe('changeReviewState', () => {
       expect(linkable(db).find((row) => row.ref === 'r10')).toEqual({ ref: 'r10', gone: 0 });
       expect((await loadReviewFile(db)).known.has('r1')).toBe(true);
       expect((await loadReviewFile(db)).known.has('r10')).toBe(true);
+    });
+
+    it('preserves seenDigest when a pre-F39 unsynced comment_links row without posted_digest meta is unlinked and relinked', async () => {
+      const baseline = digestBody('Legacy posted before sync');
+      await changeReviewState(
+        db,
+        (state) => ({
+          state: {
+            ...state,
+            data: withFinding(state.data, 'F2'),
+            links: [...state.links, { ref: 'c777', role: 'own', finding: 'F2', seenDigest: baseline }],
+            pullRequest: PULL_REQUEST,
+          },
+          result: null,
+        }),
+        { knownRef: 'c777' },
+      );
+      expect(meta(db, 'posted_digest:c777')).toBeUndefined();
+
+      await changeReviewState(db, (state) => ({ state: unlink(state, 'c777', NOW), result: null }));
+      expect(meta(db, 'posted_digest:c777')).toBe(baseline);
+
+      await changeReviewState(db, (state) => ({ state: linkOwn(state, 'F2', 'c777', NOW), result: null }));
+      expect((await loadReviewFile(db)).links.find(({ ref }) => ref === 'c777')?.seenDigest).toBe(baseline);
     });
   });
 
