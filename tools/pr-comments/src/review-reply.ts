@@ -99,10 +99,11 @@ export async function replyToDuplicate(
   const recorded = await recordAfterWrite(
     dbPath,
     result,
-    (state) => recordReplied(state, ref, replyRef, result.state, deps.now()),
+    (state) => recordReplied(state, ref, replyRef, result.state, deps.now(), body),
     {
       pullRequest: pullRequestRef,
       knownRef: [ref, replyRef],
+      updatedComment: { ref: replyRef, body },
       was: result.action === 'created' ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`,
       advice: 'run the command again to record it',
     },

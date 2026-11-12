@@ -1,7 +1,7 @@
-import { isAnnotationRef, isCommentRef, isLinkRef, isReviewBodyRef } from './comment-ref.ts';
+import { digestBody, isAnnotationRef, isCommentRef, isLinkRef, isReviewBodyRef } from './comment-ref.ts';
 import { formatPullRequestUrl, parsePullRequestUrl } from './pr-url.ts';
 import type { FindingLinkRole, PostedUpdateAction, ReviewData } from './review-model.ts';
-import { amend, oneLineText } from './review-ops.ts';
+import { amend, oneLineText, optionalNote } from './review-ops.ts';
 import { findFinding } from './review-view.ts';
 
 // How a PR comment, review body or check annotation relates to the review:
@@ -24,6 +24,8 @@ export interface CommentLink {
   finding?: string;
   // The one-line reason: present for `note`, absent for the other roles.
   note?: string;
+  // SHA-256 hex digest of the normalized comment or review body text when linked; absent for check annotations.
+  seenDigest?: string;
 }
 
 // Everything the database stores about a review: the review itself, its PR comment links (in the order they were
@@ -37,6 +39,8 @@ export interface ReviewState {
   // last `pr sync` (and that are not gone): the only ones a link may point at. The links table has a foreign key to
   // them; the operations check it first to give a message that says what to do.
   known: ReadonlySet<string>;
+  // SHA-256 digests of the stored comment and submitted review bodies, keyed by ref.
+  currentDigests?: ReadonlyMap<string, string>;
 }
 
 // The review database is the one the command was given, which this pure module does not know: its hints use the
@@ -50,8 +54,10 @@ function checkedRef(ref: string): void {
   }
 }
 
-function knownRef(state: ReviewState, ref: string): void {
-  if (!state.known.has(ref)) throw new Error(`${ref} is not in the database; run "pr-comments pr sync ${DB_HINT_PLACEHOLDER}" first, or check the id`);
+function knownRef(state: ReviewState, ref: string, allowLinkedPresent = false): void {
+  if (state.known.has(ref)) return;
+  if (allowLinkedPresent && state.currentDigests?.has(ref)) return;
+  throw new Error(`${ref} is not in the database; run "pr-comments pr sync ${DB_HINT_PLACEHOLDER}" first, or check the id`);
 }
 
 // A check annotation is no comment: where only a comment will do, it is refused with the reason (`why` follows its ref).
@@ -91,6 +97,11 @@ const alreadyHasOwn = (finding: string, own: CommentLink, lead = ''): Error =>
 const commentPullRequest = (state: ReviewState, ref: string): { pullRequest?: string } =>
   !isAnnotationRef(ref) && state.pullRequest !== undefined ? { pullRequest: state.pullRequest } : {};
 
+function withSeenDigest<T extends CommentLink>(link: T, seenDigest: string | undefined): T {
+  const { seenDigest: _prev, ...rest } = link;
+  return (seenDigest === undefined ? rest : { ...rest, seenDigest }) as T;
+}
+
 // A finding's link: logged under its Updates. Nothing changes unless every check passes.
 function linkToFinding(
   state: ReviewState,
@@ -102,13 +113,22 @@ function linkToFinding(
 ): ReviewState {
   const found = findFinding(state.data, findingId);
   checkedRef(ref);
-  knownRef(state, ref);
   const linked = linkOf(state.links, ref);
-  if (linked !== undefined) throw alreadyLinked(linked);
+  knownRef(state, ref, linked !== undefined);
+  const currentDigest = isAnnotationRef(ref) ? undefined : state.currentDigests?.get(ref);
+  if (linked !== undefined) {
+    if (linked.role !== role || linked.finding !== found.id || currentDigest === undefined || linked.seenDigest === currentDigest) {
+      throw alreadyLinked(linked);
+    }
+    const cleanedNote = optionalNote(note);
+    const data = cleanedNote === undefined ? state.data : amend(state.data, found, now, {}, { kind: 'note', note: cleanedNote });
+    const links = state.links.map((item) => (item === linked ? withSeenDigest(linked, currentDigest) : item));
+    return { ...state, data, links };
+  }
   const own = role === 'own' ? ownOf(state.links, found.id) : undefined;
   if (own !== undefined) throw alreadyHasOwn(found.id, own);
   const data = amend(state.data, found, now, { note }, { kind: 'linked', ref, role, ...commentPullRequest(state, ref) });
-  return { ...state, data, links: [...state.links, { ref, role, finding: found.id }] };
+  return { ...state, data, links: [...state.links, withSeenDigest({ ref, role, finding: found.id }, currentDigest)] };
 }
 
 // Every operation is pure: it returns a new state (never changes its argument), or throws an Error whose message
@@ -156,11 +176,19 @@ export function linkDuplicate(state: ReviewState, findingId: string, ref: string
 export function linkNote(state: ReviewState, ref: string, text: string): ReviewState {
   refuseAnnotation(ref, NOT_A_NOTE);
   checkedRef(ref);
-  knownRef(state, ref);
-  const reason = oneLineText('note', text);
   const linked = linkOf(state.links, ref);
-  if (linked !== undefined) throw alreadyLinked(linked);
-  return { ...state, links: [...state.links, { ref, role: 'note', note: reason }] };
+  knownRef(state, ref, linked !== undefined);
+  const reason = oneLineText('note', text);
+  const currentDigest = state.currentDigests?.get(ref);
+  if (linked !== undefined) {
+    const seenDigest = currentDigest ?? linked.seenDigest;
+    if (linked.role !== 'note' || (linked.note === reason && linked.seenDigest === seenDigest)) {
+      throw alreadyLinked(linked);
+    }
+    const updated = withSeenDigest({ ref, role: 'note', note: reason }, seenDigest);
+    return { ...state, links: state.links.map((item) => (item === linked ? updated : item)) };
+  }
+  return { ...state, links: [...state.links, withSeenDigest({ ref, role: 'note', note: reason }, currentDigest)] };
 }
 
 // Removes the link of `ref` (any role); unknown refs are an error. A note link leaves no trace, and takes no `note`
@@ -188,7 +216,7 @@ export type PostedAction = PostedUpdateAction;
 
 // What `finding post` records after publishing the finding's comment `ref`. The finding's own link becomes `ref`
 // (a finding whose own link is another comment is an error: a posted comment cannot move). `unchanged` with an
-// own link that already is `ref` changes nothing and returns the same state. `where` is the publish state.
+// own link that already is `ref` and has the same seen digest changes nothing and returns the same state. `where` is the publish state.
 export function recordPosted(
   state: ReviewState,
   findingId: string,
@@ -196,6 +224,7 @@ export function recordPosted(
   action: PostedAction,
   where: 'pending' | 'posted' | undefined,
   now: Date,
+  postedBody?: string,
 ): ReviewState {
   refuseAnnotation(ref, ONLY_DUPLICATE);
   refuseReviewBodyAsOwn(ref);
@@ -206,11 +235,21 @@ export function recordPosted(
   if (linked !== undefined && !(linked.role === 'own' && linked.finding === found.id)) throw alreadyLinked(linked);
   const own = ownOf(state.links, found.id);
   if (own !== undefined && own.ref !== ref) throw alreadyHasOwn(found.id, own, 'a posted comment cannot move: ');
-  if (own !== undefined && action === 'unchanged') return state;
+  const seenDigest = postedBody !== undefined ? digestBody(postedBody) : state.currentDigests?.get(ref);
+  if (own !== undefined && action === 'unchanged') {
+    if (seenDigest === undefined || own.seenDigest === seenDigest) return state;
+    return { ...state, links: state.links.map((item) => (item === own ? withSeenDigest(own, seenDigest) : item)) };
+  }
   const pending = action === 'created' && where === 'pending' ? { pending: true } : {};
   const pullRequest = state.pullRequest === undefined ? {} : { pullRequest: state.pullRequest };
   const data = amend(state.data, found, now, {}, { kind: 'posted', ref, action, ...pending, ...pullRequest });
-  return { ...state, data, links: own === undefined ? [...state.links, { ref, role: 'own', finding: found.id }] : state.links };
+  const links =
+    own === undefined
+      ? [...state.links, withSeenDigest({ ref, role: 'own', finding: found.id }, seenDigest)]
+      : seenDigest !== undefined && own.seenDigest !== seenDigest
+        ? state.links.map((item) => (item === own ? withSeenDigest(own, seenDigest) : item))
+        : state.links;
+  return { ...state, data, links };
 }
 
 // What `link reply` records after answering the duplicate comment `ref` (it must be a comment ref `r…` or `c…` linked
@@ -225,6 +264,7 @@ export function recordReplied(
   replyRef: string,
   where: 'pending' | 'posted' | undefined,
   now: Date,
+  replyBody?: string,
 ): ReviewState {
   refuseAnnotation(ref, NOTHING_TO_REPLY);
   if (isReviewBodyRef(ref)) {
@@ -258,7 +298,10 @@ export function recordReplied(
       entry.pullRequest === state.pullRequest,
   );
   if (alreadyRecorded && replyLinked) return state;
-  const links = replyLinked ? state.links : [...state.links, { ref: replyRef, role: 'note' as const, note: `duplicate reply to ${ref}` }];
+  const seenDigest = replyBody !== undefined ? digestBody(replyBody) : state.currentDigests?.get(replyRef);
+  const links = replyLinked
+    ? state.links
+    : [...state.links, withSeenDigest({ ref: replyRef, role: 'note' as const, note: `duplicate reply to ${ref}` }, seenDigest)];
   if (alreadyRecorded) return { ...state, links };
   const pending = where === 'pending' ? { pending: true } : {};
   const pullRequest = state.pullRequest === undefined ? {} : { pullRequest: state.pullRequest };

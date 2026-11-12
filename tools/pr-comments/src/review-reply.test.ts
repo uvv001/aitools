@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { commentRefFromUrl, commentUrl } from './comment-ref.ts';
+import { commentRefFromUrl, commentUrl, digestBody } from './comment-ref.ts';
 import type { PullRequest, PullRequestData } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { AGENT_DISCLAIMER } from './publish.ts';
@@ -320,7 +320,10 @@ describe('recording the reply', () => {
       pending: true,
       pullRequest: PR,
     });
-    expect(after.links).toEqual([...before.links, { ref: 'r10', role: 'note', note: 'duplicate reply to r2' }]);
+    expect(after.links).toEqual([
+      ...before.links,
+      { ref: 'r10', role: 'note', note: 'duplicate reply to r2', seenDigest: digestBody(replied.text) },
+    ]);
     expect(after.pullRequest).toBe(PR);
     expect(replied.result).toEqual({
       action: 'created',
@@ -339,11 +342,16 @@ describe('recording the reply', () => {
     await changeReviewState(db, (state) => ({ state: unlink(state, 'r10', NOW), result: undefined }));
     const updatesBefore = (await loadReviewFile(db)).data.findings.find((f) => f.id === 'F1')!.updates;
 
-    const { replied } = await reply(db, 'r2', unchanged('r10'));
+    const { replied } = await reply(db, 'r2', unchanged('r10'), { byAgent: true });
 
     expect(replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
     const after = await loadReviewFile(db);
-    expect(after.links.at(-1)).toEqual({ ref: 'r10', role: 'note', note: 'duplicate reply to r2' });
+    expect(after.links.at(-1)).toEqual({
+      ref: 'r10',
+      role: 'note',
+      note: 'duplicate reply to r2',
+      seenDigest: digestBody(replied.text),
+    });
     expect(after.data.findings.find((f) => f.id === 'F1')!.updates).toStrictEqual(updatesBefore);
   });
 
@@ -370,6 +378,25 @@ describe('recording the reply', () => {
     expect(second.replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
     expect(await contentOf(db)).toStrictEqual(recorded);
     await sameBytes(db, recordedBytes);
+  });
+
+  it('updates cached pr_comments.body when adopting an already-synced reply whose body changed on GitHub', async () => {
+    const db = await startReview();
+    await syncReviewFile(db, snapshot([...BASE, 'r10']));
+    expect((await loadSnapshot(db))!.comments.find((c) => commentRefFromUrl(c.url) === 'r10')?.body).toBe('Comment 7.');
+
+    const { replied } = await reply(db, 'r2', unchanged('r10'), { byAgent: true });
+
+    expect(replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
+    const after = await loadReviewFile(db);
+    expect(after.links.at(-1)).toEqual({
+      ref: 'r10',
+      role: 'note',
+      note: 'duplicate reply to r2',
+      seenDigest: digestBody(replied.text),
+    });
+    expect((await loadSnapshot(db))!.comments.find((c) => commentRefFromUrl(c.url) === 'r10')?.body).toBe(replied.text);
+    expect(after.currentDigests?.get('r10')).toBe(digestBody(replied.text));
   });
 
   it('writes nothing and reads nothing again in a dry run', async () => {

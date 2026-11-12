@@ -107,10 +107,11 @@ export async function postFinding(
   const recorded = await recordAfterWrite(
     dbPath,
     published,
-    (state) => recordPosted(state, id, posted, action, published.state, deps.now()),
+    (state) => recordPosted(state, id, posted, action, published.state, deps.now(), body),
     {
       pullRequest: ref,
       knownRef: posted,
+      updatedComment: { ref: posted, body },
       was: action === 'created' ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`,
       advice: `record it with "pr-comments link own --db ${quotedDb} ${id} ${posted}"`,
     },

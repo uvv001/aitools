@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { digestBody } from './comment-ref.ts';
 import type { CheckAnnotation, CheckRun, Comment, PullRequestData, Review, ReviewThread } from './model.ts';
 import type { CommentLink } from './review-links.ts';
 import { pendingItems, pendingLines } from './review-pending.ts';
@@ -685,5 +686,64 @@ describe('pendingLines', () => {
       expect(line).not.toMatch(/[\r\n]/u);
       expect(line).toBe(line.trimEnd());
     }
+  });
+});
+
+describe('pendingItems and pendingLines: edited linked items', () => {
+  it('surfaces edited linked conversation comments, thread roots, thread replies and review bodies (including empty-edited reviews)', () => {
+    const t = thread('t-1', { line: 22 });
+    const comments = [
+      conversation(1, 'carol', 'Edited note raising a bug', '2026-10-09T08:00:00Z'),
+      reviewComment(2, 'bob', 'Edited root concern', 't-1', 0, '2026-10-09T09:00:00Z'),
+      reviewComment(3, 'alice', 'Edited reply counter-evidence', 't-1', 1, '2026-10-09T10:00:00Z'),
+    ];
+    const reviews = [
+      pullReview(10, 'erin', 'CHANGES_REQUESTED', 'Edited review summary.', '2026-10-09T11:00:00Z'),
+      pullReview(11, 'frank', 'CHANGES_REQUESTED', '', '2026-10-09T12:00:00Z'),
+    ];
+    const links: CommentLink[] = [
+      { ref: 'c1', role: 'note', note: 'ack', seenDigest: digestBody('Thanks!') },
+      { ref: 'r2', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Original root concern') },
+      { ref: 'r3', role: 'note', note: 'ack', seenDigest: digestBody('Original reply') },
+      { ref: 'v10', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Original review summary.') },
+      { ref: 'v11', role: 'note', note: 'summary', seenDigest: digestBody('Original review before clearing.') },
+    ];
+    const items = pending(comments, [t], links, undefined, reviews);
+    expect(items.map(({ ref, edited }) => [ref, edited])).toEqual([
+      ['c1', true],
+      ['r2', true],
+      ['r3', true],
+      ['v10', true],
+      ['v11', true],
+    ]);
+    expect(pendingLines(items)).toEqual([
+      '  c1   carol  conversation               edited — "Edited note raising a bug"',
+      `  r2   bob    ${PATH}:22  edited, thread open, 1 reply — "Edited root concern"`,
+      `  r3   alice  ${PATH}:22  edited, reply, thread open — "Edited reply counter-evidence"`,
+      '  v10  erin   review                     edited, changes requested — "Edited review summary."',
+      '  v11  frank  review                     edited, changes requested',
+    ]);
+  });
+
+  it('does not surface linked items when only updatedAt, editedAt or line-ending/outer-whitespace formatting changed, while surfacing first-line indentation edits', () => {
+    const comments = [
+      conversation(1, 'carol', '  \r\nSame text\r\nsecond line  \r\n', '2026-10-09T08:00:00Z', {
+        updatedAt: '2026-10-10T12:00:00Z',
+        editedAt: '2026-10-10T12:00:00Z',
+      }),
+    ];
+    const reviews = [
+      pullReview(10, 'erin', 'CHANGES_REQUESTED', 'Same summary\r\n', '2026-10-09T11:00:00Z', {
+        editedAt: '2026-10-10T12:00:00Z',
+      }),
+    ];
+    const links: CommentLink[] = [
+      { ref: 'c1', role: 'note', note: 'ack', seenDigest: digestBody('Same text\nsecond line') },
+      { ref: 'v10', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Same summary') },
+    ];
+    expect(pending(comments, [], links, undefined, reviews)).toEqual([]);
+
+    const indented = [conversation(1, 'carol', '    Same text\nsecond line', '2026-10-09T08:00:00Z')];
+    expect(pending(indented, [], links.slice(0, 1))).toMatchObject([{ ref: 'c1', edited: true }]);
   });
 });

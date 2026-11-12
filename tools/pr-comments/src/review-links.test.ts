@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAnnotationRef, isLinkRef, isReviewBodyRef } from './comment-ref.ts';
+import { digestBody, isAnnotationRef, isLinkRef, isReviewBodyRef } from './comment-ref.ts';
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, linksOf, recordPosted, recordReplied, unlink } from './review-links.ts';
 import type { CommentLink, PostedAction, ReviewState } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
@@ -1103,6 +1103,144 @@ describe('pull request review bodies', () => {
     const noted = changes(connected, (state) => linkNote(state, REVIEW_BODY, 'overall LGTM'));
     expect(noted.links).toStrictEqual([note(REVIEW_BODY, 'overall LGTM')]);
     expect(changes(noted, (state) => unlink(state, REVIEW_BODY, at(6))).links).toEqual([]);
+  });
+});
+
+describe('seenDigest and re-confirming edited links', () => {
+  const withDigests = (digests: Record<string, string>, links: CommentLink[] = []): ReviewState => ({
+    ...stateWith(links),
+    pullRequest: PR,
+    currentDigests: new Map(Object.entries(digests).map(([ref, body]) => [ref, digestBody(body)])),
+  });
+
+  it('records seenDigest on new comment and review-body links, and omits seenDigest on check annotations', () => {
+    let state = withDigests({ r1: 'Own body', c2: 'Note body', v1: 'Review body' });
+    state = changes(state, (current) => linkOwn(current, 'F1', 'r1', at(1)));
+    state = changes(state, (current) => linkNote(current, 'c2', 'ack'));
+    state = changes(state, (current) => linkDuplicate(current, 'F1', 'v1', at(2)));
+    state = changes(state, (current) => linkDuplicate(current, 'F1', ANNOTATION, at(3)));
+    expect(state.links).toStrictEqual([
+      { ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody('Own body') },
+      { ref: 'c2', role: 'note', note: 'ack', seenDigest: digestBody('Note body') },
+      { ref: 'v1', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Review body') },
+      { ref: ANNOTATION, role: 'duplicate', finding: 'F1' },
+    ]);
+  });
+
+  it('allows re-running linkOwn, linkDuplicate and linkNote on edited items in place, while refusing unedited double-links or role/finding changes', () => {
+    let state = withDigests({ r1: 'Own v1', r2: 'Dup v1', c3: 'Note v1' });
+    state = linkOwn(state, 'F1', 'r1', at(1));
+    state = linkDuplicate(state, 'F1', 'r2', at(2));
+    state = linkNote(state, 'c3', 'just praise');
+
+    // Unedited items with the same role/finding/note still fail with alreadyLinked.
+    refuses(state, (current) => linkOwn(current, 'F1', 'r1', at(3)), `r1 is already linked as the own comment of F1; remove that link first with "${REMOVE} r1"`);
+    refuses(state, (current) => linkDuplicate(current, 'F1', 'r2', at(3)), `r2 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2"`);
+    refuses(state, (current) => linkNote(current, 'c3', 'just praise'), `c3 is already linked as a note (just praise); remove that link first with "${REMOVE} c3"`);
+
+    // Updating the note text on an unedited note link is allowed in place.
+    const renoted = changes(state, (current) => linkNote(current, 'c3', 'updated reason'));
+    expect(renoted.links[2]).toStrictEqual({ ref: 'c3', role: 'note', note: 'updated reason', seenDigest: digestBody('Note v1') });
+
+    // Simulate edits on GitHub (new currentDigests).
+    const edited: ReviewState = {
+      ...state,
+      currentDigests: new Map([
+        ['r1', digestBody('Own v2')],
+        ['r2', digestBody('Dup v2')],
+        ['c3', digestBody('Note v2')],
+      ]),
+    };
+
+    // Changing role or finding on an edited link still requires unlink first.
+    refuses(edited, (current) => linkDuplicate(current, 'F2', 'r2', at(4)), `r2 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2"`);
+    refuses(edited, (current) => linkDuplicate(current, 'F1', 'c3', at(4)), `c3 is already linked as a note (just praise); remove that link first with "${REMOVE} c3"`);
+
+    // Re-confirming without --note refreshes seenDigest in place without duplicating the linked update.
+    const f1UpdatesBefore = updatesOf(edited, 'F1');
+    const refreshedOwn = changes(edited, (current) => linkOwn(current, 'F1', 'r1', at(5)));
+    expect(refreshedOwn.links.map(({ ref }) => ref)).toEqual(['r1', 'r2', 'c3']);
+    expect(refreshedOwn.links[0]).toStrictEqual({ ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody('Own v2') });
+    expect(updatesOf(refreshedOwn, 'F1')).toStrictEqual(f1UpdatesBefore);
+
+    // Re-confirming with --note records a note update on the finding without duplicating the linked update.
+    const refreshedDup = changes(refreshedOwn, (current) => linkDuplicate(current, 'F1', 'r2', at(6), 'still same issue after edit'));
+    expect(refreshedDup.links[1]).toStrictEqual({ ref: 'r2', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Dup v2') });
+    expect(updatesOf(refreshedDup, 'F1')).toStrictEqual([...f1UpdatesBefore, `${stamp(6)} — still same issue after edit`]);
+
+    // Re-confirming an edited note refreshes seenDigest (even when keeping the same reason).
+    const refreshedNote = changes(refreshedDup, (current) => linkNote(current, 'c3', 'just praise'));
+    expect(refreshedNote.links[2]).toStrictEqual({ ref: 'c3', role: 'note', note: 'just praise', seenDigest: digestBody('Note v2') });
+  });
+
+  it('allows re-confirming an already-linked review body edited to empty text (gone from known, present in currentDigests)', () => {
+    const initial = withDigests({ v91204: 'Please fix retry cap.' });
+    const linked = linkDuplicate(initial, 'F1', 'v91204', at(1));
+    const cleared: ReviewState = {
+      ...without(linked, 'v91204'),
+      currentDigests: new Map([['v91204', digestBody('')]]),
+    };
+    const confirmed = changes(cleared, (current) => linkDuplicate(current, 'F1', 'v91204', at(2), 'review text cleared'));
+    expect(confirmed.links).toStrictEqual([{ ref: 'v91204', role: 'duplicate', finding: 'F1', seenDigest: digestBody('') }]);
+    expect(updatesOf(confirmed, 'F1').at(-1)).toBe(`${stamp(2)} — review text cleared`);
+  });
+
+  it('preserves seenDigest and refuses re-confirmation when currentDigest is undefined on unsynced comments', () => {
+    let state: ReviewState = {
+      ...withDigests({ r2: 'Duplicate body' }),
+      known: new Set(['r2', 'r2001', 'r2002', 'r2003']),
+    };
+    state = recordPosted(state, 'F1', 'r2001', 'created', 'pending', at(1), 'Posted own');
+    state = linkDuplicate(state, 'F1', 'r2', at(2));
+    state = recordReplied(state, 'r2', 'r2002', 'pending', at(3), 'Duplicate of r2001.');
+    state = {
+      ...state,
+      links: [...state.links, { ref: 'r2003', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Unsynced dup') }],
+    };
+
+    // Unsynced links (currentDigest === undefined) have not been edited locally: re-running refuses instead of wiping seenDigest.
+    refuses(state, (current) => linkOwn(current, 'F1', 'r2001', at(4)), `r2001 is already linked as the own comment of F1; remove that link first with "${REMOVE} r2001"`);
+    refuses(state, (current) => linkDuplicate(current, 'F1', 'r2003', at(4)), `r2003 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2003"`);
+    refuses(state, (current) => linkNote(current, 'r2002', 'duplicate reply to r2'), `r2002 is already linked as a note (duplicate reply to r2); remove that link first with "${REMOVE} r2002"`);
+
+    // Updating the note text on an unsynced reply note preserves its existing seenDigest.
+    const renoted = changes(state, (current) => linkNote(current, 'r2002', 'custom reply note'));
+    expect(renoted.links.find(({ ref }) => ref === 'r2002')).toStrictEqual({
+      ref: 'r2002',
+      role: 'note',
+      note: 'custom reply note',
+      seenDigest: digestBody('Duplicate of r2001.'),
+    });
+  });
+
+  it('sets seenDigest in recordPosted and recordReplied without overwriting an existing manual reply link', () => {
+    let state = withDigests({ r1: 'Old body', r2: 'Duplicate body', r10: 'Manual reply' });
+    state = changes(state, (current) => recordPosted(current, 'F1', 'r1', 'created', 'pending', at(1), 'Posted v1'));
+    expect(state.links).toStrictEqual([{ ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody('Posted v1') }]);
+
+    state = changes(state, (current) => recordPosted(current, 'F1', 'r1', 'updated', 'pending', at(2), 'Posted v2'));
+    expect(state.links).toStrictEqual([{ ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody('Posted v2') }]);
+    stays(state, (current) => recordPosted(current, 'F1', 'r1', 'unchanged', 'pending', at(3), 'Posted v2'));
+
+    // Auto-created reply link gets seenDigest from replyBody.
+    state = linkDuplicate(state, 'F1', 'r2', at(4));
+    const autoReplied = changes(state, (current) => recordReplied(current, 'r2', 'r11', 'pending', at(5), 'Duplicate of r1.'));
+    expect(autoReplied.links.at(-1)).toStrictEqual({
+      ref: 'r11',
+      role: 'note',
+      note: 'duplicate reply to r2',
+      seenDigest: digestBody('Duplicate of r1.'),
+    });
+
+    // Manually linked replyRef keeps its existing seenDigest untouched.
+    const manualReply = linkNote(state, 'r10', 'manual note');
+    const preserved = changes(manualReply, (current) => recordReplied(current, 'r2', 'r10', 'pending', at(6), 'Different body.'));
+    expect(preserved.links.find(({ ref }) => ref === 'r10')).toStrictEqual({
+      ref: 'r10',
+      role: 'note',
+      note: 'manual note',
+      seenDigest: digestBody('Manual reply'),
+    });
   });
 });
 

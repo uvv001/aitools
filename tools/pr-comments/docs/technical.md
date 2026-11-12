@@ -35,7 +35,7 @@ The architecture separates pure domain logic from I/O:
 - Only `init` creates a database. When `--db` is omitted, `init` places `<yyyy-mm-dd>_<slug>_review.sqlite` and its companion `.md` report in `.ai/review-with-docs/` at the git root. Whenever the target path is inside `.ai/review-with-docs/` (including subdirectories), `init` checks git ignore rules with `git check-ignore`, adds `/.ai/review-with-docs/` to `.git/info/exclude` if needed (so `.ai/` itself can remain tracked), and aborts if a `.gitignore` rule still exposes the directory.
 - `init` refuses existing database or report paths (including symbolic links), opens the database file exclusively (`wx`), and writes the initial state in one transaction. If initialization fails, `init` removes the file.
 - Connections use `journal_mode = DELETE` and `foreign_keys = ON`. No `-wal` or `-shm` files are created; a `-journal` file exists only during an active write.
-- `PRAGMA user_version` stores the schema version (currently `7`). The tool does not migrate across schema versions; it rejects databases from older or newer schema versions and rejects SQLite files that lack the review tables.
+- `PRAGMA user_version` stores the schema version (currently `8`). The tool does not migrate across schema versions; it rejects databases from older or newer schema versions and rejects SQLite files that lack the review tables.
 
 ### 2.2 Logical data model
 
@@ -69,15 +69,16 @@ The database stores at most one pull request snapshot at a time.
 **Link tables and relational invariants (`src/review-store.ts`):**
 
 - `linkable` stores every known ref (`r<id>` review comment, `c<id>` conversation comment, `v<id>` nonempty submitted pull request review body, or `a<8-hex>` check annotation), its `kind` (`review_comment`, `conversation_comment`, `review`, or `annotation`), and a boolean `gone` flag (`0` or `1`).
-- `comment_links` maps each linked `ref` (unique, foreign key to `linkable.ref`) to a `role` (`own`, `duplicate`, or `note`), an optional `finding` (`DEFERRABLE INITIALLY DEFERRED` foreign key to `findings.id`), and an optional `note`.
+- `comment_links` maps each linked `ref` (unique, foreign key to `linkable.ref`) to a `role` (`own`, `duplicate`, or `note`), an optional `finding` (`DEFERRABLE INITIALLY DEFERRED` foreign key to `findings.id`), an optional `note`, and an optional `seen_digest` (the SHA-256 hex digest of the normalized comment or review body text when it was linked or posted; `NULL` for check annotations).
 - Relational invariants enforced by constraints and indexes:
   - A link can reference only a ref present in `linkable`.
   - Each ref can be linked at most once.
   - `own` and `duplicate` links must reference a finding; `note` links must not reference a finding and must include a note text.
   - Each finding can have at most one `own` link (enforced by a partial unique index).
-  - Check annotations (`a…`) can only have the `duplicate` role.
+  - Check annotations (`a…`) can only have the `duplicate` role and must have `seen_digest IS NULL` (message or line changes produce a new `a…` ref).
   - Pull request review bodies (`v…`) can have the `duplicate` or `note` role, never `own`.
   - The foreign key from `comment_links.finding` to `findings.id` is deferred until transaction commit so finding rows can be replaced cleanly inside a write transaction.
+- `link pending` and `report comments --pending` compare each linked comment or submitted review body's current normalized SHA-256 digest against `seen_digest` and surface items whose text changed since linking (marked `edited`; a linked review body edited to empty text renders as `_(no text)_`). Re-running the matching `link` command refreshes `seen_digest` (and updates `note` on `link note`, or appends an optional `--note` update on `link own` / `link duplicate`); changing a link's role or finding requires `link remove <ref>` first.
 
 ### 2.3 Read and write modes
 
@@ -118,7 +119,7 @@ When `finding post` or `link reply` creates a comment on GitHub, the new comment
 
 1. The command loads the review read-only and validates offline preconditions.
 2. The publish or reply engine sends the request to GitHub (stopping early on `--dry-run`).
-3. On success, a write transaction verifies the connected pull request, inserts or updates the relevant comment refs in `linkable` with `gone = 0` (`finding post` records the own comment ref; `link reply` records both the target duplicate ref and the new reply ref), and saves the link or reply update (`link reply` also auto-links the reply ref as a `note` so it does not surface in `link pending`).
+3. On success, a write transaction verifies the connected pull request, inserts or updates the relevant comment refs in `linkable` with `gone = 0` (`finding post` records the own comment ref; `link reply` records both the target duplicate ref and the new reply ref), and saves the link or reply update (`finding post` records `seen_digest` from the posted body and updates `pr_comments.body` if the comment was already stored locally so `link pending` does not mark it `edited` before the next `pr sync`; `link reply` auto-links the reply ref as a `note` with its `seen_digest` and updates `pr_comments.body` if already stored locally so it does not surface in `link pending`).
 
 ## 3. Ids
 

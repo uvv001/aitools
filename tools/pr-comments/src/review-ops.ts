@@ -76,6 +76,8 @@ function requiredText(what: string, text: string): string {
 const optionalText = (what: string, text: string | undefined): string | undefined =>
   text === undefined ? undefined : bulletText(what, text);
 
+export const optionalNote = (text: string | undefined): string | undefined => optionalText('note', text);
+
 // The description without its surrounding blank lines, otherwise verbatim.
 function descriptionText(text: string): string {
   const lines = splitLines('description', noControls('description', text));

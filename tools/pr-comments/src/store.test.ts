@@ -1,11 +1,20 @@
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { digestBody } from './comment-ref.ts';
 import { samplePullRequest } from './fixtures.ts';
 import type { CheckRun, PullRequestData } from './model.ts';
 import { inTransaction, loadLinks, openReviewDb, saveLinks, saveReview } from './review-store.ts';
 import { removeScratch, sampleReview, scratchDir } from './review-test-support.ts';
-import { clearPullRequest, loadKnownRefs, loadPullRequest, recordKnownCommentRef, savePullRequest } from './store.ts';
+import {
+  clearPullRequest,
+  loadCurrentDigests,
+  loadKnownRefs,
+  loadPullRequest,
+  recordKnownCommentRef,
+  savePullRequest,
+  updateStoredCommentBody,
+} from './store.ts';
 
 let dir: string;
 const opened: DatabaseSync[] = [];
@@ -610,5 +619,49 @@ describe('recordKnownCommentRef', () => {
     expect(() => recordKnownCommentRef(db, 'a3f9c2d1e')).toThrow('"a3f9c2d1e" is not a comment id; expected r544830 or c623843');
     expect(() => recordKnownCommentRef(db, 'v91204')).toThrow('"v91204" is not a comment id; expected r544830 or c623843');
     expect(() => recordKnownCommentRef(db, 'bogus')).toThrow('"bogus" is not a comment id; expected r544830 or c623843');
+  });
+});
+
+describe('loadCurrentDigests and updateStoredCommentBody', () => {
+  it('computes SHA-256 digests for comments and submitted reviews (including empty bodies) while skipping pending reviews and null-ref rows', () => {
+    const db = openNew();
+    expect(loadCurrentDigests(db)).toEqual(new Map());
+
+    const base = samplePullRequest();
+    const data: PullRequestData = {
+      ...base,
+      reviews: [
+        ...base.reviews,
+        {
+          id: 'rev-pending',
+          author: 'alice',
+          state: 'PENDING',
+          body: 'Draft text',
+          submittedAt: null,
+          editedAt: null,
+          commitSha: null,
+          url: `${base.pullRequest.url}#pullrequestreview-99`,
+        },
+      ],
+      comments: [
+        ...base.comments,
+        { ...base.comments[0]!, id: 'ic-no-ref', url: base.pullRequest.url },
+      ],
+    };
+    savePullRequest(db, data);
+
+    const digests = loadCurrentDigests(db);
+    expect(digests.get('c2001')).toBe(digestBody('Thanks, will address.'));
+    expect(digests.get('r1001')).toBe(digestBody('Should this be configurable?'));
+    expect(digests.get('v1')).toBe(digestBody('Please address the inline comments.'));
+    // Empty-body submitted review rev-2 (APPROVED) gets digestBody('') so an edit to empty text is detected.
+    expect(digests.get('v2')).toBe(digestBody(''));
+    expect(digests.has('v99')).toBe(false);
+
+    updateStoredCommentBody(db, 'r1001', 'Updated own comment.');
+    expect(loadCurrentDigests(db).get('r1001')).toBe(digestBody('Updated own comment.'));
+    // Unknown ref is a no-op.
+    updateStoredCommentBody(db, 'r9999', 'Ignored.');
+    expect(loadCurrentDigests(db).has('r9999')).toBe(false);
   });
 });

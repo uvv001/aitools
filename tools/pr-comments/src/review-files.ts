@@ -14,7 +14,15 @@ import { defaultDatabasePath, findRepoRoot, REVIEW_FOLDER } from './review-namin
 import { newReview } from './review-ops.ts';
 import { renderReport } from './review-render.ts';
 import { getMeta, inTransaction, loadLinks, loadReview, openReviewDb, saveLinks, saveReview, setMeta } from './review-store.ts';
-import { clearPullRequest, loadKnownRefs, loadPullRequest, recordKnownCommentRef, savePullRequest } from './store.ts';
+import {
+  clearPullRequest,
+  loadCurrentDigests,
+  loadKnownRefs,
+  loadPullRequest,
+  recordKnownCommentRef,
+  savePullRequest,
+  updateStoredCommentBody,
+} from './store.ts';
 
 export interface ReviewPaths {
   // The review database (the source of truth) and the derived report, side by side: `<stem>.sqlite` and `<stem>.md`.
@@ -293,7 +301,12 @@ export interface LoadedReview extends ReviewState {
 // The review, its links, its pull request and the refs a link may name, read as one snapshot.
 function loadState(db: DatabaseSync): ReviewState {
   return inTransaction(db, () => {
-    const state: ReviewState = { data: loadReview(db), links: loadLinks(db), known: loadKnownRefs(db) };
+    const state: ReviewState = {
+      data: loadReview(db),
+      links: loadLinks(db),
+      known: loadKnownRefs(db),
+      currentDigests: loadCurrentDigests(db),
+    };
     const pullRequest = getMeta(db, PULL_REQUEST);
     if (pullRequest !== undefined) state.pullRequest = pullRequest;
     return state;
@@ -424,6 +437,7 @@ export async function changeReviewState<T>(
     snapshot?: PullRequestData;
     pullRequest?: PullRequestRef;
     knownRef?: string | readonly string[];
+    updatedComment?: { ref: string; body: string };
   } = {},
 ): Promise<StateChange<T>> {
   const paths = reviewPaths(dbPath);
@@ -444,6 +458,9 @@ export async function changeReviewState<T>(
           for (const ref of refs) {
             recordKnownCommentRef(db, ref);
           }
+        }
+        if (options.updatedComment !== undefined) {
+          updateStoredCommentBody(db, options.updatedComment.ref, options.updatedComment.body);
         }
         const before = loadState(db);
         let result: StateChange<T>;
@@ -521,6 +538,7 @@ export async function recordAfterWrite<R extends { action: string; message?: str
   options: {
     pullRequest: PullRequestRef;
     knownRef: string | readonly string[];
+    updatedComment?: { ref: string; body: string };
     was: string;
     advice: string;
   },
@@ -529,7 +547,11 @@ export async function recordAfterWrite<R extends { action: string; message?: str
     const { reportError } = await changeReviewState(
       dbPath,
       (state) => ({ state: change(state), result: undefined }),
-      { pullRequest: options.pullRequest, knownRef: options.knownRef },
+      {
+        pullRequest: options.pullRequest,
+        knownRef: options.knownRef,
+        ...(options.updatedComment === undefined ? {} : { updatedComment: options.updatedComment }),
+      },
     );
     return reportError === undefined ? { result } : { result, reportError };
   } catch (error) {

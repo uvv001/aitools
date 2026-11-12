@@ -478,6 +478,20 @@ describe('renderMarkdown check annotations', () => {
     const pendingReplyRef = renderMarkdown(data, { refs: ['r1003'], pendingRefs: new Set(['r1003']) });
     expect(pendingReplyRef).toContain('- **@bob** _(context)_ · `r1001`');
     expect(pendingReplyRef).toContain('  - ↳ **@bob** · `r1003`');
+
+    // A previously linked submitted review edited to an empty body renders under --pending (and --ref with linkedRefs) as _(no text)_.
+    const clearedReview: PullRequestData = {
+      ...data,
+      reviews: data.reviews.map((r) => (r.id === 'rev-1' ? { ...r, body: '   ' } : r)),
+    };
+    const pendingCleared = renderMarkdown(clearedReview, { pendingRefs: new Set(['v1']) });
+    expect(pendingCleared).toContain('**@carol** requested changes · `v1`');
+    expect(pendingCleared).toContain('  _(no text)_');
+
+    const refCleared = renderMarkdown(clearedReview, { refs: ['v1'], linkedRefs: new Set(['v1']) });
+    expect(refCleared).toContain('**@carol** requested changes · `v1`');
+    expect(refCleared).toContain('  _(no text)_');
+    expect(findUnknownRefs(clearedReview, ['v1', 'v2'], new Set(['v1']))).toEqual(['v2']);
   });
 });
 

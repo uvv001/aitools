@@ -111,7 +111,7 @@ pr-comments pr show --db $DB
 
 `pr show` tells when the data was downloaded, the head commit, and how much the database holds.
 
-**6. Deal with what others wrote.** `link pending` is the to-do list for comments (thread roots and replies), nonempty submitted review bodies (`v…`), and check annotations (`a…`). It prints every item of the pull request that no link names yet. Read full pending conversation items, review bodies, threads, and annotations with `report comments --pending` (already-linked comments in a thread with a new pending reply stay visible as `_(context)_`), and read `report comments` to inspect edited linked comments.
+**6. Deal with what others wrote.** `link pending` is the to-do list for comments (thread roots and replies), nonempty submitted review bodies (`v…`), and check annotations (`a…`). It prints every item of the pull request that no link names yet, plus any already-linked comment or review body whose text was edited since it was linked (marked `edited`). Read full pending conversation items, review bodies, threads, and annotations with `report comments --pending` (already-linked unedited comments in a thread stay visible as `_(context)_`).
 
 ```
 pr-comments link pending --db $DB
@@ -150,7 +150,7 @@ pr-comments link duplicate F2 a8d5d4a2a --db $DB
 F2: duplicate a8d5d4a2a linked
 ```
 
-When `link pending` prints nothing, every comment, nonempty submitted review body, and check annotation is linked. Empty output means no unlinked item is left in the pending list. The exit code is 0 whether it printed something or not, so pending work is never a failure. (Before the first `pr sync` it is an error instead.)
+When `link pending` prints nothing, every comment, nonempty submitted review body, and check annotation is linked at its current text. Re-run the matching `link` command to confirm an `edited` item (or `link remove <ref>` and a new `link` command if its classification changed). The exit code is 0 whether it printed something or not, so pending work is never a failure. (Before the first `pr sync` it is an error instead.)
 
 **7. Post the findings.** `finding list --unposted` shows the findings that have no comment of their own yet, in any state; `--state approved` narrows it to the approved ones. First look at what would happen, then post:
 
@@ -389,14 +389,14 @@ pr-comments finding post F7 --dry-run --db review.sqlite
 
 A link ties a comment, a nonempty submitted review body or a check annotation of the pull request to the review. Its role is `own` (the comment of a finding, at most one per finding; `r…` or `c…` only), `duplicate` (the same issue as a finding, any number) or `note` (a comment or review body that is no finding, with the reason). A ref is linked once. Links are records in the database only. The refs must be in the downloaded pull request, so run `pr sync` first.
 
-**`link pending`**: lists the comments, review bodies and check annotations not linked yet. Prints one line per comment (thread roots and replies), nonempty submitted review body or check annotation of the synced pull request that no link names: ref, author or app, place, state or level, and an excerpt. Nothing is printed when everything is processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.
+**`link pending`**: lists unlinked or edited comments, review bodies and check annotations. Prints one line per comment (thread roots and replies), nonempty submitted review body or check annotation of the synced pull request that no link names yet, plus any already-linked comment or review body whose text was edited since it was linked (marked "edited"): ref, author or app, place, state or level, and an excerpt. Re-run the matching link command to confirm an edited item (or "link remove `<ref>`" first if its classification changed). Nothing is printed when everything is processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.
 
 ```
 pr-comments link pending --db <file.sqlite>
 pr-comments link pending --db review.sqlite
 ```
 
-**`link own`**: links a comment as the own comment of a finding. Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.
+**`link own`**: links a comment as the own comment of a finding. Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it. Re-run it on an edited own comment to update the seen version (with --note to log a reconciliation note on the finding), or run "link remove `<ref>`" first to change its role or finding.
 
 ```
 pr-comments link own <finding> <ref> [--note <text>] --db <file.sqlite>
@@ -407,7 +407,7 @@ pr-comments link own F7 r544861 --db review.sqlite
 - `<ref>`: the comment: r544830 or c623843.
 - `--note <text>`: why.
 
-**`link duplicate`**: links a comment, review body or check annotation about the same issue. Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have several).
+**`link duplicate`**: links a comment, review body or check annotation about the same issue. Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have several). Re-run it on an edited comment or review body to update the seen version (with --note to log a reconciliation note on the finding), or run "link remove `<ref>`" first to change its role or finding.
 
 ```
 pr-comments link duplicate <finding> <ref> [--note <text>] --db <file.sqlite>
@@ -418,7 +418,7 @@ pr-comments link duplicate F7 c623843 --db review.sqlite
 - `<ref>`: the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e.
 - `--note <text>`: why.
 
-**`link note`**: records that a comment or review body is not a finding, and why. Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note.
+**`link note`**: records that a comment or review body is not a finding, and why. Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note. Re-run it to update the reason or confirm an edited comment or review body, or run "link remove `<ref>`" first to link it to a finding.
 
 ```
 pr-comments link note <ref> <text> --db <file.sqlite>
@@ -470,9 +470,9 @@ pr-comments report comments --pending --out pr-42.md --db review.sqlite
 ```
 
 - `--ref <ref>`: only these comments, review bodies or check annotations (several refs comma-separated); a review comment includes its thread; may be repeated.
-- `--pending`: only comments, nonempty submitted review bodies and check annotations that no link names yet.
+- `--pending`: only unlinked items and already-linked comments or review bodies whose text was edited since linking.
 - `--out <file.md>`: write the markdown to this file.
-- With `--ref` or `--pending`, matching threads keep their non-matching comments marked `_(context)_`, and empty or pending review bodies are omitted. An unknown `--ref` gives a warning, and a malformed ref is an error.
+- With `--ref` or `--pending`, matching threads keep their non-matching comments marked `_(context)_`, and pending or unlinked empty review bodies are omitted (a linked review body edited to empty text is rendered as `_(no text)_`). An unknown `--ref` gives a warning, and a malformed ref is an error.
 - On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.
 
 ### Help and version

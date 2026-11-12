@@ -291,28 +291,35 @@ export const COMMAND_SPECS: CommandSpec[] = [
   ),
   spec(
     'link pending',
-    'lists the comments, review bodies and check annotations not linked yet',
+    'lists unlinked or edited comments, review bodies and check annotations',
     'Prints one line per comment (thread roots and replies), nonempty submitted review body or check annotation of the synced\n' +
-      'pull request that no link names: ref, author or app, place, state or level, and an excerpt. Nothing is printed when\n' +
-      'everything is processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.',
+      'pull request that no link names yet, plus any already-linked comment or review body whose text was edited since it was\n' +
+      'linked (marked "edited"): ref, author or app, place, state or level, and an excerpt. Re-run the matching link command to\n' +
+      'confirm an edited item (or "link remove <ref>" first if its classification changed). Nothing is printed when everything\n' +
+      'is processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first "pr sync" it exits with 1.',
     { database: 'readonly' },
   ),
   spec(
     'link own',
     'links a comment as the own comment of a finding',
-    'Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.',
+    'Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.\n' +
+      'Re-run it on an edited own comment to update the seen version (with --note to log a reconciliation note on the finding), or\n' +
+      'run "link remove <ref>" first to change its role or finding.',
     { args: [FINDING, COMMENT_ONLY_REF], options: [noteOption()], example: 'F7 r544861' },
   ),
   spec(
     'link duplicate',
     'links a comment, review body or check annotation about the same issue',
-    'Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have several).',
+    'Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have\n' +
+      'several). Re-run it on an edited comment or review body to update the seen version (with --note to log a reconciliation note\n' +
+      'on the finding), or run "link remove <ref>" first to change its role or finding.',
     { args: [FINDING, COMMENT_REF], options: [noteOption()], example: 'F7 c623843' },
   ),
   spec(
     'link note',
     'records that a comment or review body is not a finding, and why',
-    'Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note.',
+    'Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note.\n' +
+      'Re-run it to update the reason or confirm an edited comment or review body, or run "link remove <ref>" first to link it to a finding.',
     { args: [COMMENT_OR_REVIEW_REF, arg('<text>', 'the reason, one line')], example: 'c623843 "a bot, not a finding"' },
   ),
   spec(
@@ -355,11 +362,11 @@ export const COMMAND_SPECS: CommandSpec[] = [
     {
       options: [
         opt('ref', '<ref>', 'only these comments, review bodies or check annotations (several refs comma-separated); a review comment includes its thread', { repeatable: true }),
-        flag('pending', 'only comments, nonempty submitted review bodies and check annotations that no link names yet'),
+        flag('pending', 'only unlinked items and already-linked comments or review bodies whose text was edited since linking'),
         opt('out', '<file.md>', 'write the markdown to this file'),
       ],
       notes: [
-        'With `--ref` or `--pending`, matching threads keep their non-matching comments marked `_(context)_`, and empty or pending review bodies are omitted. An unknown `--ref` gives a warning, and a malformed ref is an error.',
+        'With `--ref` or `--pending`, matching threads keep their non-matching comments marked `_(context)_`, and pending or unlinked empty review bodies are omitted (a linked review body edited to empty text is rendered as `_(no text)_`). An unknown `--ref` gives a warning, and a malformed ref is an error.',
         'On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16.',
       ],
       database: 'readonly',

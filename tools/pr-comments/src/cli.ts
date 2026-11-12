@@ -545,13 +545,13 @@ async function renderComments({ env, values }: Context, db: string): Promise<num
   // Before anything is read or written: the markdown must never replace a database, under whatever name it is reached.
   if (values.out) refuseDatabase(values.out, db);
   const data = await snapshotOf(db);
-  const pendingRefs = values.pending
-    ? new Set(pendingItems({ links: (await loadReviewFile(db)).links, data }).map((item) => item.ref))
-    : undefined;
-  for (const ref of findUnknownRefs(data, refs ?? [])) {
+  const links = values.pending || refs !== undefined ? (await loadReviewFile(db)).links : undefined;
+  const pendingRefs = values.pending ? new Set(pendingItems({ links: links!, data }).map((item) => item.ref)) : undefined;
+  const linkedRefs = links ? new Set(links.map((link) => link.ref)) : undefined;
+  for (const ref of findUnknownRefs(data, refs ?? [], linkedRefs)) {
     env.warn(`Warning: no comment, review or check annotation ${ref} in this pull request\n`);
   }
-  const markdown = renderMarkdown(data, { refs, pendingRefs });
+  const markdown = renderMarkdown(data, { refs, pendingRefs, linkedRefs });
   if (values.out) {
     await mkdir(dirname(values.out), { recursive: true });
     await writeFile(values.out, markdown, 'utf8');

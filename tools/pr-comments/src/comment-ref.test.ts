@@ -3,6 +3,7 @@ import {
   commentLink,
   commentRefFromUrl,
   commentUrl,
+  digestBody,
   isCommentRef,
   isLinkRef,
   isReviewBodyRef,
@@ -104,5 +105,16 @@ describe('comment link', () => {
   it('leaves what is no ref as it is', () => {
     expect(commentLink(PR, 'x12')).toBe('x12');
     expect(commentLink(PR, '')).toBe('');
+  });
+});
+
+describe('digestBody', () => {
+  it('computes a 64-hex SHA-256 digest after normalizing CRLF, leading blank lines and trailing whitespace while preserving leading indentation', () => {
+    const base = digestBody('Please cap retries.\nSecond line.');
+    expect(base).toMatch(/^[0-9a-f]{64}$/u);
+    expect(digestBody('  \r\n\t\nPlease cap retries.\r\nSecond line. \r\n\t')).toBe(base);
+    expect(digestBody('Please cap retries.\nDifferent line.')).not.toBe(base);
+    expect(digestBody('    text')).not.toBe(digestBody('text'));
+    expect(digestBody('   \r\n ')).toBe(digestBody(''));
   });
 });

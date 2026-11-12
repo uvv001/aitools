@@ -47,8 +47,8 @@ describe('openReviewDb', () => {
   it('creates the folders and a database at the current schema version', () => {
     const path = join(dir, 'a', 'b', 'r.sqlite');
     const db = openReviewDb(path, 'create');
-    expect(REVIEW_SCHEMA_VERSION).toBe(7);
-    expect(pragma(db, 'user_version')).toBe(7);
+    expect(REVIEW_SCHEMA_VERSION).toBe(8);
+    expect(pragma(db, 'user_version')).toBe(8);
     expect(pragma(db, 'journal_mode')).toBe('delete');
     expect(pragma(db, 'foreign_keys')).toBe(1);
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all();
@@ -293,12 +293,12 @@ describe('openReviewDb', () => {
 
       const bare = reviewFile('bare.sqlite');
       const other = new DatabaseSync(bare);
-      other.exec('PRAGMA user_version = 9');
+      other.exec('PRAGMA user_version = 10');
       other.close();
-      expect(() => openReviewDb(bare, mode)).toThrow(`${bare} was written by a newer pr-comments (schema 9); update the tool`);
+      expect(() => openReviewDb(bare, mode)).toThrow(`${bare} was written by a newer pr-comments (schema 10); update the tool`);
     });
 
-    it.each([1, 2, 3, 4, 5, 6])('refuses a database of the older schema %i, and leaves it as it was', (version) => {
+    it.each([1, 2, 3, 4, 5, 6, 7])('refuses a database of the older schema %i, and leaves it as it was', (version) => {
       const path = reviewFile();
       openReviewDb(path, 'create').close();
       const raw = new DatabaseSync(path);
@@ -875,7 +875,7 @@ describe('saveLinks and loadLinks', () => {
 });
 
 describe('the schema of the links rejects invalid states', () => {
-  const insert = (values: string): string => `INSERT INTO comment_links VALUES (${values})`;
+  const insert = (values: string): string => `INSERT INTO comment_links (position, ref, role, finding, note) VALUES (${values})`;
   const REJECTED: [string, string][] = [
     ['a second own link for one finding', insert("9, 'r99', 'own', 'F2', NULL")],
     ['a note with a finding', insert("9, 'r99', 'note', 'F2', 'why'")],
@@ -889,6 +889,7 @@ describe('the schema of the links rejects invalid states', () => {
     ['a role outside the three', insert("9, 'r99', 'other', 'F2', NULL")],
     ['a check annotation as an own link', insert("9, 'a00000000', 'own', 'F2', NULL")],
     ['a check annotation as a note', insert("9, 'a00000000', 'note', NULL, 'why'")],
+    ['a check annotation with a seen_digest', "INSERT INTO comment_links VALUES (9, 'a00000000', 'duplicate', 'F2', NULL, 'deadbeef')"],
     ['a pull request review body as an own link', insert("9, 'v91204', 'own', 'F2', NULL")],
     ['a ref that no comment or check annotation of the pull request has', insert("9, 'r5555', 'duplicate', 'F2', NULL")],
     ['a link to a finding that does not exist', insert("9, 'r99', 'duplicate', 'F99', NULL")],
@@ -935,16 +936,19 @@ describe('the schema of the links rejects invalid states', () => {
     const db = openWithLinks();
     expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'own', finding: 'F1' }])).toThrow(/CHECK constraint failed/u);
     expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'note', note: 'why' }])).toThrow(/CHECK constraint failed/u);
+    expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1', seenDigest: 'abc' }])).toThrow(
+      /CHECK constraint failed/u,
+    );
     expect(() => saveLinks(db, [{ ref: 'v91204', role: 'own', finding: 'F1' }])).toThrow(/CHECK constraint failed/u);
     saveLinks(db, [
       { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' },
-      { ref: 'v91204', role: 'duplicate', finding: 'F1' },
-      { ref: 'v5', role: 'note', note: 'summary verdict' },
+      { ref: 'v91204', role: 'duplicate', finding: 'F1', seenDigest: 'd1' },
+      { ref: 'v5', role: 'note', note: 'summary verdict', seenDigest: 'd2' },
     ]);
     expect(loadLinks(db)).toStrictEqual([
       { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' },
-      { ref: 'v91204', role: 'duplicate', finding: 'F1' },
-      { ref: 'v5', role: 'note', note: 'summary verdict' },
+      { ref: 'v91204', role: 'duplicate', finding: 'F1', seenDigest: 'd1' },
+      { ref: 'v5', role: 'note', note: 'summary verdict', seenDigest: 'd2' },
     ]);
     db.close();
   });

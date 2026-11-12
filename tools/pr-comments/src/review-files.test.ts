@@ -420,7 +420,13 @@ describe('initReviewFile', () => {
 
   it('starts at the current schema without links, without a pull request and without anything to link to', async () => {
     const { db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW });
-    expect(await loadReviewFile(db)).toStrictEqual({ data: NEW_REVIEW, links: [], known: new Set(), paths: { db, report: join(dir, 'r.md') } });
+    expect(await loadReviewFile(db)).toStrictEqual({
+      data: NEW_REVIEW,
+      links: [],
+      known: new Set(),
+      currentDigests: new Map(),
+      paths: { db, report: join(dir, 'r.md') },
+    });
     expect(await loadSnapshot(db)).toBeUndefined();
     expect(userVersion(db)).toBe(REVIEW_SCHEMA_VERSION);
   });
@@ -872,11 +878,13 @@ describe('changeReviewState', () => {
       seen = state;
       return { state, result: null };
     });
+    const loaded = await loadReviewFile(db);
     expect(seen).toStrictEqual({
       data: withFinding(newReview('PR 42'), 'F1'),
       links: [own('r1', 'F1'), { ref: 'c2', role: 'note', note: 'why' }, { ref: 'r0', role: 'duplicate', finding: 'F1' }],
       pullRequest: PULL_REQUEST,
       known: new Set(REFS),
+      currentDigests: loaded.currentDigests,
     });
   });
 
@@ -890,7 +898,13 @@ describe('changeReviewState', () => {
     expect(loaded.links).toStrictEqual([own('r1', 'F1'), own('r2', 'F2')]);
     expect(loaded.data.findings.map((each) => each.id)).toEqual(['F1', 'F2']);
     expect(loaded.pullRequest).toBe(PULL_REQUEST);
-    expect(changed.state).toStrictEqual({ data: loaded.data, links: loaded.links, pullRequest: loaded.pullRequest, known: loaded.known });
+    expect(changed.state).toStrictEqual({
+      data: loaded.data,
+      links: loaded.links,
+      pullRequest: loaded.pullRequest,
+      known: loaded.known,
+      currentDigests: loaded.currentDigests,
+    });
     expect(listing()).toEqual(['r.md', 'r.sqlite']);
   });
 

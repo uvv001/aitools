@@ -2,14 +2,15 @@ import { existsSync } from 'node:fs';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { commentRefFromUrl } from './comment-ref.ts';
+import { commentRefFromUrl, digestBody } from './comment-ref.ts';
 import type { PullRequest, PullRequestData } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
 import { AGENT_DISCLAIMER, composeBody } from './publish.ts';
 import type { OwnCommentReason, PublishComment, PublishOptions, PublishResult } from './publish.ts';
 import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
 import { connectPullRequest, linkOwn, unlink } from './review-links.ts';
-import { addFinding, formatStamp, openRound, setState } from './review-ops.ts';
+import { addFinding, formatStamp, openRound, setDescription, setState } from './review-ops.ts';
+import { pendingItems } from './review-pending.ts';
 import { postFinding } from './review-post.ts';
 import type { PostFindingDeps, PostFindingOptions } from './review-post.ts';
 import { renderReport } from './review-render.ts';
@@ -315,7 +316,7 @@ describe('recording the link', () => {
     const { posted } = await post(db, 'F1', created('r2'));
 
     const state = await loadReviewFile(db);
-    expect(state.links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1' }]);
+    expect(state.links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) }]);
     expect(state.pullRequest).toBe(PR);
     expect(await lastUpdateOf(db, 'F1')).toEqual({
       kind: 'posted',
@@ -344,7 +345,9 @@ describe('recording the link', () => {
 
     expect(calls).toHaveLength(1);
     expect(posted.result).toMatchObject({ action: 'created', comment: 'r2', path: 'src/c.ts', lines: '3' });
-    expect((await loadReviewFile(db)).links).toEqual([{ ref: 'r2', role: 'own', finding: 'F3' }]);
+    expect((await loadReviewFile(db)).links).toEqual([
+      { ref: 'r2', role: 'own', finding: 'F3', seenDigest: digestBody(posted.body) },
+    ]);
     await expectSound(db);
   });
 
@@ -361,7 +364,9 @@ describe('recording the link', () => {
       action: 'updated',
       pullRequest: PR,
     });
-    expect((await loadReviewFile(db)).links).toEqual([{ ref: 'r1', role: 'own', finding: 'F1' }]);
+    expect((await loadReviewFile(db)).links).toEqual([
+      { ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) },
+    ]);
 
     const before = await contentOf(db);
     const beforeBytes = await readFile(db);
@@ -375,8 +380,8 @@ describe('recording the link', () => {
     );
     expect(adopted.posted.result).toMatchObject({ action: 'unchanged', comment: 'r7', message: ADOPTED });
     expect((await loadReviewFile(db)).links).toEqual([
-      { ref: 'r1', role: 'own', finding: 'F1' },
-      { ref: 'r7', role: 'own', finding: 'F4' },
+      { ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) },
+      { ref: 'r7', role: 'own', finding: 'F4', seenDigest: digestBody(adopted.posted.body) },
     ]);
     expect(await lastUpdateOf(db, 'F4')).toEqual({
       kind: 'posted',
@@ -436,7 +441,7 @@ describe('recording the comment ref locally', () => {
     expect(posted.result).toMatchObject({ action: 'created', comment: 'r2' });
     const { known, links } = await loadReviewFile(db);
     expect([...known].sort()).toEqual(['r1', 'r2', 'r4', 'r8']);
-    expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1' }]);
+    expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) }]);
     const stored = await loadSnapshot(db);
     expect(stored!.comments.map(({ url }) => commentRefFromUrl(url)).sort()).toEqual(['r1', 'r4', 'r8']);
   });
@@ -455,7 +460,7 @@ describe('recording the comment ref locally', () => {
     expect(posted.result).toMatchObject({ action: 'created', comment: 'r2' });
     const { data, links } = await loadReviewFile(db);
     expect(data.findings.map((finding) => finding.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5']);
-    expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1' }]);
+    expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) }]);
   });
 });
 
@@ -518,7 +523,9 @@ describe('a comment that could not be recorded', () => {
         LINK_OWN(db, 'r2'),
     });
     await sameBytes(db, during!);
-    expect((await loadReviewFile(db)).links).toEqual([{ ref: 'r2', role: 'own', finding: 'F4' }]);
+    expect((await loadReviewFile(db)).links).toEqual([
+      { ref: 'r2', role: 'own', finding: 'F4', seenDigest: digestBody('Comment 3.') },
+    ]);
   });
 
   it('refuses to overwrite a pull request reconnected while the post was in flight', async () => {
@@ -587,8 +594,48 @@ describe('a posted comment cannot move', () => {
     const { calls } = await post(db, 'F1', created('r5'));
 
     expect(calls[0]!.comment.commentRef).toBeUndefined();
-    expect((await loadReviewFile(db)).links).toEqual([{ ref: 'r5', role: 'own', finding: 'F1' }]);
+    expect((await loadReviewFile(db)).links).toEqual([
+      { ref: 'r5', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) },
+    ]);
     await expectSound(db);
   });
+
+  it.each([false, true])(
+    'keeps an updated own comment in sync before and after pr sync (byAgent: %s), and surfaces external edits on sync',
+    async (byAgent) => {
+      const db = await startReview();
+      await withOwn(db, 'F1', 'r1');
+
+      const first = await post(db, 'F1', (comment, options) => answer(comment, options, 'updated', 'r1'), { byAgent });
+      expect(first.posted.result.action).toBe('updated');
+
+      // Before pr sync, local pr_comments.body and seenDigest both match the posted text, so r1 is not falsely edited.
+      const pendingBeforeSync = pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! });
+      expect(pendingBeforeSync.map(({ ref }) => ref)).not.toContain('r1');
+
+      // Revise the finding description and post again.
+      await mutateReviewFile(db, (data) => ({
+        data: setDescription(data, 'F1', { description: 'Revised crash fix.\n\n`src/app.ts:10-12`' }, NOW),
+        result: undefined,
+      }));
+      const second = await post(db, 'F1', (comment, options) => answer(comment, options, 'updated', 'r1'), { byAgent });
+      expect(pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! }).map(({ ref }) => ref)).not.toContain('r1');
+
+      // After pr sync returning the exact posted text, r1 still does not surface as edited.
+      const syncedSame = snapshot(BASE, { fetchedAt: '2026-10-08T11:00:00Z' });
+      syncedSame.comments = syncedSame.comments.map((c) => (c.id === 'id-r1' ? { ...c, body: second.posted.body } : c));
+      await syncReviewFile(db, syncedSame);
+      expect(pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! }).map(({ ref }) => ref)).not.toContain('r1');
+
+      // An external edit to r1 on GitHub surfaces r1 as edited on the next pr sync.
+      const syncedEdited = snapshot(BASE, { fetchedAt: '2026-10-08T11:05:00Z' });
+      syncedEdited.comments = syncedEdited.comments.map((c) =>
+        c.id === 'id-r1' ? { ...c, body: `${second.posted.body}\n\nEdited in GitHub UI.` } : c,
+      );
+      await syncReviewFile(db, syncedEdited);
+      const pendingAfterExternalEdit = pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! });
+      expect(pendingAfterExternalEdit.find(({ ref }) => ref === 'r1')).toMatchObject({ ref: 'r1', edited: true });
+    },
+  );
 });
 

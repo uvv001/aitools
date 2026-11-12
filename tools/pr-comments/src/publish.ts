@@ -59,7 +59,7 @@ class OwnCommentError extends Error {
 export const AGENT_DISCLAIMER = '🤖 *Written by an AI agent.*';
 
 // The posted text: the optional disclaimer, then the text exactly as given.
-export function composeBody(text: string, byAgent: boolean): string {
+export function composeBody(text: string, byAgent = false): string {
   return byAgent ? [AGENT_DISCLAIMER, text].join('\n\n') : text;
 }
 

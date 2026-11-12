@@ -76,3 +76,9 @@ export function annotationRef(app: string, path: string, startLine: number, endL
   const text = [app, path, startLine, endLine, message].join('\0');
   return `a${createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 8)}`;
 }
+
+// SHA-256 hex digest of a comment or review body after normalizing CRLF, stripping leading blank lines, and trimming trailing whitespace.
+export function digestBody(body: string): string {
+  const normalized = body.replaceAll('\r\n', '\n').replace(/^(?:[ \t]*\n)+/u, '').trimEnd();
+  return createHash('sha256').update(normalized, 'utf8').digest('hex');
+}

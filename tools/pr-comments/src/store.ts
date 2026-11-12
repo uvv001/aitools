@@ -1,5 +1,5 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
-import { commentRefFromUrl, isCommentRef, linkableReviewRef, reviewRefFromUrl } from './comment-ref.ts';
+import { commentRefFromUrl, digestBody, isCommentRef, linkableReviewRef, reviewRefFromUrl } from './comment-ref.ts';
 import type {
   AnnotationLevel,
   CheckRun,
@@ -378,4 +378,23 @@ export function recordKnownCommentRef(db: DatabaseSync, ref: string): void {
   db.prepare(
     'INSERT INTO linkable (ref, kind, gone) VALUES (?, ?, 0) ON CONFLICT (ref) DO UPDATE SET kind = excluded.kind, gone = 0',
   ).run(ref, kind);
+}
+
+// SHA-256 digests of the stored comment and submitted review bodies, keyed by ref.
+export function loadCurrentDigests(db: DatabaseSync): Map<string, string> {
+  const rows = db
+    .prepare(
+      "SELECT ref, body FROM pr_comments WHERE ref IS NOT NULL UNION ALL SELECT ref, body FROM pr_reviews WHERE ref IS NOT NULL AND state != 'PENDING'",
+    )
+    .all() as { ref: string; body: string }[];
+  const digests = new Map<string, string>();
+  for (const { ref, body } of rows) digests.set(ref, digestBody(body));
+  return digests;
+}
+
+// Updates the stored body of an already-synced comment when `finding post` updates it before the next `pr sync`.
+export function updateStoredCommentBody(db: DatabaseSync, ref: string, body: string): void {
+  const existing = db.prepare('SELECT body FROM pr_comments WHERE ref = ?').get(ref) as { body: string } | undefined;
+  if (existing === undefined || digestBody(existing.body) === digestBody(body)) return;
+  db.prepare('UPDATE pr_comments SET body = ? WHERE ref = ?').run(body, ref);
 }

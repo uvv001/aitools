@@ -14,7 +14,7 @@ import type {
 } from './review-model.ts';
 import { PULL_REQUEST_SCHEMA } from './store.ts';
 
-export const REVIEW_SCHEMA_VERSION = 7;
+export const REVIEW_SCHEMA_VERSION = 8;
 
 // Every table of the review is STRICT (typed columns). Lists keep their order in `position`. Rounds and finding
 // updates are stored as structured columns (`intro_items` and `updates`), never as pre-rendered Markdown text.
@@ -100,9 +100,11 @@ CREATE TABLE comment_links (
   role TEXT NOT NULL CHECK (role IN ('own', 'duplicate', 'note')),
   finding TEXT REFERENCES findings (id) DEFERRABLE INITIALLY DEFERRED,
   note TEXT,
+  seen_digest TEXT,
   CHECK ((role = 'note') = (finding IS NULL)),
   CHECK ((role = 'note') = (note IS NOT NULL)),
   CHECK (ref NOT GLOB 'a*' OR role = 'duplicate'),
+  CHECK (ref NOT GLOB 'a*' OR seen_digest IS NULL),
   CHECK (ref NOT GLOB 'v*' OR role != 'own')
 ) STRICT;
 
@@ -369,11 +371,12 @@ export function loadReview(db: DatabaseSync): ReviewData {
 // The links in the order they were saved.
 export function loadLinks(db: DatabaseSync): CommentLink[] {
   return inTransaction(db, () => {
-    const rows = db.prepare('SELECT ref, role, finding, note FROM comment_links ORDER BY position').all() as Row[];
+    const rows = db.prepare('SELECT ref, role, finding, note, seen_digest FROM comment_links ORDER BY position').all() as Row[];
     return rows.map((row) => {
       const link: CommentLink = { ref: row.ref as string, role: row.role as LinkRole };
       if (row.finding !== null) link.finding = row.finding as string;
       if (row.note !== null) link.note = row.note as string;
+      if (row.seen_digest !== null) link.seenDigest = row.seen_digest as string;
       return link;
     });
   });
@@ -384,8 +387,12 @@ export function loadLinks(db: DatabaseSync): CommentLink[] {
 export function saveLinks(db: DatabaseSync, links: CommentLink[]): void {
   inTransaction(db, () => {
     db.exec('DELETE FROM comment_links');
-    const insert = db.prepare('INSERT INTO comment_links (position, ref, role, finding, note) VALUES (?, ?, ?, ?, ?)');
-    links.forEach((link, position) => insert.run(position, link.ref, link.role, link.finding ?? null, link.note ?? null));
+    const insert = db.prepare(
+      'INSERT INTO comment_links (position, ref, role, finding, note, seen_digest) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    links.forEach((link, position) =>
+      insert.run(position, link.ref, link.role, link.finding ?? null, link.note ?? null, link.seenDigest ?? null),
+    );
   });
 }
 

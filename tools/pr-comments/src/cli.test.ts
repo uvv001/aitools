@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COMMANDS, checkNodeVersion, defaultEnvironment, isMainModule, readFailure, run, synopsis } from './cli.ts';
 import type { CliEnvironment } from './cli.ts';
-import { annotationRef } from './comment-ref.ts';
+import { annotationRef, digestBody } from './comment-ref.ts';
 import { samplePullRequest } from './fixtures.ts';
 import { resolveRevision } from './git-revision.ts';
 import { BEGIN_COMMAND_REFERENCE, END_COMMAND_REFERENCE, renderCommandReferenceMarkdown, syncReadmeCommandReference } from './help-catalog.ts';
@@ -1508,7 +1508,7 @@ describe('cli', () => {
       expect(printed).toBe('c2001 unlinked\n');
 
       expect((await loaded()).links).toEqual([
-        { ref: 'r1001', role: 'own', finding: 'F3' },
+        { ref: 'r1001', role: 'own', finding: 'F3', seenDigest: digestBody('Should this be configurable?') },
         { ref: ELSE_IF_REF, role: 'duplicate', finding: 'F1' },
       ]);
     });
@@ -1753,6 +1753,146 @@ describe('cli', () => {
         expect(printed).toBe('F1: duplicate v91204 linked\n');
 
         await step('link', 'pending', '--db', db);
+        expect(printed).toBe('');
+      });
+
+      it('surfaces edited linked comments and review bodies in link pending and report comments --pending, ignores updatedAt-only changes, and clears edits on re-link or remove+link', async () => {
+        await step('link', 'duplicate', 'F1', 'r1001');
+        await step('link', 'note', 'r1002', 'author ack');
+        await step('link', 'note', 'r1003', 'reviewer ack');
+        await step('link', 'note', 'r1004', 'typo');
+        await step('link', 'note', 'c2001', 'just thanks');
+        await step('link', 'duplicate', 'F1', 'v1');
+        for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) {
+          await step('link', 'duplicate', 'F2', ref);
+        }
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        // updatedAt/editedAt-only sync without normalized body changes does not surface anything.
+        const base = withChecks();
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:05:00Z' },
+          comments: base.comments.map((c) => ({
+            ...c,
+            body: `  \r\n${c.body}  \r\n`,
+            updatedAt: '2026-01-06T12:04:00Z',
+            editedAt: '2026-01-06T12:04:00Z',
+          })),
+          reviews: base.reviews.map((r) => ({ ...r, editedAt: '2026-01-06T12:04:00Z' })),
+        };
+        await step('pr', 'sync');
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        // Edit linked note c2001, linked duplicate r1001, and linked review body v1 (cleared to empty text).
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:10:00Z' },
+          comments: base.comments.map((c) => {
+            if (c.id === 'ic-1') return { ...c, body: 'Wait, retries can also deadlock on shutdown!' };
+            if (c.id === 'rc-1') return { ...c, body: 'Should this be configurable with a hard cap of 5?' };
+            return c;
+          }),
+          reviews: base.reviews.map((r) => (r.id === 'rev-1' ? { ...r, body: '' } : r)),
+        };
+        await step('pr', 'sync');
+
+        await step('link', 'pending');
+        expect(printed).toContain('r1001');
+        expect(printed).toContain('edited, thread resolved, 2 replies — "Should this be configurable with a hard cap of 5?"');
+        expect(printed).toContain('c2001');
+        expect(printed).toContain('edited — "Wait, retries can also deadlock on shutdown!"');
+        expect(printed).toContain('v1');
+        expect(printed).toContain('edited, changes requested');
+        expect(printed).not.toContain('r1002');
+
+        await step('report', 'comments', '--pending');
+        expect(printed).toContain('**@carol** requested changes · `v1`');
+        expect(printed).toContain('  _(no text)_');
+        expect(printed).toContain('- **@alice** · `c2001`');
+        expect(printed).toContain('Wait, retries can also deadlock on shutdown!');
+        expect(printed).toContain('- **@bob** · `r1001`');
+        expect(printed).toContain('  - ↳ **@alice** _(context)_ · `r1002`');
+
+        // Re-confirming r1001 as duplicate of F1 with --note clears r1001 and logs the note without duplicating linked.
+        await step('link', 'duplicate', 'F1', 'r1001', '--note', 'edited to suggest cap of 5');
+        expect((await findingOf('F1'))?.updates.filter((u) => u.kind === 'linked' && u.ref === 'r1001')).toHaveLength(1);
+        expect((await findingOf('F1'))?.updates.at(-1)).toMatchObject({ kind: 'note', note: 'edited to suggest cap of 5' });
+
+        // Changing c2001 from note to duplicate requires link remove + link duplicate.
+        await fails(['link', 'duplicate', 'F2', 'c2001', '--db', review], 'c2001 is already linked as a note (just thanks)');
+        await step('link', 'remove', 'c2001');
+        await step('link', 'duplicate', 'F2', 'c2001');
+
+        // Removing the cleared review v1 link leaves link pending empty.
+        await step('link', 'remove', 'v1');
+        await step('link', 'pending');
+        expect(printed).toBe('');
+      });
+
+      it('does not falsely flag an own comment updated by finding post (with or without --by-agent), while surfacing external edits on pr sync', async () => {
+        for (const ref of ['r1002', 'r1003', 'r1004', 'c2001', 'v1']) await step('link', 'note', ref, 'handled');
+        for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'F2', ref);
+        await step('link', 'own', 'F1', 'r1001');
+
+        let publishedBody = '';
+        env.publish = async (_ref, comment, options) => {
+          publishedBody = options.byAgent ? `${AGENT_DISCLAIMER}\n\n${comment.body}` : comment.body;
+          return {
+            action: 'updated',
+            dryRun: false,
+            comment: 'r1001',
+            url: `${prUrl}#discussion_r1001`,
+            state: 'pending',
+            path: 'src/app.ts',
+            lines: '10-12',
+          };
+        };
+
+        // Post without --by-agent: neither before nor after pr sync is r1001 marked edited.
+        expect(await step('finding', 'post', 'F1')).toBe(0);
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        const base = withChecks();
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:15:00Z' },
+          comments: base.comments.map((c) => (c.id === 'rc-1' ? { ...c, body: publishedBody } : c)),
+        };
+        await step('pr', 'sync');
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        // Post with --by-agent: neither before nor after pr sync is r1001 marked edited.
+        expect(await step('finding', 'post', 'F1', '--by-agent')).toBe(0);
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:20:00Z' },
+          comments: base.comments.map((c) => (c.id === 'rc-1' ? { ...c, body: publishedBody } : c)),
+        };
+        await step('pr', 'sync');
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        // External edit to r1001 in GitHub UI surfaces r1001 as edited on pr sync, and link own F1 r1001 confirms it.
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:25:00Z' },
+          comments: base.comments.map((c) => (c.id === 'rc-1' ? { ...c, body: `${publishedBody}\n\nEdited by user.` } : c)),
+        };
+        await step('pr', 'sync');
+        await step('link', 'pending');
+        expect(printed).toContain('r1001');
+        expect(printed).toContain('edited, thread resolved, 2 replies');
+
+        await step('link', 'own', 'F1', 'r1001', '--note', 'accepted user wording tweak');
+        await step('link', 'pending');
         expect(printed).toBe('');
       });
 
