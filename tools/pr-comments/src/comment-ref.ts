@@ -77,8 +77,12 @@ export function annotationRef(app: string, path: string, startLine: number, endL
   return `a${createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 8)}`;
 }
 
-// SHA-256 hex digest of a comment or review body after normalizing CRLF, stripping leading blank lines, and trimming trailing whitespace.
+// Normalizes CRLF line endings, strips leading blank lines, and trims trailing whitespace while preserving leading indentation on line 1.
+export function normalizeBody(body: string): string {
+  return body.replaceAll('\r\n', '\n').replace(/^(?:[ \t]*\n)+/u, '').trimEnd();
+}
+
+// SHA-256 hex digest of a comment or review body after normalizeBody.
 export function digestBody(body: string): string {
-  const normalized = body.replaceAll('\r\n', '\n').replace(/^(?:[ \t]*\n)+/u, '').trimEnd();
-  return createHash('sha256').update(normalized, 'utf8').digest('hex');
+  return createHash('sha256').update(normalizeBody(body), 'utf8').digest('hex');
 }

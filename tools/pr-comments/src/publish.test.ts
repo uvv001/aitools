@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { digestBody, normalizeBody } from './comment-ref.ts';
 import { AccessDeniedError } from './github.ts';
 import type { GraphQLClient } from './github.ts';
+import { sameText } from './github-write.ts';
 import type { Comment, PullRequestData, Review, ReviewThread } from './model.ts';
 import { AGENT_DISCLAIMER, composeBody, publishComment } from './publish.ts';
 import type { PublishComment, PublishOptions } from './publish.ts';
@@ -726,6 +728,27 @@ describe('comments that already exist', () => {
     expect(mutations).toEqual([]);
   });
 
+  it('updates when line 1 has 4 leading spaces, while treating leading blank lines as unchanged with identical digestBody', async () => {
+    expect(sameText('    **Issue**', '**Issue**')).toBe(false);
+    expect(normalizeBody('    **Issue**')).toBe('    **Issue**');
+    const indented = withExisting(4, { comment: { body: '    **Issue**' } });
+    const updated = await publish(tied({ body: '**Issue**' }), { data: indented });
+
+    expect(updated.result).toMatchObject({ action: 'updated', comment: 'r4' });
+    expect(updated.mutations).toEqual([
+      { op: 'updatePullRequestReviewComment', input: { pullRequestReviewCommentId: 'RC_4', body: '**Issue**' } },
+    ]);
+
+    const withLeadingBlanks = '\n  \n**Issue**\n';
+    expect(sameText(withLeadingBlanks, '**Issue**')).toBe(true);
+    expect(digestBody(withLeadingBlanks)).toBe(digestBody('**Issue**'));
+    const blankPadded = withExisting(4, { comment: { body: withLeadingBlanks } });
+    const unchanged = await publish(tied({ body: '**Issue**' }), { data: blankPadded });
+
+    expect(unchanged.result).toMatchObject({ action: 'unchanged', comment: 'r4' });
+    expect(unchanged.mutations).toEqual([]);
+  });
+
   it('reports a comment of a submitted review as posted', async () => {
     const submitted = { ...pendingReview, id: 'REV_DONE', state: 'COMMENTED' };
     const data = withExisting(4, { comment: { reviewId: 'REV_DONE' }, reviews: [submitted] });
@@ -849,6 +872,22 @@ describe('adopting an identical comment', () => {
     const { result } = await publish(commentOf('F4', { ...at(22), body: 'one\ntwo' }), { data });
 
     expect(result).toMatchObject({ action: 'unchanged', comment: 'r4', message: ADOPTED });
+  });
+
+  it('does not adopt a comment indented with 4 leading spaces on line 1, while adopting one with leading blank lines', async () => {
+    const indented = withExisting(4, { comment: { body: '    **Issue**' } });
+    const created = await publish(commentOf('F4', { ...at(22), body: '**Issue**' }), { data: indented });
+
+    expect(created.result).toMatchObject({ action: 'created', comment: 'r501' });
+    expect(created.mutations.map((m) => m.op)).toEqual(['addPullRequestReviewThread']);
+
+    const withLeadingBlanks = '\n  \n**Issue**\n';
+    expect(digestBody(withLeadingBlanks)).toBe(digestBody('**Issue**'));
+    const blankPadded = withExisting(4, { comment: { body: withLeadingBlanks } });
+    const adopted = await publish(commentOf('F4', { ...at(22), body: '**Issue**' }), { data: blankPadded });
+
+    expect(adopted.result).toMatchObject({ action: 'unchanged', comment: 'r4', message: ADOPTED });
+    expect(adopted.mutations).toEqual([]);
   });
 
   it('compares the body with the disclaimer when byAgent is set', async () => {

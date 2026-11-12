@@ -8,6 +8,7 @@ import {
   isLinkRef,
   isReviewBodyRef,
   linkableReviewRef,
+  normalizeBody,
   reviewRefFromUrl,
 } from './comment-ref.ts';
 
@@ -109,6 +110,14 @@ describe('comment link', () => {
 });
 
 describe('digestBody', () => {
+  it('normalizes CRLF, leading blank lines and trailing whitespace while preserving leading indentation on line 1', () => {
+    expect(normalizeBody('  \r\n\t\nPlease cap retries.\r\nSecond line.\r\nThird line. \r\n\t')).toBe(
+      'Please cap retries.\nSecond line.\nThird line.',
+    );
+    expect(normalizeBody('\n  \n    **Issue**\n  ')).toBe('    **Issue**');
+    expect(normalizeBody('   \r\n ')).toBe('');
+  });
+
   it('computes a 64-hex SHA-256 digest after normalizing CRLF, leading blank lines and trailing whitespace while preserving leading indentation', () => {
     const base = digestBody('Please cap retries.\nSecond line.');
     expect(base).toMatch(/^[0-9a-f]{64}$/u);

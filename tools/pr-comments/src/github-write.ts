@@ -1,3 +1,4 @@
+import { normalizeBody } from './comment-ref.ts';
 import type { TokenContext } from './download.ts';
 import { fetchPullRequest } from './github.ts';
 import type { GraphQLClient } from './github.ts';
@@ -33,9 +34,7 @@ export interface ViewerAndPullRequest {
 
 export const sameLogin = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 
-export const normalize = (body: string): string => body.replaceAll('\r\n', '\n').trim();
-
-export const sameText = (a: string, b: string): boolean => normalize(a) === normalize(b);
+export const sameText = (a: string, b: string): boolean => normalizeBody(a) === normalizeBody(b);
 
 export const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 

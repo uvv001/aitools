@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { digestBody } from './comment-ref.ts';
 import { AccessDeniedError } from './github.ts';
 import type { GraphQLClient } from './github.ts';
 import type { Comment, PullRequestData, Review, ReviewThread } from './model.ts';
@@ -420,7 +421,7 @@ describe('an identical reply', () => {
   });
 
   it('is found through other line endings and surrounding blanks', async () => {
-    const existing = '\r\n  line one\r\nline two  \r\n\n';
+    const existing = '  \r\n\t\nline one\r\nline two  \r\n\n';
     const { result, mutations } = await reply({
       data: threadData({ reviews: [pendingReview], more: [ownReply(11, { body: existing })] }),
       body: 'line one\nline two',
@@ -428,6 +429,22 @@ describe('an identical reply', () => {
 
     expect(result).toEqual(unchangedPending);
     expect(mutations).toEqual([]);
+  });
+
+  it('does not treat 4 leading spaces on line 1 as an identical thread reply, while matching leading blank lines', async () => {
+    const indented = await reply({
+      data: threadData({ reviews: [pendingReview], more: [ownReply(11, { body: `    ${TEXT}` })] }),
+    });
+    expect(indented.result).toMatchObject({ action: 'created', comment: 'r900', state: 'pending' });
+    expect(indented.mutations).toEqual([replyInput('REV_PENDING')]);
+
+    const withLeadingBlanks = `\n  \n${TEXT}\n`;
+    expect(digestBody(withLeadingBlanks)).toBe(digestBody(TEXT));
+    const blankPadded = await reply({
+      data: threadData({ reviews: [pendingReview], more: [ownReply(11, { body: withLeadingBlanks })] }),
+    });
+    expect(blankPadded.result).toEqual(unchangedPending);
+    expect(blankPadded.mutations).toEqual([]);
   });
 
   it('is found when the viewer logs in with another case', async () => {
@@ -642,6 +659,25 @@ describe('a conversation comment', () => {
     const { result } = await reply({ data: conversationData([ownConversationReply(6)]), commentRef: 'c5' });
 
     expect(result.action).toBe('unchanged');
+  });
+
+  it('does not treat 4 leading spaces on line 1 as an identical conversation reply, while matching leading blank lines', async () => {
+    const indentedData = conversationData([ownConversationReply(6, { body: `    ${TEXT}` })]);
+    const withoutNow = await reply({ data: indentedData, commentRef: 'c5' });
+    expect(withoutNow.result).toEqual({ action: 'error', dryRun: false, target: conversationTarget, message: NEEDS_NOW });
+
+    const withNow = await reply({ data: indentedData, commentRef: 'c5', options: { now: true } });
+    expect(withNow.result).toMatchObject({ action: 'created', comment: 'c901', state: 'posted' });
+    expect(withNow.mutations).toEqual([{ op: 'addComment', input: { subjectId: 'PR_1', body: TEXT } }]);
+
+    const withLeadingBlanks = `\n  \n${TEXT}\n`;
+    expect(digestBody(withLeadingBlanks)).toBe(digestBody(TEXT));
+    const blankPadded = await reply({
+      data: conversationData([ownConversationReply(6, { body: withLeadingBlanks })]),
+      commentRef: 'c5',
+    });
+    expect(blankPadded.result).toMatchObject({ action: 'unchanged', comment: 'c6', message: IDENTICAL });
+    expect(blankPadded.mutations).toEqual([]);
   });
 
   it('is not answered by a comment written before it, by somebody else, or with another text', async () => {

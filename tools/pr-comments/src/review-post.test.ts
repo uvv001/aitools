@@ -3,9 +3,10 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { commentRefFromUrl, digestBody } from './comment-ref.ts';
+import type { GraphQLClient } from './github.ts';
 import type { PullRequest, PullRequestData } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
-import { AGENT_DISCLAIMER, composeBody } from './publish.ts';
+import { AGENT_DISCLAIMER, composeBody, publishComment } from './publish.ts';
 import type { OwnCommentReason, PublishComment, PublishOptions, PublishResult } from './publish.ts';
 import { changeReviewState, initReviewFile, loadReviewFile, loadSnapshot, mutateReviewFile, syncReviewFile } from './review-files.ts';
 import { connectPullRequest, linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
@@ -676,5 +677,53 @@ describe('a posted comment cannot move', () => {
       expect(pending.find(({ ref }) => ref === 'c3')).toMatchObject({ ref: 'c3', edited: true });
     },
   );
+
+  it('adopts leading-blank-line comments with zero false edit on pr sync, and updates own comments indented with 4 leading spaces', async () => {
+    const db = await startReview();
+    const f2Body = '🟡 **F2 — Remark without a place**\n\nA remark that belongs to no line.';
+    const githubBlankPadded = `\n  \n${f2Body}\n`;
+
+    const makePublish = (prData: PullRequestData): PostFindingDeps['publish'] => {
+      const client = (async (query: string) => {
+        if (query.includes('viewer')) return { viewer: { login: 'viewer' } };
+        if (query.includes('updateIssueComment')) return { updateIssueComment: { issueComment: { id: 'id-c9' } } };
+        return { addComment: { commentEdge: { node: { id: 'id-c10', url: `${PR}#issuecomment-10` } } } };
+      }) as GraphQLClient;
+      return (ref, comment, opts) =>
+        publishComment({ client, token: 'token', host: ref.host, fetchImpl: fetch }, ref, comment, opts, {
+          loadPullRequest: async () => prData,
+        });
+    };
+
+    const remoteBlankPadded = snapshot([...BASE, 'c9'], { fetchedAt: '2026-10-08T11:00:00Z' });
+    remoteBlankPadded.comments = remoteBlankPadded.comments.map((c) =>
+      c.id === 'id-c9' ? { ...c, author: 'viewer', body: githubBlankPadded } : c,
+    );
+
+    const adopted = await postFinding(
+      db,
+      'F2',
+      { ...OPTIONS, now: true },
+      { publish: makePublish(remoteBlankPadded), now: () => LATER },
+    );
+    expect(adopted.result).toMatchObject({ action: 'unchanged', comment: 'c9', message: ADOPTED });
+
+    // Syncing the raw GitHub body with leading blank lines produces no false edit because sameText and digestBody share normalizeBody.
+    await syncReviewFile(db, remoteBlankPadded);
+    expect(pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! }).map(({ ref }) => ref)).not.toContain('c9');
+
+    // If c9 on GitHub has 4 leading spaces on line 1, posting F2 updates c9 instead of treating it as unchanged.
+    const remoteIndented = snapshot([...BASE, 'c9'], { fetchedAt: '2026-10-08T11:05:00Z' });
+    remoteIndented.comments = remoteIndented.comments.map((c) =>
+      c.id === 'id-c9' ? { ...c, author: 'viewer', body: `    ${f2Body}` } : c,
+    );
+    const updated = await postFinding(
+      db,
+      'F2',
+      { ...OPTIONS, now: true },
+      { publish: makePublish(remoteIndented), now: () => LATER },
+    );
+    expect(updated.result).toMatchObject({ action: 'updated', comment: 'c9' });
+  });
 });
 

@@ -204,8 +204,9 @@ async function replyInConversation(run: Run, answered: Comment, target: ReplyTar
 //    the answered comment as `target`): the reply would link to a comment that is gone (a discarded or edited pending
 //    review). This is checked before anything else that can write, and in a dry run too, so nothing is written.
 // 2. Review comment (`r…`): the answered thread is the one of the comment (`threadId`). Finds out whether the viewer
-//    already has an identical reply after the answered comment in that thread (same text after trimming and
-//    normalising line breaks, written by the viewer: pending replies of the viewer are part of the data): then `unchanged`.
+//    already has an identical reply after the answered comment in that thread (same text after stripping leading blank
+//    lines, trimming trailing whitespace, and normalising line breaks, written by the viewer: pending replies of the
+//    viewer are part of the data): then `unchanged`.
 //    Otherwise, outside a dry run, the reply is written with the GraphQL mutation `addPullRequestReviewThreadReply`
 //    (read how src/publish.ts makes its requests and how its mutations are shaped; the live findings are in the
 //    task notes below) into the viewer's PENDING review:
