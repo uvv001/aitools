@@ -20,13 +20,15 @@ the user to create it.
 check annotations. Run it after every push and before every publish.
 `link pending` then lists every unlinked comment (thread roots and replies,
 `r<id>` / `c<id>`), nonempty submitted review body (`v<id>`), and check
-annotation (`a<hex>`); empty output means every one is handled. Read the
-pending conversation comments, nonempty review bodies, pending threads
-(already-linked comments in a thread stay visible marked `_(context)_`), and
-pending check annotations with `report comments --pending` — when the fleet
-threshold below is met, the parallel agents read their slices instead — then
-classify only the non-`_(context)_` unlinked refs and record each from the
-orchestrator:
+annotation (`a<hex>`), plus any already-linked comment or review body whose
+text was edited since it was linked (marked `edited`); empty output means
+every one is handled at its current text. Read the pending conversation
+comments, review bodies (a linked review body cleared to empty text renders as
+`_(no text)_`), pending threads (already-linked unedited comments in a thread
+stay visible marked `_(context)_`), and pending check annotations with
+`report comments --pending` — when the fleet threshold below is met, the
+parallel agents read their slices instead — then classify only the
+non-`_(context)_` pending refs and record each from the orchestrator:
 
 | The pending item | Command |
 |---|---|
@@ -41,7 +43,14 @@ Links are records in the database; nothing reaches GitHub. A note attaches to
 no finding and leaves no trace in the report, so every comment or review body
 that raises a concern on the changeset — even one the agent refutes or that
 collides with a rule — goes to a finding (with the counter-evidence recorded
-there) for the user to triage. `link remove <ref>` undoes a link. `reopen <F>`
+there) for the user to triage. When `link pending` surfaces an `edited`
+already-linked item, re-run the matching `link` command (`link own <F> <ref>
+[--note '<why>']`, `link duplicate <F> <ref> [--note '<why>']`, or
+`link note <ref> '<reason>'` — after `finding update <F>` when the edit brings
+counter-evidence or new context on `<F>`) to confirm the edited text, or run
+`link remove <ref>` first and record the new `link` command when its
+classification or target `<F>` changed (or `link remove <ref>` alone when an
+edited `v<id>` review body was cleared to empty text). `reopen <F>`
 (`--round <n>`) and `finding add` record against the open round `<n>` — open
 step 7's round first when a sync triggers a re-review round in step 7
 ([SKILL.md](SKILL.md)), or use the current round during step 4 or step 6.
