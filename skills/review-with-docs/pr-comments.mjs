@@ -58,6 +58,10 @@ function annotationRef(app, path, startLine, endLine, message) {
 	].join("\0");
 	return `a${createHash("sha256").update(text, "utf8").digest("hex").slice(0, 8)}`;
 }
+function digestBody(body) {
+	const normalized = body.replaceAll("\r\n", "\n").replace(/^(?:[ \t]*\n)+/u, "").trimEnd();
+	return createHash("sha256").update(normalized, "utf8").digest("hex");
+}
 //#endregion
 //#region src/github.ts
 var AccessDeniedError = class extends Error {};
@@ -743,18 +747,18 @@ const COMMAND_SPECS = [
 		],
 		example: "F7 --dry-run"
 	}),
-	spec("link pending", "lists the comments, review bodies and check annotations not linked yet", "Prints one line per comment (thread roots and replies), nonempty submitted review body or check annotation of the synced\npull request that no link names: ref, author or app, place, state or level, and an excerpt. Nothing is printed when\neverything is processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first \"pr sync\" it exits with 1.", { database: "readonly" }),
-	spec("link own", "links a comment as the own comment of a finding", "Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.", {
+	spec("link pending", "lists unlinked or edited comments, review bodies and check annotations", "Prints one line per comment (thread roots and replies), nonempty submitted review body or check annotation of the synced\npull request that no link names yet, plus any already-linked comment or review body whose text was edited since it was\nlinked (marked \"edited\"): ref, author or app, place, state or level, and an excerpt. Re-run the matching link command to\nconfirm an edited item (or \"link remove <ref>\" first if its classification changed). Nothing is printed when everything\nis processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first \"pr sync\" it exits with 1.", { database: "readonly" }),
+	spec("link own", "links a comment as the own comment of a finding", "Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.\nRe-run it on an edited own comment to update the seen version (with --note to log a reconciliation note on the finding), or\nrun \"link remove <ref>\" first to change its role or finding.", {
 		args: [FINDING, COMMENT_ONLY_REF],
 		options: [noteOption()],
 		example: "F7 r544861"
 	}),
-	spec("link duplicate", "links a comment, review body or check annotation about the same issue", "Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have several).", {
+	spec("link duplicate", "links a comment, review body or check annotation about the same issue", "Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have\nseveral). Re-run it on an edited comment or review body to update the seen version (with --note to log a reconciliation note\non the finding), or run \"link remove <ref>\" first to change its role or finding.", {
 		args: [FINDING, COMMENT_REF],
 		options: [noteOption()],
 		example: "F7 c623843"
 	}),
-	spec("link note", "records that a comment or review body is not a finding, and why", "Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note.", {
+	spec("link note", "records that a comment or review body is not a finding, and why", "Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note.\nRe-run it to update the reason or confirm an edited comment or review body, or run \"link remove <ref>\" first to link it to a finding.", {
 		args: [COMMENT_OR_REVIEW_REF, arg("<text>", "the reason, one line")],
 		example: "c623843 \"a bot, not a finding\""
 	}),
@@ -777,10 +781,10 @@ const COMMAND_SPECS = [
 	spec("report comments", "writes the pull request conversation as markdown", "Writes the downloaded pull request (reviews, threads, comments and the Checks section) as markdown, to the\nscreen unless --out is given. Run \"pr-comments pr sync --db <file.sqlite>\" first.", {
 		options: [
 			opt("ref", "<ref>", "only these comments, review bodies or check annotations (several refs comma-separated); a review comment includes its thread", { repeatable: true }),
-			flag("pending", "only comments, nonempty submitted review bodies and check annotations that no link names yet"),
+			flag("pending", "only unlinked items and already-linked comments or review bodies whose text was edited since linking"),
 			opt("out", "<file.md>", "write the markdown to this file")
 		],
-		notes: ["With `--ref` or `--pending`, matching threads keep their non-matching comments marked `_(context)_`, and empty or pending review bodies are omitted. An unknown `--ref` gives a warning, and a malformed ref is an error.", "On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16."],
+		notes: ["With `--ref` or `--pending`, matching threads keep their non-matching comments marked `_(context)_`, and pending or unlinked empty review bodies are omitted (a linked review body edited to empty text is rendered as `_(no text)_`). An unknown `--ref` gives a warning, and a malformed ref is an error.", "On Windows PowerShell prefer `--out` to `>`, because `>` writes UTF-16."],
 		database: "readonly",
 		example: "--pending --out pr-42.md"
 	})
@@ -977,19 +981,19 @@ function commentHeader(comment, isContext = false) {
 	parts.push(`[link](${comment.url})`);
 	return parts.join(" · ");
 }
-function renderReview$1(review) {
-	const ref = linkableReviewRef(review);
+function renderReview$1(review, ref = linkableReviewRef(review)) {
 	const parts = [`**@${review.author}** ${REVIEW_STATE_LABELS[review.state] ?? review.state.toLowerCase()}`];
 	if (ref) parts.push(`\`${ref}\``);
 	if (review.submittedAt) parts.push(review.submittedAt);
 	if (review.editedAt) parts.push(`edited ${review.editedAt}`);
 	if (review.commitSha) parts.push(`commit \`${shortSha(review.commitSha)}\``);
 	parts.push(`[link](${review.url})`);
-	return listItem(parts.join(" · "), review.body.trim() ? bodyText(review.body) : void 0);
+	const body = review.body.trim() || ref !== void 0 ? bodyText(review.body) : void 0;
+	return listItem(parts.join(" · "), body);
 }
 function renderConversationItem(item) {
 	if (item.kind === "comment") return listItem(commentHeader(item.comment), bodyText(item.comment.body));
-	return renderReview$1(item.review);
+	return renderReview$1(item.review, item.ref);
 }
 function renderThreadComments(comments, isContext) {
 	const children = /* @__PURE__ */ new Map();
@@ -1058,15 +1062,15 @@ function renderCheckRun(run) {
 		items.join(isTight ? "\n" : "\n\n")
 	].join("\n\n");
 }
-function findUnknownRefs(data, refs) {
+function findUnknownRefs(data, refs, linkedRefs) {
 	const known = /* @__PURE__ */ new Set();
 	for (const comment of data.comments) {
 		const ref = commentRefFromUrl(comment.url);
 		if (ref !== void 0) known.add(ref);
 	}
 	for (const review of data.reviews) {
-		const ref = linkableReviewRef(review);
-		if (ref !== void 0) known.add(ref);
+		const ref = linkableReviewRef(review) ?? (review.state !== "PENDING" ? reviewRefFromUrl(review.url) : void 0);
+		if (ref !== void 0 && (review.body.trim() !== "" || linkedRefs?.has(ref))) known.add(ref);
 	}
 	for (const run of data.checkRuns ?? []) for (const annotation of run.annotations) known.add(annotation.ref);
 	return refs.filter((ref) => !known.has(ref.toLowerCase()));
@@ -1077,6 +1081,14 @@ function renderMarkdown(data, options = {}) {
 	const pending = options.pendingRefs;
 	const filtered = wantedRefs !== void 0 || pending !== void 0;
 	const matchesRef = (ref) => (wantedRefs === void 0 || ref !== void 0 && wantedRefs.has(ref)) && (pending === void 0 || ref !== void 0 && pending.has(ref));
+	const effectiveReviewRef = (review) => {
+		const linkable = linkableReviewRef(review);
+		if (linkable !== void 0) return linkable;
+		if (review.state === "PENDING") return void 0;
+		const ref = reviewRefFromUrl(review.url);
+		if (ref === void 0) return void 0;
+		if (pending?.has(ref) || wantedRefs?.has(ref) && options.linkedRefs?.has(ref)) return ref;
+	};
 	const out = [`# ${pr.title}`];
 	const meta = [
 		`- Pull request: [${pr.owner}/${pr.repo}#${pr.number}](${pr.url})`,
@@ -1094,10 +1106,19 @@ function renderMarkdown(data, options = {}) {
 		at: comment.createdAt,
 		kind: "comment",
 		comment
-	})), ...(filtered ? data.reviews.filter((r) => matchesRef(linkableReviewRef(r))) : data.reviews.filter((r) => r.state !== "COMMENTED" || r.body.trim() !== "")).map((review) => ({
+	})), ...filtered ? data.reviews.map((review) => ({
+		review,
+		ref: effectiveReviewRef(review)
+	})).filter(({ ref }) => matchesRef(ref)).map(({ review, ref }) => ({
 		at: review.submittedAt ?? "",
 		kind: "review",
-		review
+		review,
+		ref
+	})) : data.reviews.filter((r) => r.state !== "COMMENTED" || r.body.trim() !== "").map((review) => ({
+		at: review.submittedAt ?? "",
+		kind: "review",
+		review,
+		ref: linkableReviewRef(review)
 	}))].sort((a, b) => a.at.localeCompare(b.at));
 	const threadComments = (thread) => data.comments.filter((c) => c.threadId === thread.id).sort((a, b) => (a.threadPosition ?? 0) - (b.threadPosition ?? 0));
 	const threads = data.threads.map((thread) => ({
@@ -1248,7 +1269,7 @@ var OwnCommentError = class extends Error {
 	}
 };
 const AGENT_DISCLAIMER = "🤖 *Written by an AI agent.*";
-function composeBody(text, byAgent) {
+function composeBody(text, byAgent = false) {
 	return byAgent ? [AGENT_DISCLAIMER, text].join("\n\n") : text;
 }
 const ADD_THREAD = `
@@ -1943,6 +1964,7 @@ function requiredText(what, text) {
 	return cleaned;
 }
 const optionalText = (what, text) => text === void 0 ? void 0 : bulletText(what, text);
+const optionalNote = (text) => optionalText("note", text);
 function descriptionText(text) {
 	const lines = splitLines("description", noControls("description", text));
 	const from = lines.findIndex((line) => !BLANK.test(line));
@@ -2140,8 +2162,10 @@ const REMOVE = `pr-comments link remove ${DB_HINT_PLACEHOLDER}`;
 function checkedRef(ref) {
 	if (!isLinkRef(ref)) throw new Error(`"${ref}" is not a PR comment ref; expected r544830, c623843, v91204 or a3f9c2d1e`);
 }
-function knownRef(state, ref) {
-	if (!state.known.has(ref)) throw new Error(`${ref} is not in the database; run "pr-comments pr sync ${DB_HINT_PLACEHOLDER}" first, or check the id`);
+function knownRef(state, ref, allowLinkedPresent = false) {
+	if (state.known.has(ref)) return;
+	if (allowLinkedPresent && state.currentDigests?.has(ref)) return;
+	throw new Error(`${ref} is not in the database; run "pr-comments pr sync ${DB_HINT_PLACEHOLDER}" first, or check the id`);
 }
 const ONLY_DUPLICATE = ": it can only be linked as a duplicate of a finding (the tool does not publish it, and every check item has to be tied to a finding)";
 const NOT_A_NOTE = `: every check item has to be tied to a finding, so it cannot be recorded as a note; link it to a finding (add one with "pr-comments finding add ${DB_HINT_PLACEHOLDER}" when none covers it)`;
@@ -2161,12 +2185,33 @@ function describeLink({ role, finding, note }) {
 const alreadyLinked = (link) => /* @__PURE__ */ new Error(`${link.ref} is already linked as ${describeLink(link)}; remove that link first with "${REMOVE} ${link.ref}"`);
 const alreadyHasOwn = (finding, own, lead = "") => /* @__PURE__ */ new Error(`${lead}${finding} already has its own comment ${own.ref}; remove that link first with "${REMOVE} ${own.ref}"`);
 const commentPullRequest = (state, ref) => !isAnnotationRef(ref) && state.pullRequest !== void 0 ? { pullRequest: state.pullRequest } : {};
+function withSeenDigest(link, seenDigest) {
+	const { seenDigest: _prev, ...rest } = link;
+	return seenDigest === void 0 ? rest : {
+		...rest,
+		seenDigest
+	};
+}
 function linkToFinding(state, findingId, ref, role, now, note) {
 	const found = findFinding(state.data, findingId);
 	checkedRef(ref);
-	knownRef(state, ref);
 	const linked = linkOf(state.links, ref);
-	if (linked !== void 0) throw alreadyLinked(linked);
+	knownRef(state, ref, linked !== void 0);
+	const currentDigest = isAnnotationRef(ref) ? void 0 : state.currentDigests?.get(ref);
+	if (linked !== void 0) {
+		if (linked.role !== role || linked.finding !== found.id || currentDigest === void 0 || linked.seenDigest === currentDigest) throw alreadyLinked(linked);
+		const cleanedNote = optionalNote(note);
+		const data = cleanedNote === void 0 ? state.data : amend(state.data, found, now, {}, {
+			kind: "note",
+			note: cleanedNote
+		});
+		const links = state.links.map((item) => item === linked ? withSeenDigest(linked, currentDigest) : item);
+		return {
+			...state,
+			data,
+			links
+		};
+	}
 	const own = role === "own" ? ownOf(state.links, found.id) : void 0;
 	if (own !== void 0) throw alreadyHasOwn(found.id, own);
 	const data = amend(state.data, found, now, { note }, {
@@ -2178,11 +2223,11 @@ function linkToFinding(state, findingId, ref, role, now, note) {
 	return {
 		...state,
 		data,
-		links: [...state.links, {
+		links: [...state.links, withSeenDigest({
 			ref,
 			role,
 			finding: found.id
-		}]
+		}, currentDigest)]
 	};
 }
 function linkOwn(state, findingId, ref, now, note) {
@@ -2196,17 +2241,30 @@ function linkDuplicate(state, findingId, ref, now, note) {
 function linkNote(state, ref, text) {
 	refuseAnnotation(ref, NOT_A_NOTE);
 	checkedRef(ref);
-	knownRef(state, ref);
-	const reason = oneLineText("note", text);
 	const linked = linkOf(state.links, ref);
-	if (linked !== void 0) throw alreadyLinked(linked);
-	return {
-		...state,
-		links: [...state.links, {
+	knownRef(state, ref, linked !== void 0);
+	const reason = oneLineText("note", text);
+	const currentDigest = state.currentDigests?.get(ref);
+	if (linked !== void 0) {
+		const seenDigest = currentDigest ?? linked.seenDigest;
+		if (linked.role !== "note" || linked.note === reason && linked.seenDigest === seenDigest) throw alreadyLinked(linked);
+		const updated = withSeenDigest({
 			ref,
 			role: "note",
 			note: reason
-		}]
+		}, seenDigest);
+		return {
+			...state,
+			links: state.links.map((item) => item === linked ? updated : item)
+		};
+	}
+	return {
+		...state,
+		links: [...state.links, withSeenDigest({
+			ref,
+			role: "note",
+			note: reason
+		}, currentDigest)]
 	};
 }
 function unlink$1(state, ref, now, note) {
@@ -2238,7 +2296,7 @@ function unlink$1(state, ref, now, note) {
 		links
 	};
 }
-function recordPosted(state, findingId, ref, action, where, now) {
+function recordPosted(state, findingId, ref, action, where, now, postedBody) {
 	refuseAnnotation(ref, ONLY_DUPLICATE);
 	refuseReviewBodyAsOwn(ref);
 	const found = findFinding(state.data, findingId);
@@ -2248,7 +2306,14 @@ function recordPosted(state, findingId, ref, action, where, now) {
 	if (linked !== void 0 && !(linked.role === "own" && linked.finding === found.id)) throw alreadyLinked(linked);
 	const own = ownOf(state.links, found.id);
 	if (own !== void 0 && own.ref !== ref) throw alreadyHasOwn(found.id, own, "a posted comment cannot move: ");
-	if (own !== void 0 && action === "unchanged") return state;
+	const seenDigest = postedBody !== void 0 ? digestBody(postedBody) : state.currentDigests?.get(ref);
+	if (own !== void 0 && action === "unchanged") {
+		if (seenDigest === void 0 || own.seenDigest === seenDigest) return state;
+		return {
+			...state,
+			links: state.links.map((item) => item === own ? withSeenDigest(own, seenDigest) : item)
+		};
+	}
 	const pending = action === "created" && where === "pending" ? { pending: true } : {};
 	const pullRequest = state.pullRequest === void 0 ? {} : { pullRequest: state.pullRequest };
 	const data = amend(state.data, found, now, {}, {
@@ -2258,17 +2323,18 @@ function recordPosted(state, findingId, ref, action, where, now) {
 		...pending,
 		...pullRequest
 	});
+	const links = own === void 0 ? [...state.links, withSeenDigest({
+		ref,
+		role: "own",
+		finding: found.id
+	}, seenDigest)] : seenDigest !== void 0 && own.seenDigest !== seenDigest ? state.links.map((item) => item === own ? withSeenDigest(own, seenDigest) : item) : state.links;
 	return {
 		...state,
 		data,
-		links: own === void 0 ? [...state.links, {
-			ref,
-			role: "own",
-			finding: found.id
-		}] : state.links
+		links
 	};
 }
-function recordReplied(state, ref, replyRef, where, now) {
+function recordReplied(state, ref, replyRef, where, now, replyBody) {
 	refuseAnnotation(ref, NOTHING_TO_REPLY);
 	if (isReviewBodyRef(ref)) throw new Error(`${ref} is a pull request review, not a comment; only a comment (r… or c…) can be answered`);
 	checkedRef(ref);
@@ -2283,11 +2349,12 @@ function recordReplied(state, ref, replyRef, where, now) {
 	const found = findFinding(state.data, link.finding);
 	const alreadyRecorded = found.updates.some((entry) => entry.kind === "replied" && entry.ref === ref && entry.replyRef === replyRef && entry.pullRequest === state.pullRequest);
 	if (alreadyRecorded && replyLinked) return state;
-	const links = replyLinked ? state.links : [...state.links, {
+	const seenDigest = replyBody !== void 0 ? digestBody(replyBody) : state.currentDigests?.get(replyRef);
+	const links = replyLinked ? state.links : [...state.links, withSeenDigest({
 		ref: replyRef,
 		role: "note",
 		note: `duplicate reply to ${ref}`
-	}];
+	}, seenDigest)];
 	if (alreadyRecorded) return {
 		...state,
 		links
@@ -2675,6 +2742,17 @@ function recordKnownCommentRef(db, ref) {
 	if (existing?.kind === kind && existing.gone === 0) return;
 	db.prepare("INSERT INTO linkable (ref, kind, gone) VALUES (?, ?, 0) ON CONFLICT (ref) DO UPDATE SET kind = excluded.kind, gone = 0").run(ref, kind);
 }
+function loadCurrentDigests(db) {
+	const rows = db.prepare("SELECT ref, body FROM pr_comments WHERE ref IS NOT NULL UNION ALL SELECT ref, body FROM pr_reviews WHERE ref IS NOT NULL AND state != 'PENDING'").all();
+	const digests = /* @__PURE__ */ new Map();
+	for (const { ref, body } of rows) digests.set(ref, digestBody(body));
+	return digests;
+}
+function updateStoredCommentBody(db, ref, body) {
+	const existing = db.prepare("SELECT body FROM pr_comments WHERE ref = ?").get(ref);
+	if (existing === void 0 || digestBody(existing.body) === digestBody(body)) return;
+	db.prepare("UPDATE pr_comments SET body = ? WHERE ref = ?").run(body, ref);
+}
 const SCHEMA = `
 CREATE TABLE review (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -2750,9 +2828,11 @@ CREATE TABLE comment_links (
   role TEXT NOT NULL CHECK (role IN ('own', 'duplicate', 'note')),
   finding TEXT REFERENCES findings (id) DEFERRABLE INITIALLY DEFERRED,
   note TEXT,
+  seen_digest TEXT,
   CHECK ((role = 'note') = (finding IS NULL)),
   CHECK ((role = 'note') = (note IS NOT NULL)),
   CHECK (ref NOT GLOB 'a*' OR role = 'duplicate'),
+  CHECK (ref NOT GLOB 'a*' OR seen_digest IS NULL),
   CHECK (ref NOT GLOB 'v*' OR role != 'own')
 ) STRICT;
 
@@ -2781,13 +2861,13 @@ function hasReviewTables(db) {
 }
 function configure(db, path, mode) {
 	const version = userVersion(db, path);
-	if (version > 7) throw new Error(`${path} was written by a newer pr-comments (schema ${version}); update the tool`);
+	if (version > 8) throw new Error(`${path} was written by a newer pr-comments (schema ${version}); update the tool`);
 	if (mode !== "create") {
 		if (version === 0 || !hasReviewTables(db)) throw new Error(`${path} is not a review database`);
-		if (version < 7) throw new Error(`${path} was written by an older pr-comments (schema ${version}); start again with "pr-comments init"`);
+		if (version < 8) throw new Error(`${path} was written by an older pr-comments (schema ${version}); start again with "pr-comments init"`);
 	}
 	if (mode !== "readonly") {
-		if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}${PULL_REQUEST_SCHEMA}PRAGMA user_version = 7`));
+		if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}${PULL_REQUEST_SCHEMA}PRAGMA user_version = 8`));
 		db.exec("PRAGMA journal_mode = DELETE");
 	}
 	db.exec("PRAGMA foreign_keys = ON");
@@ -2978,13 +3058,14 @@ function loadReview(db) {
 }
 function loadLinks(db) {
 	return inTransaction(db, () => {
-		return db.prepare("SELECT ref, role, finding, note FROM comment_links ORDER BY position").all().map((row) => {
+		return db.prepare("SELECT ref, role, finding, note, seen_digest FROM comment_links ORDER BY position").all().map((row) => {
 			const link = {
 				ref: row.ref,
 				role: row.role
 			};
 			if (row.finding !== null) link.finding = row.finding;
 			if (row.note !== null) link.note = row.note;
+			if (row.seen_digest !== null) link.seenDigest = row.seen_digest;
 			return link;
 		});
 	});
@@ -2992,8 +3073,8 @@ function loadLinks(db) {
 function saveLinks(db, links) {
 	inTransaction(db, () => {
 		db.exec("DELETE FROM comment_links");
-		const insert = db.prepare("INSERT INTO comment_links (position, ref, role, finding, note) VALUES (?, ?, ?, ?, ?)");
-		links.forEach((link, position) => insert.run(position, link.ref, link.role, link.finding ?? null, link.note ?? null));
+		const insert = db.prepare("INSERT INTO comment_links (position, ref, role, finding, note, seen_digest) VALUES (?, ?, ?, ?, ?, ?)");
+		links.forEach((link, position) => insert.run(position, link.ref, link.role, link.finding ?? null, link.note ?? null, link.seenDigest ?? null));
 	});
 }
 function getMeta(db, key) {
@@ -3196,7 +3277,8 @@ function loadState(db) {
 		const state = {
 			data: loadReview(db),
 			links: loadLinks(db),
-			known: loadKnownRefs(db)
+			known: loadKnownRefs(db),
+			currentDigests: loadCurrentDigests(db)
 		};
 		const pullRequest = getMeta(db, PULL_REQUEST);
 		if (pullRequest !== void 0) state.pullRequest = pullRequest;
@@ -3281,6 +3363,7 @@ async function changeReviewState(dbPath, change, options = {}) {
 				const refs = typeof options.knownRef === "string" ? [options.knownRef] : options.knownRef;
 				for (const ref of refs) recordKnownCommentRef(db, ref);
 			}
+			if (options.updatedComment !== void 0) updateStoredCommentBody(db, options.updatedComment.ref, options.updatedComment.body);
 			const before = loadState(db);
 			let result;
 			try {
@@ -3346,7 +3429,8 @@ async function recordAfterWrite(dbPath, result, change, options) {
 			result: void 0
 		}), {
 			pullRequest: options.pullRequest,
-			knownRef: options.knownRef
+			knownRef: options.knownRef,
+			...options.updatedComment === void 0 ? {} : { updatedComment: options.updatedComment }
 		});
 		return reportError === void 0 ? { result } : {
 			result,
@@ -3441,11 +3525,14 @@ function annotationItem({ annotation, run }) {
 }
 function pendingItems({ links, data }) {
 	const threads = indexThreads(data);
-	const linkedRefs = new Set(links.map(({ ref }) => ref));
+	const linksByRef = new Map(links.map((link) => [link.ref, link]));
 	const items = [];
 	for (const comment of data.comments) {
 		const ref = commentRefFromUrl(comment.url);
-		if (ref === void 0 || linkedRefs.has(ref)) continue;
+		if (ref === void 0) continue;
+		const link = linksByRef.get(ref);
+		const edited = link !== void 0 && link.seenDigest !== void 0 && link.seenDigest !== digestBody(comment.body);
+		if (link !== void 0 && !edited) continue;
 		const { author, kind, createdAt } = comment;
 		const isRoot = threads.isRoot(comment);
 		const replies = isRoot ? threads.repliesTo(comment) : 0;
@@ -3453,6 +3540,7 @@ function pendingItems({ links, data }) {
 			ref,
 			author,
 			kind,
+			...edited ? { edited: true } : {},
 			...isRoot ? {} : { reply: true },
 			...threads.placeOf(comment),
 			replies,
@@ -3461,13 +3549,18 @@ function pendingItems({ links, data }) {
 		});
 	}
 	for (const review of data.reviews) {
-		const ref = linkableReviewRef(review);
-		if (ref === void 0 || linkedRefs.has(ref)) continue;
+		if (review.state === "PENDING") continue;
+		const ref = reviewRefFromUrl(review.url);
+		if (ref === void 0) continue;
+		const link = linksByRef.get(ref);
+		const edited = link !== void 0 && link.seenDigest !== void 0 && link.seenDigest !== digestBody(review.body);
+		if (link === void 0 ? linkableReviewRef(review) === void 0 : !edited) continue;
 		const reviewState = PULL_REVIEW_STATES[review.state] ?? review.state.toLowerCase().replaceAll("_", " ");
 		items.push({
 			ref,
 			author: review.author,
 			kind: "pull_review",
+			...edited ? { edited: true } : {},
 			reviewState,
 			replies: 0,
 			...review.submittedAt === null ? {} : { createdAt: review.submittedAt },
@@ -3480,7 +3573,7 @@ function pendingItems({ links, data }) {
 		annotation,
 		run
 	});
-	const pendingAnnotations = [...annotations.values()].filter(({ annotation }) => !linkedRefs.has(annotation.ref)).sort(({ annotation: a }, { annotation: b }) => compare(a.path, b.path) || a.startLine - b.startLine || compare(a.ref, b.ref));
+	const pendingAnnotations = [...annotations.values()].filter(({ annotation }) => !linksByRef.has(annotation.ref)).sort(({ annotation: a }, { annotation: b }) => compare(a.path, b.path) || a.startLine - b.startLine || compare(a.ref, b.ref));
 	return [...items, ...pendingAnnotations.map(annotationItem)];
 }
 function placeText({ kind, path, lines }) {
@@ -3490,16 +3583,19 @@ function placeText({ kind, path, lines }) {
 	return lines === void 0 ? path : `${path}:${lines}`;
 }
 const plural$1 = (count, one, many) => `${count} ${count === 1 ? one : many}`;
-function stateText({ kind, reply, reviewState, resolved, outdated, replies }) {
-	if (kind === "pull_review") return reviewState ?? "";
-	if (kind === "issue") return "";
-	if (resolved === void 0) return reply ? "reply" : "";
+function stateText({ kind, edited, reply, reviewState, resolved, outdated, replies }) {
+	const prefix = edited ? ["edited"] : [];
+	if (kind === "pull_review") return [...prefix, ...reviewState ? [reviewState] : []].join(", ");
+	if (kind === "issue") return prefix.join(", ");
+	if (resolved === void 0) return [...prefix, ...reply ? ["reply"] : []].join(", ");
 	if (reply) return [
+		...prefix,
 		"reply",
 		`thread ${resolved ? "resolved" : "open"}`,
 		...outdated ? ["outdated"] : []
 	].join(", ");
 	return [
+		...prefix,
 		`thread ${resolved ? "resolved" : "open"}`,
 		...outdated ? ["outdated"] : [],
 		plural$1(replies, "reply", "replies")
@@ -3866,9 +3962,13 @@ async function postFinding(dbPath, findingId, options, deps) {
 		result: published
 	};
 	const action = published.action;
-	const recorded = await recordAfterWrite(dbPath, published, (state) => recordPosted(state, id, posted, action, published.state, deps.now()), {
+	const recorded = await recordAfterWrite(dbPath, published, (state) => recordPosted(state, id, posted, action, published.state, deps.now(), body), {
 		pullRequest: ref,
 		knownRef: posted,
+		updatedComment: {
+			ref: posted,
+			body
+		},
 		was: action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`,
 		advice: `record it with "pr-comments link own --db ${quotedDb} ${id} ${posted}"`
 	});
@@ -3915,9 +4015,13 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 	};
 	const replyRef = result.comment;
 	if (options.dryRun || result.action === "error" || replyRef === void 0) return replied;
-	const recorded = await recordAfterWrite(dbPath, result, (state) => recordReplied(state, ref, replyRef, result.state, deps.now()), {
+	const recorded = await recordAfterWrite(dbPath, result, (state) => recordReplied(state, ref, replyRef, result.state, deps.now(), body), {
 		pullRequest: pullRequestRef,
 		knownRef: [ref, replyRef],
+		updatedComment: {
+			ref: replyRef,
+			body
+		},
 		was: result.action === "created" ? `the reply was posted as ${replyRef}` : `the reply already exists as ${replyRef}`,
 		advice: "run the command again to record it"
 	});
@@ -3930,7 +4034,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+2a4cf58`;
+	return `pr-comments ${VERSION}+0e96815`;
 }
 //#endregion
 //#region src/cli.ts
@@ -4349,14 +4453,17 @@ async function renderComments({ env, values }, db) {
 	});
 	if (values.out) refuseDatabase(values.out, db);
 	const data = await snapshotOf(db);
+	const links = values.pending || refs !== void 0 ? (await loadReviewFile(db)).links : void 0;
 	const pendingRefs = values.pending ? new Set(pendingItems({
-		links: (await loadReviewFile(db)).links,
+		links,
 		data
 	}).map((item) => item.ref)) : void 0;
-	for (const ref of findUnknownRefs(data, refs ?? [])) env.warn(`Warning: no comment, review or check annotation ${ref} in this pull request\n`);
+	const linkedRefs = links ? new Set(links.map((link) => link.ref)) : void 0;
+	for (const ref of findUnknownRefs(data, refs ?? [], linkedRefs)) env.warn(`Warning: no comment, review or check annotation ${ref} in this pull request\n`);
 	const markdown = renderMarkdown(data, {
 		refs,
-		pendingRefs
+		pendingRefs,
+		linkedRefs
 	});
 	if (values.out) {
 		await mkdir(dirname(values.out), { recursive: true });
