@@ -2184,6 +2184,7 @@ function describeLink({ role, finding, note }) {
 }
 const alreadyLinked = (link) => /* @__PURE__ */ new Error(`${link.ref} is already linked as ${describeLink(link)}; remove that link first with "${REMOVE} ${link.ref}"`);
 const alreadyHasOwn = (finding, own, lead = "") => /* @__PURE__ */ new Error(`${lead}${finding} already has its own comment ${own.ref}; remove that link first with "${REMOVE} ${own.ref}"`);
+const unsyncedRef = (ref) => /* @__PURE__ */ new Error(`${ref} is not in the synced pull request yet; run "pr-comments pr sync ${DB_HINT_PLACEHOLDER}" first`);
 const commentPullRequest = (state, ref) => !isAnnotationRef(ref) && state.pullRequest !== void 0 ? { pullRequest: state.pullRequest } : {};
 function withSeenDigest(link, seenDigest) {
 	const { seenDigest: _prev, ...rest } = link;
@@ -2192,26 +2193,49 @@ function withSeenDigest(link, seenDigest) {
 		seenDigest
 	};
 }
+const baselineDigestOf = (state, ref) => isAnnotationRef(ref) ? void 0 : state.currentDigests?.get(ref) ?? state.postedDigests?.get(ref);
+function withBaselineDigest(state, ref, digest, overwrite = true) {
+	if (digest === void 0 || isAnnotationRef(ref)) return state;
+	if (state.currentDigests !== void 0) {
+		if (!overwrite && (state.currentDigests.has(ref) || state.postedDigests?.has(ref))) return state;
+		if (state.currentDigests.get(ref) === digest) return state;
+		const currentDigests = new Map(state.currentDigests);
+		currentDigests.set(ref, digest);
+		return {
+			...state,
+			currentDigests
+		};
+	}
+	if (!overwrite && state.postedDigests?.has(ref)) return state;
+	if (state.postedDigests?.get(ref) === digest) return state;
+	const postedDigests = new Map(state.postedDigests);
+	postedDigests.set(ref, digest);
+	return {
+		...state,
+		postedDigests
+	};
+}
 function linkToFinding(state, findingId, ref, role, now, note) {
 	const found = findFinding(state.data, findingId);
 	checkedRef(ref);
 	const linked = linkOf(state.links, ref);
 	knownRef(state, ref, linked !== void 0);
-	const currentDigest = isAnnotationRef(ref) ? void 0 : state.currentDigests?.get(ref);
+	const baselineDigest = baselineDigestOf(state, ref);
 	if (linked !== void 0) {
-		if (linked.role !== role || linked.finding !== found.id || currentDigest === void 0 || linked.seenDigest === currentDigest) throw alreadyLinked(linked);
+		if (linked.role !== role || linked.finding !== found.id || baselineDigest === void 0 || linked.seenDigest === baselineDigest) throw alreadyLinked(linked);
 		const cleanedNote = optionalNote(note);
 		const data = cleanedNote === void 0 ? state.data : amend(state.data, found, now, {}, {
 			kind: "note",
 			note: cleanedNote
 		});
-		const links = state.links.map((item) => item === linked ? withSeenDigest(linked, currentDigest) : item);
+		const links = state.links.map((item) => item === linked ? withSeenDigest(linked, baselineDigest) : item);
 		return {
 			...state,
 			data,
 			links
 		};
 	}
+	if (!isAnnotationRef(ref) && state.currentDigests !== void 0 && baselineDigest === void 0) throw unsyncedRef(ref);
 	const own = role === "own" ? ownOf(state.links, found.id) : void 0;
 	if (own !== void 0) throw alreadyHasOwn(found.id, own);
 	const data = amend(state.data, found, now, { note }, {
@@ -2227,7 +2251,7 @@ function linkToFinding(state, findingId, ref, role, now, note) {
 			ref,
 			role,
 			finding: found.id
-		}, currentDigest)]
+		}, baselineDigest)]
 	};
 }
 function linkOwn(state, findingId, ref, now, note) {
@@ -2243,11 +2267,13 @@ function linkNote(state, ref, text) {
 	checkedRef(ref);
 	const linked = linkOf(state.links, ref);
 	knownRef(state, ref, linked !== void 0);
+	const baselineDigest = baselineDigestOf(state, ref);
+	if (linked === void 0 && state.currentDigests !== void 0 && baselineDigest === void 0) throw unsyncedRef(ref);
 	const reason = oneLineText("note", text);
-	const currentDigest = state.currentDigests?.get(ref);
 	if (linked !== void 0) {
-		const seenDigest = currentDigest ?? linked.seenDigest;
+		const seenDigest = baselineDigest ?? linked.seenDigest;
 		if (linked.role !== "note" || linked.note === reason && linked.seenDigest === seenDigest) throw alreadyLinked(linked);
+		if (state.currentDigests !== void 0 && seenDigest === void 0) throw unsyncedRef(ref);
 		const updated = withSeenDigest({
 			ref,
 			role: "note",
@@ -2264,7 +2290,7 @@ function linkNote(state, ref, text) {
 			ref,
 			role: "note",
 			note: reason
-		}, currentDigest)]
+		}, baselineDigest)]
 	};
 }
 function unlink$1(state, ref, now, note) {
@@ -2275,10 +2301,11 @@ function unlink$1(state, ref, now, note) {
 		throw new Error(`${ref} is not linked in this review; ${known === "" ? "the review has no links" : `it has ${known}`}`);
 	}
 	const links = state.links.filter((item) => item !== link);
+	const next = state.known.has(ref) ? withBaselineDigest(state, ref, link.seenDigest, false) : state;
 	if (link.finding === void 0) {
 		if (note !== void 0) throw new Error(`${ref} is recorded as a note, which has no finding to log under; leave out --note`);
 		return {
-			...state,
+			...next,
 			links
 		};
 	}
@@ -2291,7 +2318,7 @@ function unlink$1(state, ref, now, note) {
 		...commentPullRequest(state, ref)
 	});
 	return {
-		...state,
+		...next,
 		data,
 		links
 	};
@@ -2306,12 +2333,16 @@ function recordPosted(state, findingId, ref, action, where, now, postedBody) {
 	if (linked !== void 0 && !(linked.role === "own" && linked.finding === found.id)) throw alreadyLinked(linked);
 	const own = ownOf(state.links, found.id);
 	if (own !== void 0 && own.ref !== ref) throw alreadyHasOwn(found.id, own, "a posted comment cannot move: ");
-	const seenDigest = postedBody !== void 0 ? digestBody(postedBody) : state.currentDigests?.get(ref);
+	const baselineDigest = baselineDigestOf(state, ref);
+	const seenDigest = postedBody !== void 0 ? digestBody(postedBody) : baselineDigest;
+	if (own === void 0 && state.currentDigests !== void 0 && seenDigest === void 0) throw unsyncedRef(ref);
+	const next = postedBody !== void 0 ? withBaselineDigest(state, ref, seenDigest, true) : state;
 	if (own !== void 0 && action === "unchanged") {
-		if (seenDigest === void 0 || own.seenDigest === seenDigest) return state;
+		if ((seenDigest === void 0 || own.seenDigest === seenDigest) && next === state) return state;
+		const links = seenDigest !== void 0 && own.seenDigest !== seenDigest ? state.links.map((item) => item === own ? withSeenDigest(own, seenDigest) : item) : state.links;
 		return {
-			...state,
-			links: state.links.map((item) => item === own ? withSeenDigest(own, seenDigest) : item)
+			...next,
+			links
 		};
 	}
 	const pending = action === "created" && where === "pending" ? { pending: true } : {};
@@ -2329,7 +2360,7 @@ function recordPosted(state, findingId, ref, action, where, now, postedBody) {
 		finding: found.id
 	}, seenDigest)] : seenDigest !== void 0 && own.seenDigest !== seenDigest ? state.links.map((item) => item === own ? withSeenDigest(own, seenDigest) : item) : state.links;
 	return {
-		...state,
+		...next,
 		data,
 		links
 	};
@@ -2348,15 +2379,18 @@ function recordReplied(state, ref, replyRef, where, now, replyBody) {
 	if (link.role !== "duplicate") throw new Error(link.role === "note" ? `${ref} is recorded as a note, not as a duplicate of a finding` : `${ref} is linked as ${describeLink(link)}, not as a duplicate; only a duplicate is answered`);
 	const found = findFinding(state.data, link.finding);
 	const alreadyRecorded = found.updates.some((entry) => entry.kind === "replied" && entry.ref === ref && entry.replyRef === replyRef && entry.pullRequest === state.pullRequest);
-	if (alreadyRecorded && replyLinked) return state;
-	const seenDigest = replyBody !== void 0 ? digestBody(replyBody) : state.currentDigests?.get(replyRef);
+	const baselineDigest = baselineDigestOf(state, replyRef);
+	const seenDigest = replyBody !== void 0 ? digestBody(replyBody) : baselineDigest;
+	if (!replyLinked && state.currentDigests !== void 0 && seenDigest === void 0) throw unsyncedRef(replyRef);
+	const next = replyBody !== void 0 ? withBaselineDigest(state, replyRef, seenDigest, !replyLinked) : state;
+	if (alreadyRecorded && replyLinked && next === state) return state;
 	const links = replyLinked ? state.links : [...state.links, withSeenDigest({
 		ref: replyRef,
 		role: "note",
 		note: `duplicate reply to ${ref}`
 	}, seenDigest)];
 	if (alreadyRecorded) return {
-		...state,
+		...next,
 		links
 	};
 	const pending = where === "pending" ? { pending: true } : {};
@@ -2369,7 +2403,7 @@ function recordReplied(state, ref, replyRef, where, now, replyBody) {
 		...pullRequest
 	});
 	return {
-		...state,
+		...next,
 		data,
 		links
 	};
@@ -2378,6 +2412,13 @@ function connectPullRequest(state, url) {
 	const canonical = formatPullRequestUrl(parsePullRequestUrl(url));
 	if (state.pullRequest?.toLowerCase() === canonical.toLowerCase()) return state;
 	if (state.pullRequest !== void 0 && state.links.length > 0) throw new Error(`the review is connected to ${state.pullRequest} and its ${state.links.length} PR comment link(s) point there; remove them first with "${REMOVE} <ref>" before connecting ${canonical}`);
+	if (state.pullRequest !== void 0 && state.postedDigests !== void 0) {
+		const { postedDigests: _cleared, ...rest } = state;
+		return {
+			...rest,
+			pullRequest: canonical
+		};
+	}
 	return {
 		...state,
 		pullRequest: canonical
@@ -2517,6 +2558,9 @@ const COMMENT_KINDS = {
 	issue: "conversation_comment",
 	review: "review_comment"
 };
+const POSTED_DIGEST_PREFIX = "posted_digest:";
+const POSTED_DIGEST_GLOB = `${POSTED_DIGEST_PREFIX}*`;
+const POSTED_DIGEST_REF_OFFSET = 15;
 function reconcileLinkable(db, present) {
 	db.exec("UPDATE linkable SET gone = 1");
 	const upsert = db.prepare("INSERT INTO linkable (ref, kind, gone) VALUES (?, ?, 0) ON CONFLICT (ref) DO UPDATE SET kind = excluded.kind, gone = 0");
@@ -2537,6 +2581,7 @@ function clearPullRequest(db) {
 	inTransaction(db, () => {
 		clearRows(db);
 		reconcileLinkable(db, /* @__PURE__ */ new Map());
+		db.prepare("DELETE FROM meta WHERE key GLOB ?").run(POSTED_DIGEST_GLOB);
 	});
 }
 function savePullRequest(db, data) {
@@ -2644,6 +2689,13 @@ function savePullRequest(db, data) {
 			});
 		}
 		reconcileLinkable(db, present);
+		db.prepare(`DELETE FROM meta
+       WHERE key GLOB ?
+         AND (
+           substr(key, ?) IN (SELECT ref FROM pr_comments WHERE ref IS NOT NULL)
+           OR substr(key, ?) IN (SELECT ref FROM pr_reviews WHERE ref IS NOT NULL AND state != 'PENDING')
+           OR substr(key, ?) NOT IN (SELECT ref FROM linkable)
+         )`).run(POSTED_DIGEST_GLOB, POSTED_DIGEST_REF_OFFSET, POSTED_DIGEST_REF_OFFSET, POSTED_DIGEST_REF_OFFSET);
 	});
 }
 function loadPullRequest(db) {
@@ -2743,15 +2795,27 @@ function recordKnownCommentRef(db, ref) {
 	db.prepare("INSERT INTO linkable (ref, kind, gone) VALUES (?, ?, 0) ON CONFLICT (ref) DO UPDATE SET kind = excluded.kind, gone = 0").run(ref, kind);
 }
 function loadCurrentDigests(db) {
-	const rows = db.prepare("SELECT ref, body FROM pr_comments WHERE ref IS NOT NULL UNION ALL SELECT ref, body FROM pr_reviews WHERE ref IS NOT NULL AND state != 'PENDING'").all();
 	const digests = /* @__PURE__ */ new Map();
+	const posted = db.prepare(`SELECT substr(m.key, ?) AS ref, m.value AS digest
+       FROM meta m
+       JOIN linkable l ON l.ref = substr(m.key, ?)
+       WHERE m.key GLOB ? AND l.gone = 0`).all(POSTED_DIGEST_REF_OFFSET, POSTED_DIGEST_REF_OFFSET, POSTED_DIGEST_GLOB);
+	for (const { ref, digest } of posted) digests.set(ref, digest);
+	const rows = db.prepare("SELECT ref, body FROM pr_comments WHERE ref IS NOT NULL UNION ALL SELECT ref, body FROM pr_reviews WHERE ref IS NOT NULL AND state != 'PENDING'").all();
 	for (const { ref, body } of rows) digests.set(ref, digestBody(body));
 	return digests;
 }
 function updateStoredCommentBody(db, ref, body) {
+	const digest = digestBody(body);
+	const metaKey = `${POSTED_DIGEST_PREFIX}${ref}`;
 	const existing = db.prepare("SELECT body FROM pr_comments WHERE ref = ?").get(ref);
-	if (existing === void 0 || digestBody(existing.body) === digestBody(body)) return;
-	db.prepare("UPDATE pr_comments SET body = ? WHERE ref = ?").run(body, ref);
+	if (existing !== void 0) {
+		if (digestBody(existing.body) !== digest) db.prepare("UPDATE pr_comments SET body = ? WHERE ref = ?").run(body, ref);
+		if (getMeta(db, metaKey) !== void 0) db.prepare("DELETE FROM meta WHERE key = ?").run(metaKey);
+		return;
+	}
+	if (db.prepare("SELECT gone FROM linkable WHERE ref = ?").get(ref)?.gone !== 0) return;
+	setMeta(db, metaKey, digest);
 }
 const SCHEMA = `
 CREATE TABLE review (
@@ -3072,6 +3136,18 @@ function loadLinks(db) {
 }
 function saveLinks(db, links) {
 	inTransaction(db, () => {
+		const kept = new Set(links.map((link) => link.ref));
+		const unsynced = db.prepare(`SELECT cl.ref, cl.seen_digest
+         FROM comment_links cl
+         JOIN linkable l ON l.ref = cl.ref
+         WHERE cl.seen_digest IS NOT NULL
+           AND l.gone = 0
+           AND NOT EXISTS (SELECT 1 FROM pr_comments pc WHERE pc.ref = cl.ref)
+           AND NOT EXISTS (SELECT 1 FROM pr_reviews pr WHERE pr.ref = cl.ref AND pr.state != 'PENDING')`).all();
+		if (unsynced.length > 0) {
+			const preserve = db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)");
+			for (const { ref, seen_digest } of unsynced) if (!kept.has(ref)) preserve.run(`${POSTED_DIGEST_PREFIX}${ref}`, seen_digest);
+		}
 		db.exec("DELETE FROM comment_links");
 		const insert = db.prepare("INSERT INTO comment_links (position, ref, role, finding, note, seen_digest) VALUES (?, ?, ?, ?, ?, ?)");
 		links.forEach((link, position) => insert.run(position, link.ref, link.role, link.finding ?? null, link.note ?? null, link.seenDigest ?? null));
@@ -3962,6 +4038,7 @@ async function postFinding(dbPath, findingId, options, deps) {
 		result: published
 	};
 	const action = published.action;
+	const linkOwnCommand = `"pr-comments link own --db ${quotedDb} ${id} ${posted}"`;
 	const recorded = await recordAfterWrite(dbPath, published, (state) => recordPosted(state, id, posted, action, published.state, deps.now(), body), {
 		pullRequest: ref,
 		knownRef: posted,
@@ -3970,7 +4047,7 @@ async function postFinding(dbPath, findingId, options, deps) {
 			body
 		},
 		was: action === "created" ? `the comment was posted as ${posted}` : `the comment is ${posted} on GitHub`,
-		advice: `record it with "pr-comments link own --db ${quotedDb} ${id} ${posted}"`
+		advice: `run "pr-comments pr sync --db ${quotedDb}", then record it with ${linkOwnCommand}`
 	});
 	return {
 		...base,
@@ -4034,7 +4111,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+41eb38f`;
+	return `pr-comments ${VERSION}+f0c3c08`;
 }
 //#endregion
 //#region src/cli.ts
