@@ -2194,26 +2194,16 @@ function withSeenDigest(link, seenDigest) {
 		seenDigest
 	};
 }
-const baselineDigestOf = (state, ref) => isAnnotationRef(ref) ? void 0 : state.currentDigests?.get(ref) ?? state.postedDigests?.get(ref);
+const baselineDigestOf = (state, ref) => isAnnotationRef(ref) ? void 0 : state.currentDigests?.get(ref);
 function withBaselineDigest(state, ref, digest, overwrite = true) {
-	if (digest === void 0 || isAnnotationRef(ref)) return state;
-	if (state.currentDigests !== void 0) {
-		if (!overwrite && (state.currentDigests.has(ref) || state.postedDigests?.has(ref))) return state;
-		if (state.currentDigests.get(ref) === digest) return state;
-		const currentDigests = new Map(state.currentDigests);
-		currentDigests.set(ref, digest);
-		return {
-			...state,
-			currentDigests
-		};
-	}
-	if (!overwrite && state.postedDigests?.has(ref)) return state;
-	if (state.postedDigests?.get(ref) === digest) return state;
-	const postedDigests = new Map(state.postedDigests);
-	postedDigests.set(ref, digest);
+	if (digest === void 0 || isAnnotationRef(ref) || state.currentDigests === void 0) return state;
+	if (!overwrite && state.currentDigests.has(ref)) return state;
+	if (state.currentDigests.get(ref) === digest) return state;
+	const currentDigests = new Map(state.currentDigests);
+	currentDigests.set(ref, digest);
 	return {
 		...state,
-		postedDigests
+		currentDigests
 	};
 }
 function linkToFinding(state, findingId, ref, role, now, note) {
@@ -2413,13 +2403,6 @@ function connectPullRequest(state, url) {
 	const canonical = formatPullRequestUrl(parsePullRequestUrl(url));
 	if (state.pullRequest?.toLowerCase() === canonical.toLowerCase()) return state;
 	if (state.pullRequest !== void 0 && state.links.length > 0) throw new Error(`the review is connected to ${state.pullRequest} and its ${state.links.length} PR comment link(s) point there; remove them first with "${REMOVE} <ref>" before connecting ${canonical}`);
-	if (state.pullRequest !== void 0 && state.postedDigests !== void 0) {
-		const { postedDigests: _cleared, ...rest } = state;
-		return {
-			...rest,
-			pullRequest: canonical
-		};
-	}
 	return {
 		...state,
 		pullRequest: canonical
@@ -4112,7 +4095,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+937853b`;
+	return `pr-comments ${VERSION}+d016c1b`;
 }
 //#endregion
 //#region src/cli.ts
