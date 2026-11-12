@@ -11,8 +11,6 @@ import type {
 } from './model.ts';
 import { inTransaction } from './review-store.ts';
 
-export { linkableReviewRef } from './comment-ref.ts';
-
 // The pull request the review is about, inside the review database (review-store.ts creates these tables with the
 // rest of its schema). At most one pull request is stored: the connected one. `pr_comments.ref` and `pr_reviews.ref`
 // hold the short ids read from their URLs (`NULL` when a URL holds none; a review is added to `linkable` only when it
