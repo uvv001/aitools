@@ -58,9 +58,11 @@ function annotationRef(app, path, startLine, endLine, message) {
 	].join("\0");
 	return `a${createHash("sha256").update(text, "utf8").digest("hex").slice(0, 8)}`;
 }
+function normalizeBody(body) {
+	return body.replaceAll("\r\n", "\n").replace(/^(?:[ \t]*\n)+/u, "").trimEnd();
+}
 function digestBody(body) {
-	const normalized = body.replaceAll("\r\n", "\n").replace(/^(?:[ \t]*\n)+/u, "").trimEnd();
-	return createHash("sha256").update(normalized, "utf8").digest("hex");
+	return createHash("sha256").update(normalizeBody(body), "utf8").digest("hex");
 }
 //#endregion
 //#region src/github.ts
@@ -1197,8 +1199,7 @@ mutation($input: DeletePullRequestReviewInput!) {
 }`;
 const ID_NOT_READ = "created, but its id could not be read from the URL";
 const sameLogin = (a, b) => a.toLowerCase() === b.toLowerCase();
-const normalize = (body) => body.replaceAll("\r\n", "\n").trim();
-const sameText = (a, b) => normalize(a) === normalize(b);
+const sameText = (a, b) => normalizeBody(a) === normalizeBody(b);
 const messageOf = (error) => error instanceof Error ? error.message : String(error);
 const isPending = (run, comment) => run.data.reviews.find((r) => r.id === comment.reviewId)?.state === "PENDING";
 async function readViewerAndPullRequest(context, ref, loader = fetchPullRequest) {
@@ -4111,7 +4112,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+f0c3c08`;
+	return `pr-comments ${VERSION}+937853b`;
 }
 //#endregion
 //#region src/cli.ts
