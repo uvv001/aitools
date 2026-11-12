@@ -1220,27 +1220,26 @@ describe('seenDigest and re-confirming edited links', () => {
   });
 
   it('preserves seenDigest when an unsynced comment from recordPosted or recordReplied is unlinked and relinked before pr sync', () => {
-    for (const initial of [withDigests({ r2: 'Duplicate body' }), { ...stateWith(), pullRequest: PR }]) {
-      const posted = changes(initial, (current) =>
-        recordPosted(current, 'F1', 'c3', 'created', 'posted', at(1), 'Initial posted body'),
-      );
-      const unlinked = changes(posted, (current) => unlink(current, 'c3', at(2)));
+    const initial = withDigests({ r2: 'Duplicate body' });
+    const posted = changes(initial, (current) =>
+      recordPosted(current, 'F1', 'c3', 'created', 'posted', at(1), 'Initial posted body'),
+    );
+    const unlinked = changes(posted, (current) => unlink(current, 'c3', at(2)));
 
-      for (const relinked of [
-        changes(unlinked, (current) => linkOwn(current, 'F1', 'c3', at(3))),
-        changes(unlinked, (current) => linkDuplicate(current, 'F2', 'c3', at(3))),
-        changes(unlinked, (current) => linkNote(current, 'c3', 'reclassified before sync')),
-      ]) {
-        expect(relinked.links.find(({ ref }) => ref === 'c3')?.seenDigest).toBe(digestBody('Initial posted body'));
+    for (const relinked of [
+      changes(unlinked, (current) => linkOwn(current, 'F1', 'c3', at(3))),
+      changes(unlinked, (current) => linkDuplicate(current, 'F2', 'c3', at(3))),
+      changes(unlinked, (current) => linkNote(current, 'c3', 'reclassified before sync')),
+    ]) {
+      expect(relinked.links.find(({ ref }) => ref === 'c3')?.seenDigest).toBe(digestBody('Initial posted body'));
 
-        const unchangedSync = snapshotOf(['c3'], { owner: 'acme', repo: 'widgets', url: PR });
-        unchangedSync.comments[0]!.body = 'Initial posted body';
-        expect(pendingItems({ links: relinked.links, data: unchangedSync })).toEqual([]);
+      const unchangedSync = snapshotOf(['c3'], { owner: 'acme', repo: 'widgets', url: PR });
+      unchangedSync.comments[0]!.body = 'Initial posted body';
+      expect(pendingItems({ links: relinked.links, data: unchangedSync })).toEqual([]);
 
-        const editedSync = snapshotOf(['c3'], { owner: 'acme', repo: 'widgets', url: PR });
-        editedSync.comments[0]!.body = 'edited remotely to add concern';
-        expect(pendingItems({ links: relinked.links, data: editedSync })).toMatchObject([{ ref: 'c3', edited: true }]);
-      }
+      const editedSync = snapshotOf(['c3'], { owner: 'acme', repo: 'widgets', url: PR });
+      editedSync.comments[0]!.body = 'edited remotely to add concern';
+      expect(pendingItems({ links: relinked.links, data: editedSync })).toMatchObject([{ ref: 'c3', edited: true }]);
     }
 
     let state = withDigests({ r2: 'Duplicate body' });
@@ -1255,28 +1254,9 @@ describe('seenDigest and re-confirming edited links', () => {
       comment.id === 'id-r2' ? { ...comment, body: 'Duplicate body' } : { ...comment, body: 'Edited reply body.' },
     );
     expect(pendingItems({ links: state.links, data: editedReplySync })).toMatchObject([{ ref: 'r11', edited: true }]);
-  });
 
-  it('keeps currentDigests undefined via postedDigests so other knownRefs are not rejected, and preserves pre-existing seenDigest on unlink', () => {
-    const withoutDigests: ReviewState = { ...stateWith(), pullRequest: PR };
-    const posted = changes(withoutDigests, (current) =>
-      recordPosted(current, 'F1', 'c3', 'created', 'posted', at(1), 'Posted without snapshot'),
-    );
-    expect(posted.currentDigests).toBeUndefined();
-    expect(posted.postedDigests?.get('c3')).toBe(digestBody('Posted without snapshot'));
-
-    // Linking another ref in known succeeds without falsely requiring currentDigests.
-    const withDup = changes(posted, (current) => linkDuplicate(current, 'F1', 'r2', at(2)));
-    expect(withDup.links.find(({ ref }) => ref === 'r2')).toStrictEqual({ ref: 'r2', role: 'duplicate', finding: 'F1' });
-
-    // Unlinking and relinking c3 with currentDigests: undefined still preserves seenDigest.
-    const unlinked = changes(withDup, (current) => unlink(current, 'c3', at(3)));
-    const relinked = changes(unlinked, (current) => linkOwn(current, 'F1', 'c3', at(4)));
-    expect(relinked.currentDigests).toBeUndefined();
-    expect(relinked.links.find(({ ref }) => ref === 'c3')?.seenDigest).toBe(digestBody('Posted without snapshot'));
-
-    // Unlinking a pre-existing unsynced link with seenDigest preserves it on relink (with or without currentDigests),
-    // while never overwriting an already-synced currentDigests entry.
+    // Unlinking a pre-existing unsynced link with seenDigest preserves it on relink, while never overwriting an
+    // already-synced currentDigests entry.
     const legacyUnsynced: ReviewState = {
       ...withDigests({ r1: 'Edited on GitHub v2' }),
       links: [
@@ -1288,11 +1268,6 @@ describe('seenDigest and re-confirming edited links', () => {
     const relinkedLegacy = linkOwn(linkDuplicate(afterUnlink, 'F2', 'r1', at(7)), 'F1', 'c4', at(8));
     expect(relinkedLegacy.links.find(({ ref }) => ref === 'c4')?.seenDigest).toBe(digestBody('Legacy unsynced body'));
     expect(relinkedLegacy.links.find(({ ref }) => ref === 'r1')?.seenDigest).toBe(digestBody('Edited on GitHub v2'));
-
-    // Reconnecting to another pull request clears postedDigests once links are removed.
-    const clearedLinks = unlink(posted, 'c3', at(9));
-    const reconnected = connectPullRequest(clearedLinks, 'https://github.com/acme/widgets/pull/43');
-    expect(reconnected.postedDigests).toBeUndefined();
   });
 
   it('refuses linking a known non-annotation ref without a stored digest when currentDigests is active', () => {

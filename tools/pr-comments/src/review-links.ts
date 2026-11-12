@@ -41,8 +41,6 @@ export interface ReviewState {
   known: ReadonlySet<string>;
   // SHA-256 digests of the stored comment and submitted review bodies, keyed by ref.
   currentDigests?: ReadonlyMap<string, string>;
-  // Baseline SHA-256 digests of newly published or unlinked comments retained across in-memory transitions.
-  postedDigests?: ReadonlyMap<string, string>;
 }
 
 // The review database is the one the command was given, which this pure module does not know: its hints use the
@@ -108,7 +106,7 @@ function withSeenDigest<T extends CommentLink>(link: T, seenDigest: string | und
 }
 
 const baselineDigestOf = (state: ReviewState, ref: string): string | undefined =>
-  isAnnotationRef(ref) ? undefined : (state.currentDigests?.get(ref) ?? state.postedDigests?.get(ref));
+  isAnnotationRef(ref) ? undefined : state.currentDigests?.get(ref);
 
 function withBaselineDigest(
   state: ReviewState,
@@ -116,19 +114,12 @@ function withBaselineDigest(
   digest: string | undefined,
   overwrite = true,
 ): ReviewState {
-  if (digest === undefined || isAnnotationRef(ref)) return state;
-  if (state.currentDigests !== undefined) {
-    if (!overwrite && (state.currentDigests.has(ref) || state.postedDigests?.has(ref))) return state;
-    if (state.currentDigests.get(ref) === digest) return state;
-    const currentDigests = new Map(state.currentDigests);
-    currentDigests.set(ref, digest);
-    return { ...state, currentDigests };
-  }
-  if (!overwrite && state.postedDigests?.has(ref)) return state;
-  if (state.postedDigests?.get(ref) === digest) return state;
-  const postedDigests = new Map(state.postedDigests);
-  postedDigests.set(ref, digest);
-  return { ...state, postedDigests };
+  if (digest === undefined || isAnnotationRef(ref) || state.currentDigests === undefined) return state;
+  if (!overwrite && state.currentDigests.has(ref)) return state;
+  if (state.currentDigests.get(ref) === digest) return state;
+  const currentDigests = new Map(state.currentDigests);
+  currentDigests.set(ref, digest);
+  return { ...state, currentDigests };
 }
 
 // A finding's link: logged under its Updates. Nothing changes unless every check passes.
@@ -374,10 +365,6 @@ export function connectPullRequest(state: ReviewState, url: string): ReviewState
       `the review is connected to ${state.pullRequest} and its ${state.links.length} PR comment link(s) point there; ` +
         `remove them first with "${REMOVE} <ref>" before connecting ${canonical}`,
     );
-  }
-  if (state.pullRequest !== undefined && state.postedDigests !== undefined) {
-    const { postedDigests: _cleared, ...rest } = state;
-    return { ...rest, pullRequest: canonical };
   }
   return { ...state, pullRequest: canonical };
 }
