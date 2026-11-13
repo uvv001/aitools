@@ -650,7 +650,7 @@ const GROUPS = Object.fromEntries([
 	}
 ].map(({ name, summary }) => [name, summary]));
 const COMMAND_SPECS = [
-	spec("init", "creates the review database", "Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.\nIt never replaces an existing database or report file. The report (markdown) is written next to the database (<stem>.md) and updated on every change.", {
+	spec("init", "creates the review database", "Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.\nIt never replaces an existing database or report file. It writes the markdown report next to the database (<stem>.md),\nand commands that change rounds or findings update that report (\"link note\", \"pr connect\", and \"pr sync\" do not).", {
 		args: [arg("<name>", "what is under review; the title of the report (a slug of it names the files by default)")],
 		options: [opt("pr", "<url>", "connect the review to this pull request"), opt("db", "<file.sqlite>", "the database (.sqlite) to create (default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.sqlite at the git root)")],
 		database: "none",
@@ -777,7 +777,7 @@ const COMMAND_SPECS = [
 			"A conversation comment (`c…`) has no thread and is answered with a new conversation comment visible at once, so it needs `--now`.",
 			"The output says whether the thread is open or resolved, as information only. A rerun does not reply twice. The exit code is 1 when the result is an error."
 		],
-		example: "c623843 --dry-run"
+		example: "r544830 --dry-run"
 	}),
 	spec("report render", "writes the review report", "Writes the markdown report of the review, made from the database, and says whether the file was created, updated or\nleft unchanged. It overwrites the report each time (change the review with the commands, never in the markdown).\nIt writes the report only, never the database, and never over a SQLite file.", { database: "readonly" }),
 	spec("report comments", "writes the pull request conversation as markdown", "Writes the downloaded pull request (reviews, threads, comments and the Checks section) as markdown, to the\nscreen unless --out is given. Run \"pr-comments pr sync --db <file.sqlite>\" first.", {
@@ -4095,7 +4095,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+d016c1b`;
+	return `pr-comments ${VERSION}+1f3e747`;
 }
 //#endregion
 //#region src/cli.ts
