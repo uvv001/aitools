@@ -1,0 +1,2231 @@
+import { execFile, spawnSync } from 'node:child_process';
+import { access, chmod, copyFile, mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
+import { promisify } from 'node:util';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { COMMANDS, checkNodeVersion, defaultEnvironment, isMainModule, readFailure, run, synopsis } from './cli.ts';
+import type { CliEnvironment } from './cli.ts';
+import { annotationRef, digestBody } from './comment-ref.ts';
+import { samplePullRequest } from './fixtures.ts';
+import { resolveRevision } from './git-revision.ts';
+import { BEGIN_COMMAND_REFERENCE, END_COMMAND_REFERENCE, renderCommandReferenceMarkdown, syncReadmeCommandReference } from './help-catalog.ts';
+import { renderMarkdown } from './markdown.ts';
+import type { AnnotationLevel, CheckAnnotation, CheckRun, PullRequestData } from './model.ts';
+import type { PullRequestRef } from './pr-url.ts';
+import type { PublishComment, PublishOptions, PublishResult } from './publish.ts';
+import { AGENT_DISCLAIMER } from './publish.ts';
+import type { ReplyOptions, ReplyRequest, ReplyResult, ReplyTarget } from './reply.ts';
+import { loadReviewFile, loadSnapshot, reviewPaths } from './review-files.ts';
+import { pendingItems, pendingLines } from './review-pending.ts';
+import { renderReport } from './review-render.ts';
+import { removeScratch, scratchDir } from './review-test-support.ts';
+import { VERSION } from './version.ts';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    writeFile: vi.fn(actual.writeFile),
+  };
+});
+
+const execFileAsync = promisify(execFile);
+const CLI = join(import.meta.dirname, 'cli.ts');
+
+const prUrl = 'https://ghe.example.com/acme/widgets/pull/157';
+const PR_REF: PullRequestRef = { host: 'ghe.example.com', owner: 'acme', repo: 'widgets', number: 157 };
+// Local time, which is what the review stamps; the stamp reads 2026-10-09 14:30.
+const NOW = new Date(2026, 9, 9, 14, 30);
+
+// What the fake git answers: the short hash of the commit.
+const HASHES: Record<string, string> = { HEAD: '1a2b3c4d', 'origin/main': '5e6f7a8b', feature: '9c0d1e2f', abc1234: 'abc12345' };
+
+const SONAR = 'sq-community-pr-decoration';
+const COMPLEXITY = 'Refactor this method to reduce its Cognitive Complexity from 19 to 15.';
+const ELSE_IF = "'If' statement should not be the only statement in 'else' block";
+const COMMENTED_OUT = 'Remove this commented out code.';
+const UNUSED = "'x' is assigned a value but never used.";
+
+// An annotation the way GitHub gives it: the ref is computed from the app, path, lines and message, as sync does.
+function annotation(app: string, path: string, startLine: number, endLine: number, level: AnnotationLevel, message: string): CheckAnnotation {
+  const ref = annotationRef(app, path, startLine, endLine, message);
+  return { ref, path, startLine, endLine, level, title: `${path}#L${startLine}`, message, rawDetails: null };
+}
+
+// SonarQube's three issues and a lint warning, on the head commit of the sample pull request.
+const checkRuns = (): CheckRun[] => [
+  {
+    id: 9001,
+    name: 'SonarQube Code Analysis',
+    app: SONAR,
+    status: 'completed',
+    conclusion: 'failure',
+    headSha: 'c'.repeat(40),
+    detailsUrl: 'https://sonar.example.com/dashboard?id=widgets&pullRequest=157',
+    annotations: [
+      annotation(SONAR, 'src/retry.ts', 42, 42, 'failure', COMPLEXITY),
+      annotation(SONAR, 'src/retry.ts', 50, 55, 'warning', ELSE_IF),
+      annotation(SONAR, 'docs/readme.md', 5, 5, 'notice', COMMENTED_OUT),
+    ],
+  },
+  {
+    id: 9002,
+    name: 'Lint',
+    app: 'github-actions',
+    status: 'completed',
+    conclusion: 'neutral',
+    headSha: 'c'.repeat(40),
+    detailsUrl: null,
+    annotations: [annotation('github-actions', 'src/util.ts', 7, 7, 'warning', UNUSED)],
+  },
+];
+const withChecks = (): PullRequestData => ({ ...samplePullRequest(), checkRuns: checkRuns() });
+const [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF] = checkRuns().flatMap((checkRun) =>
+  checkRun.annotations.map(({ ref }) => ref),
+) as [string, string, string, string];
+
+const WORDS = COMMANDS.map(({ words }) => words);
+const GROUPS = ['pr', 'round', 'finding', 'link', 'report'];
+const CREATING = ['init'];
+const READONLY = ['pr show', 'finding list', 'finding show', 'link pending', 'report render', 'report comments'];
+const CHANGING = WORDS.filter((words) => !CREATING.includes(words) && !READONLY.includes(words));
+const DATABASE_COMMANDS = WORDS.filter((words) => !CREATING.includes(words));
+
+const command = (words: string) => COMMANDS.find((candidate) => candidate.words === words)!;
+
+// The error of a mistake in the arguments of a command: the problem, the command's one usage line and the way to its help.
+const mistake = (words: string, problem: string) =>
+  new Error(`${problem}\nUsage: ${synopsis(command(words))}\nRun "pr-comments ${words} --help" for details.`);
+
+const F1_DESCRIPTION = [
+  'Crash when the list is empty; see [the helper](src/util.ts).',
+  '',
+  '`src/app.ts:10-12`',
+  '',
+  'Second place, same cause.',
+  '',
+  '`src/other.ts:7`',
+].join('\n');
+
+describe('cli', () => {
+  let work: string;
+  let docs: string;
+  let review: string;
+  let printed = '';
+  let warned = '';
+  let stdin: string | Uint8Array = '';
+  let snapshot: PullRequestData = withChecks();
+  let downloads: PullRequestRef[] = [];
+  let revisions: string[] = [];
+  let env: CliEnvironment;
+
+  function makeEnv(cwd: string): CliEnvironment {
+    return {
+      getPullRequest: async (ref) => {
+        downloads.push(ref);
+        return snapshot;
+      },
+      publish: async () => {
+        throw new Error('publish must not be called');
+      },
+      reply: async () => {
+        throw new Error('reply must not be called');
+      },
+      resolveRevision: async (revision) => {
+        revisions.push(revision);
+        const hash = HASHES[revision];
+        if (hash === undefined) throw new Error(`revision "${revision}" does not exist in this repository`);
+        return hash;
+      },
+      print: (text) => {
+        printed += text;
+      },
+      warn: (text) => {
+        warned += text;
+      },
+      cwd: () => cwd,
+      now: () => NOW,
+      readStdin: async () => (typeof stdin === 'string' ? Buffer.from(stdin, 'utf8') : stdin),
+    };
+  }
+
+  // A review with the sample pull request connected and synced (with check annotations), one round and three findings:
+  // F1 and F2 approved (F1 has two anchors, F2 none), F3 awaiting triage. Built once, copied for every test.
+  let templateDir: string;
+  let template: string;
+
+  beforeAll(async () => {
+    templateDir = scratchDir();
+    await mkdir(join(templateDir, 'docs'), { recursive: true });
+    template = join(templateDir, 'docs', 'demo_review.sqlite');
+    const setup = makeEnv(templateDir);
+    const go = (...args: string[]) => run([...args, '--db', template], setup);
+    const add = (severity: string, title: string, description: string) => {
+      stdin = description;
+      return go('finding', 'add', '--severity', severity, '--title', title, '--description-file', '-');
+    };
+    await run(['init', 'Demo', '--db', template, '--pr', prUrl], setup);
+    await go('pr', 'sync');
+    await go('round', 'open', '--no-base');
+    await add('high', 'Missing timeout', F1_DESCRIPTION);
+    await add('medium', 'Remark', 'A remark that belongs to no line.');
+    await add('low', 'Waiting', 'Not yet.');
+    await go('finding', 'set-state', 'F1', 'approved');
+    await go('finding', 'set-state', 'F2', 'approved');
+    downloads = [];
+    revisions = [];
+  }, 60_000);
+
+  afterAll(() => removeScratch(templateDir));
+
+  beforeEach(async () => {
+    work = scratchDir();
+    // A folder with a `.git` marks the git root for the scratch directory, away from the repository this test runs in.
+    await mkdir(join(work, '.git'));
+    docs = join(work, 'docs');
+    await mkdir(docs);
+    review = join(docs, 'demo_review.sqlite');
+    await copyFile(template, review);
+    printed = '';
+    warned = '';
+    stdin = 'Some text.';
+    snapshot = withChecks();
+    downloads = [];
+    revisions = [];
+    env = makeEnv(work);
+  });
+
+  afterEach(() => removeScratch(work));
+
+  const step = async (...args: string[]) => {
+    printed = '';
+    warned = '';
+    const hasDb = args.some((arg) => arg === '--db' || arg.startsWith('--db=') || arg === '--help' || arg === '-h');
+    const needsDb =
+      !hasDb &&
+      args[0] !== 'help' &&
+      DATABASE_COMMANDS.some((words) => {
+        const parts = words.split(' ');
+        return parts.every((part, idx) => args[idx] === part);
+      });
+    return run(needsDb ? ['--db', review, ...args] : args, env);
+  };
+  const exists = (path: string) => access(path).then(() => true, () => false);
+  const bytes = () => readFile(review);
+  const tree = async (dir = work) => (await readdir(dir, { recursive: true })).sort();
+  const loaded = () => loadReviewFile(review);
+  const findingOf = async (id: string) => (await loaded()).data.findings.find((finding) => finding.id === id);
+  const shown = (path: string) => relative(work, path);
+  const line = (path = review) => `Review database: ${shown(path)}\n`;
+
+  // The command fails with that message, prints nothing, and leaves the database byte for byte as it was.
+  async function fails(args: string[], message: string | RegExp | Error): Promise<void> {
+    const before = await bytes();
+    await expect(step(...args)).rejects.toThrow(message);
+    expect(printed).toBe('');
+    expect(warned).toBe('');
+    expect((await bytes()).equals(before)).toBe(true);
+  }
+
+  // The invocation of every command that works as it stands on the database of the template, as the tests below need it.
+  const valid = (words: string): string[] =>
+    ({
+      init: ['init', 'Second'],
+      'pr connect': ['pr', 'connect', prUrl],
+      'pr show': ['pr', 'show'],
+      'pr sync': ['pr', 'sync'],
+      'round open': ['round', 'open', '--no-base'],
+      'round update': ['round', 'update', 'no findings'],
+      'finding add': ['finding', 'add', '--severity', 'low', '--title', 'Four', '--description-file', '-'],
+      'finding list': ['finding', 'list'],
+      'finding show': ['finding', 'show', 'F1'],
+      'finding set-state': ['finding', 'set-state', 'F3', 'approved'],
+      'finding set-severity': ['finding', 'set-severity', 'F3', 'high'],
+      'finding set-title': ['finding', 'set-title', 'F3', 'Other'],
+      'finding set-description': ['finding', 'set-description', 'F3', '--description-file', '-'],
+      'finding update': ['finding', 'update', 'F3', 'a note'],
+      'finding post': ['finding', 'post', 'F1', '--dry-run'],
+      'link pending': ['link', 'pending'],
+      'link own': ['link', 'own', 'F3', 'r1001'],
+      'link duplicate': ['link', 'duplicate', 'F3', 'r1002'],
+      'link note': ['link', 'note', 'r1004', 'a bot'],
+      'link remove': ['link', 'remove', 'r1001'],
+      'link reply': ['link', 'reply', 'r1002', '--dry-run'],
+      'report render': ['report', 'render'],
+      'report comments': ['report', 'comments'],
+    })[words]!;
+
+  describe('the command table', () => {
+    it('has the commands of the command line, no others', () => {
+      expect(WORDS).toEqual([
+        'init',
+        'pr connect',
+        'pr show',
+        'pr sync',
+        'round open',
+        'round update',
+        'finding add',
+        'finding list',
+        'finding show',
+        'finding set-state',
+        'finding set-severity',
+        'finding set-title',
+        'finding set-description',
+        'finding update',
+        'finding post',
+        'link pending',
+        'link own',
+        'link duplicate',
+        'link note',
+        'link remove',
+        'link reply',
+        'report render',
+        'report comments',
+      ]);
+    });
+
+    it('says for each command whether it needs the database and how: init creates it, the pure reads open it read-only', () => {
+      for (const { words, database } of COMMANDS) {
+        const expected = CREATING.includes(words) ? 'none' : READONLY.includes(words) ? 'readonly' : 'change';
+        expect(database, words).toBe(expected);
+      }
+    });
+
+    it('declares --db for all commands', () => {
+      for (const { words, options } of COMMANDS) {
+        const names = options.map(({ name }) => name);
+        expect(names.includes('db'), words).toBe(true);
+      }
+    });
+
+    it('declares only --ref as repeatable, the finding texts and --db as required, and the base of a round as one of two', () => {
+      const flagged = (key: 'repeatable' | 'required') =>
+        COMMANDS.flatMap(({ words, options }) => options.filter((option) => option[key]).map(({ name }) => `${words} --${name}`));
+      expect(flagged('repeatable')).toEqual(['report comments --ref']);
+      expect(flagged('required')).toEqual([
+        'pr connect --db',
+        'pr show --db',
+        'pr sync --db',
+        'round open --db',
+        'round update --db',
+        'finding add --severity',
+        'finding add --title',
+        'finding add --description-file',
+        'finding add --db',
+        'finding list --db',
+        'finding show --db',
+        'finding set-state --db',
+        'finding set-severity --db',
+        'finding set-title --db',
+        'finding set-description --description-file',
+        'finding set-description --db',
+        'finding update --db',
+        'finding post --db',
+        'link pending --db',
+        'link own --db',
+        'link duplicate --db',
+        'link note --db',
+        'link remove --db',
+        'link reply --db',
+        'report render --db',
+        'report comments --db',
+      ]);
+      expect(COMMANDS.filter(({ oneOf }) => oneOf).map(({ words, oneOf }) => [words, oneOf])).toEqual([['round open', ['base', 'no-base']]]);
+    });
+
+    it('gives an option the same kind (flag or value) wherever it occurs, and every command an example of itself', () => {
+      const kinds = new Map<string, boolean>();
+      for (const { words, options, example, summary, description } of COMMANDS) {
+        for (const { name, value } of options) expect(kinds.get(name) ?? value !== undefined, `${words} --${name}`).toBe(value !== undefined);
+        for (const { name, value } of options) kinds.set(name, value !== undefined);
+        expect(example.startsWith(`pr-comments ${words}`), words).toBe(true);
+        expect(summary, words).not.toBe('');
+        expect(description.length, words).toBeGreaterThan(0);
+      }
+    });
+
+    it('writes the usage line of a command from its table entry', () => {
+      expect(synopsis(command('init'))).toBe(
+        'pr-comments init <name> [--pr <url>] [--db <file.sqlite>]',
+      );
+      expect(synopsis(command('round open'))).toBe(
+        'pr-comments round open [--revision <rev>] (--base <rev> | --no-base) [--note <text>] --db <file.sqlite>',
+      );
+      expect(synopsis(command('finding add'))).toBe(
+        'pr-comments finding add --severity <high|medium|low> --title <text> --description-file <file|-> [--unverified] [--note <text>] --db <file.sqlite>',
+      );
+      expect(synopsis(command('finding set-state'))).toBe(
+        'pr-comments finding set-state <finding> <state> [--revision <rev>] [--note <text>] [--round <n>] --db <file.sqlite>',
+      );
+      expect(synopsis(command('finding post'))).toBe(
+        'pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] --db <file.sqlite>',
+      );
+      expect(synopsis(command('report comments'))).toBe(
+        'pr-comments report comments [--ref <ref>]... [--pending] [--out <file.md>] --db <file.sqlite>',
+      );
+    });
+
+    it('takes the revisions from git in the default environment, and has every member the commands use', () => {
+      expect(Object.keys(defaultEnvironment).sort()).toEqual(
+        ['cwd', 'getPullRequest', 'now', 'print', 'publish', 'readStdin', 'reply', 'resolveRevision', 'warn'].sort(),
+      );
+    });
+  });
+
+  describe('help', () => {
+    const forms = (words: string) => {
+      const parts = words.split(' ');
+      return [[...parts, '--help'], [...parts, '-h'], ['help', ...parts], ['--help', ...parts]];
+    };
+
+    it.each(WORDS)('%s --help, -h and help print its help to standard output and exit with 0', async (words) => {
+      const { summary, options, args, notes, example, database } = command(words);
+      let first: string | undefined;
+      for (const argv of forms(words)) {
+        expect(await step(...argv), argv.join(' ')).toBe(0);
+        first ??= printed;
+        expect(printed, argv.join(' ')).toBe(first);
+        expect(warned).toBe('');
+      }
+      expect(first).toContain(`Usage: ${synopsis(command(words))}\n`);
+      expect(first).toContain(summary);
+      expect(first).toContain(`Example:\n  ${example}\n`);
+      for (const { name, value, description } of options) {
+        expect(first).toContain(`--${name}${value ? ` ${value}` : ''}`);
+        expect(first).toContain(description);
+      }
+      for (const { name } of args) expect(first).toContain(name);
+      for (const note of notes ?? []) expect(first).toContain(note);
+      expect(first).toContain({ none: 'creates the database', readonly: 'read-only', change: 'changes the review database' }[database]);
+    });
+
+    it('keeps the generated Command reference in README.md in exact sync with the help catalog', async () => {
+      const readmePath = join(import.meta.dirname, '..', 'README.md');
+      const readme = (await readFile(readmePath, 'utf8')).replaceAll('\r\n', '\n');
+      const start = readme.indexOf(BEGIN_COMMAND_REFERENCE);
+      const end = readme.indexOf(END_COMMAND_REFERENCE);
+
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
+      const between = readme.slice(start + BEGIN_COMMAND_REFERENCE.length + 1, end - 1);
+      const expected = renderCommandReferenceMarkdown();
+      expect(between).toBe(expected);
+      expect(syncReadmeCommandReference(readme)).toBe(readme);
+
+      for (const cmd of COMMANDS) {
+        expect(expected, cmd.words).toContain(`**\`${cmd.words}\`**:`);
+        expect(expected, cmd.words).toContain(synopsis(cmd));
+        expect(expected, cmd.words).toContain(cmd.example);
+        for (const note of cmd.notes ?? []) expect(expected, cmd.words).toContain(note);
+      }
+
+      expect(command('link own').args[1]?.description).toBe('the comment: r544830 or c623843');
+      expect(command('link note').args[0]?.description).toBe('the comment or review body: r544830, c623843 or v91204');
+      expect(command('link duplicate').args[1]?.description).toBe('the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e');
+      expect(command('link remove').args[0]?.description).toBe('the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e');
+
+      const proseOutsideCode = expected
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/(`+)[\s\S]*?\1/g, '');
+      expect(proseOutsideCode).not.toMatch(/<[A-Za-z0-9_.:/|+-]+(?: [A-Za-z0-9_.:/|+-]+)*>/);
+    });
+
+    it('replaces stale content between the README command-reference markers and rejects missing markers', () => {
+      const stale = `# Title\n\n${BEGIN_COMMAND_REFERENCE}\nstale text\n${END_COMMAND_REFERENCE}\n\n## Next\n`;
+      const synced = syncReadmeCommandReference(stale);
+      expect(synced).toBe(`# Title\n\n${BEGIN_COMMAND_REFERENCE}\n${renderCommandReferenceMarkdown()}\n${END_COMMAND_REFERENCE}\n\n## Next\n`);
+      expect(syncReadmeCommandReference(stale.replaceAll('\n', '\r\n'))).toBe(synced.replaceAll('\n', '\r\n'));
+
+      const mixedPrefix = `# Prefix\r\nLine 2\n${BEGIN_COMMAND_REFERENCE}`;
+      const mixedSuffix = `${END_COMMAND_REFERENCE}\nFooter 1\r\nFooter 2`;
+      const mixedSynced = syncReadmeCommandReference(`${mixedPrefix}\r\nstale\r\n${mixedSuffix}`);
+      expect(mixedSynced.startsWith(`${mixedPrefix}\r\n`)).toBe(true);
+      expect(mixedSynced.endsWith(`\r\n${mixedSuffix}`)).toBe(true);
+
+      expect(() => syncReadmeCommandReference('# No markers\n')).toThrow(`missing ${BEGIN_COMMAND_REFERENCE} in README.md`);
+      expect(() => syncReadmeCommandReference(`# Half\n${BEGIN_COMMAND_REFERENCE}\n`)).toThrow(`missing ${END_COMMAND_REFERENCE} in README.md`);
+      expect(() => syncReadmeCommandReference(`${END_COMMAND_REFERENCE}\n${BEGIN_COMMAND_REFERENCE}\n`)).toThrow(
+        `missing ${END_COMMAND_REFERENCE} in README.md`,
+      );
+    });
+
+    it('is not held up by a mistake in the rest of the command line, by a missing database or by a bad --db', async () => {
+      const before = await tree();
+      for (const argv of [
+        ['finding', 'list', '--bogus', '--help'],
+        ['finding', 'list', '--unposted=yes', '-h'],
+        ['finding', 'show', '--help'],
+        ['finding', 'show', 'F1', 'F2', '--help'],
+        ['init', '--db', 'report.md', '--help'],
+        ['round', 'open', '--base', 'x', '--no-base', '--help'],
+        ['link', 'pending', '--db', join(work, 'missing.sqlite'), '--help'],
+      ]) {
+        expect(await step(...argv), argv.join(' ')).toBe(0);
+        expect(printed).toContain('Usage: pr-comments');
+      }
+      expect(await tree()).toEqual(before);
+    });
+
+    it('prints the help of help itself for help help, help --help and help -h, with its usage line, and refuses extra words', async () => {
+      const printedBy: string[] = [];
+      for (const argv of [['help', 'help'], ['help', '--help'], ['help', '-h'], ['--help', 'help']]) {
+        expect(await step(...argv), argv.join(' ')).toBe(0);
+        printedBy.push(printed);
+        expect(warned).toBe('');
+      }
+      expect(new Set(printedBy).size).toBe(1);
+      expect(printed).toContain('Usage: pr-comments help [<command>]\n');
+      expect(printed).toContain('Example:\n  pr-comments help finding set-state\n');
+      expect(printed).not.toContain('Options:');
+      await expect(step('help', 'help', 'extra')).rejects.toThrow(new Error('unknown command "help extra"\nRun "pr-comments help" for the commands.'));
+    });
+
+    it('says the default of init in the words of what it does: a slug of the name', async () => {
+      await step('init', '--help');
+
+      expect(printed).toContain('(default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.sqlite at the git root)');
+      expect(printed).toContain('the title of the report (a slug of it names the files by default)');
+      expect(printed).toContain('commands that change rounds or findings update that report');
+      expect(printed).not.toContain('--report');
+      for (const { words, args, options, summary, description } of COMMANDS) {
+        const texts = [summary, description, ...args.map(({ description: text }) => text), ...options.map(({ description: text }) => text)];
+        expect(texts.some((text) => text.includes('<name>_review')), words).toBe(false);
+      }
+
+      await step('finding', 'post', '--help');
+      expect(printed).toContain('Without --dry-run the returned comment ref');
+      expect(printed).toContain('run "pr-comments pr sync --db <file.sqlite>" to refresh the full pull request snapshot');
+      expect(printed).not.toContain('downloaded pull request is\nrefreshed');
+
+      await step('link', 'reply', '--help');
+      expect(printed).toContain('records the returned reply ref (linked as a note) and update in the database');
+      expect(printed).toContain('run\n"pr-comments pr sync --db <file.sqlite>"');
+      expect(printed).toContain('Example:\n  pr-comments link reply r544830 --dry-run --db review.sqlite\n');
+    });
+
+    it.each([[['--help']], [['-h']], [['help']]])('%j prints the overview: the groups and one line per command, without the options', async (argv) => {
+      expect(await step(...argv)).toBe(0);
+      expect(warned).toBe('');
+      const lines = printed.split('\n');
+      for (const group of GROUPS) expect(lines.some((text) => text.startsWith(`${group} (`)), group).toBe(true);
+      for (const { words, args, summary } of COMMANDS) {
+        const label = [words, ...args.map(({ name }) => name)].join(' ');
+        expect(lines.some((text) => text.startsWith(`  ${label} `) && text.endsWith(`  ${summary}`)), words).toBe(true);
+      }
+      expect(printed).not.toContain('--severity');
+      expect(printed).not.toContain('Example:');
+      expect(printed).toContain('Usage: pr-comments <command> [options]');
+    });
+
+    it.each(GROUPS)('%s alone, %s --help and help %s print the commands of the group and no others', async (group) => {
+      const inGroup = WORDS.filter((words) => words.startsWith(`${group} `));
+      const printedBy: string[] = [];
+      for (const argv of [[group], [group, '--help'], [group, '-h'], ['help', group]]) {
+        expect(await step(...argv), argv.join(' ')).toBe(0);
+        printedBy.push(printed);
+        expect(warned).toBe('');
+      }
+      expect(new Set(printedBy).size).toBe(1);
+      for (const words of WORDS) expect(printed.includes(`  ${words}`), words).toBe(inGroup.includes(words));
+      expect(printed).toContain(`Run "pr-comments ${group} <command> --help"`);
+    });
+
+    it('prints the version for --version and -v, without a build id when run from the sources', async () => {
+      for (const flag of ['--version', '-v']) {
+        expect(await step(flag)).toBe(0);
+        expect(printed).toBe(`pr-comments ${VERSION}\n`);
+      }
+    });
+
+    it('exits with 0 from a real process, with the help on standard output', () => {
+      const result = spawnSync(process.execPath, [CLI, 'finding', 'list', '--help'], { encoding: 'utf8', cwd: work });
+      expect(result).toMatchObject({ status: 0, stderr: '' });
+      expect(result.stdout).toContain(`Usage: ${synopsis(command('finding list'))}`);
+    });
+
+    it('detects the main module when import.meta.main is absent', () => {
+      const withoutMain = { url: new URL('./cli.ts', import.meta.url).href } as ImportMeta;
+      expect(isMainModule(withoutMain, CLI)).toBe(true);
+      expect(isMainModule(withoutMain, join(work, 'other.ts'))).toBe(false);
+      expect(isMainModule(withoutMain, undefined)).toBe(false);
+    });
+
+    it('detects the main module through a symlink when import.meta.main is absent', async ({ skip }) => {
+      const withoutMain = { url: new URL('./cli.ts', import.meta.url).href } as ImportMeta;
+      const binLink = join(work, 'pr-comments-bin.ts');
+      await symlink(CLI, binLink).catch((error: unknown) => skip(`symbolic links are not available here: ${(error as Error).message}`));
+      expect(isMainModule(withoutMain, binLink)).toBe(true);
+    });
+
+    it('refuses Node versions older than 24.15', () => {
+      for (const old of ['22.13.0', '22.17.0', '24.2.0', '24.14.9']) {
+        expect(() => checkNodeVersion(old)).toThrow(`pr-comments requires Node 24.15 or newer (running on Node ${old})`);
+      }
+      for (const supported of ['24.15.0', '24.16.0', '25.0.0']) {
+        expect(() => checkNodeVersion(supported)).not.toThrow();
+      }
+    });
+  });
+
+  describe('strict arguments', () => {
+    // [what is wrong, the arguments, the command whose usage is named, the problem]
+    const MISTAKES: [string, string[], string, string][] = [
+      ['an unknown option', ['finding', 'list', '--bogus'], 'finding list', 'unknown option --bogus'],
+      ['an inherited Object.prototype option name', ['finding', 'list', '--constructor'], 'finding list', 'unknown option --constructor'],
+      ['an unknown short option', ['finding', 'list', '-x'], 'finding list', 'unknown option -x'],
+      ['an unknown short option on a command with a non-text argument', ['finding', 'show', '-x'], 'finding show', 'unknown option -x'],
+      ['an unknown option of a command that creates', ['init', 'Demo', '--bogus'], 'init', 'unknown option --bogus'],
+      ['an unknown option given a value', ['finding', 'list', '--bogus=1'], 'finding list', 'unknown option --bogus'],
+      ['a text that starts with a dash and has several words', ['finding', 'update', 'F1', '-5 is wrong'], 'finding update', 'unknown option -5 is wrong'],
+      ['a text that starts with -h and has words', ['finding', 'update', 'F1', '-h is wrong'], 'finding update', 'unknown option -h is wrong'],
+      ['a text that starts with two dashes', ['finding', 'update', 'F1', '--force'], 'finding update', 'unknown option --force'],
+      ['--note on a list', ['finding', 'list', '--note', 'x'], 'finding list', '--note does not apply to finding list'],
+      ['--state on show', ['finding', 'show', 'F1', '--state', 'approved'], 'finding show', '--state does not apply to finding show'],
+      ['--unposted on a change', ['finding', 'set-state', 'F1', 'approved', '--unposted'], 'finding set-state', '--unposted does not apply to finding set-state'],
+      ['--revision on update', ['finding', 'update', 'F1', 'x', '--revision', 'HEAD'], 'finding update', '--revision does not apply to finding update'],
+      ['--dry-run on a link', ['link', 'own', 'F1', 'r1001', '--dry-run'], 'link own', '--dry-run does not apply to link own'],
+      ['--ref on report render', ['report', 'render', '--ref', 'r1001'], 'report render', '--ref does not apply to report render'],
+      ['--out on pending', ['link', 'pending', '--out', 'x.md'], 'link pending', '--out does not apply to link pending'],
+      ['--force, which no command has any more', ['report', 'render', '--force'], 'report render', 'unknown option --force'],
+      ['--report, which no command has any more', ['init', 'Demo', '--report', 'r.md'], 'init', 'unknown option --report'],
+      ['--pr-db, which no command has any more', ['pr', 'show', '--pr-db', 'x.sqlite'], 'pr show', 'unknown option --pr-db'],
+      ['a repeated option', ['finding', 'list', '--state', 'approved', '--state', 'fixed'], 'finding list', '--state was given more than once'],
+      ['a repeated flag', ['finding', 'list', '--unposted', '--unposted'], 'finding list', '--unposted was given more than once'],
+      ['a repeated --db', ['pr', 'sync', '--db', 'a.sqlite', '--db', 'b.sqlite'], 'pr sync', '--db was given more than once'],
+      ['a repeated --pr', ['init', 'Demo', '--pr', prUrl, '--pr', prUrl], 'init', '--pr was given more than once'],
+      ['a missing --severity', ['finding', 'add', '--title', 'T', '--description-file', '-'], 'finding add', '--severity is required'],
+      ['a missing --title', ['finding', 'add', '--severity', 'low', '--description-file', '-'], 'finding add', '--title is required'],
+      ['a missing --description-file', ['finding', 'add', '--severity', 'low', '--title', 'T'], 'finding add', '--description-file is required'],
+      ['a missing --description-file on set-description', ['finding', 'set-description', 'F1'], 'finding set-description', '--description-file is required'],
+      ['neither --base nor --no-base', ['round', 'open'], 'round open', '--base <rev> or --no-base is required'],
+      ['both --base and --no-base', ['round', 'open', '--base', 'x', '--no-base'], 'round open', '--base and --no-base exclude each other'],
+      ['a missing name', ['init'], 'init', 'missing <name>'],
+      ['a missing url', ['pr', 'connect'], 'pr connect', 'missing <url>'],
+      ['a missing finding', ['finding', 'show'], 'finding show', 'missing <finding>'],
+      ['a missing state', ['finding', 'set-state', 'F1'], 'finding set-state', 'missing <state>'],
+      ['a missing severity', ['finding', 'set-severity', 'F1'], 'finding set-severity', 'missing <severity>'],
+      ['a missing title', ['finding', 'set-title', 'F1'], 'finding set-title', 'missing <title>'],
+      ['a missing finding of set-description', ['finding', 'set-description', '--description-file', '-'], 'finding set-description', 'missing <finding>'],
+      ['a missing update text', ['finding', 'update', 'F1'], 'finding update', 'missing <text>'],
+      ['a missing finding to post', ['finding', 'post'], 'finding post', 'missing <finding>'],
+      ['a missing ref', ['link', 'own', 'F1'], 'link own', 'missing <ref>'],
+      ['a missing note text', ['link', 'note', 'r1004'], 'link note', 'missing <text>'],
+      ['a missing ref to remove', ['link', 'remove'], 'link remove', 'missing <ref>'],
+      ['a missing ref to reply to', ['link', 'reply'], 'link reply', 'missing <ref>'],
+      ['an extra argument to init', ['init', 'Demo', 'more'], 'init', 'unexpected argument "more"'],
+      ['an extra argument to pr show', ['pr', 'show', 'x'], 'pr show', 'unexpected argument "x"'],
+      ['an extra argument to pr sync', ['pr', 'sync', prUrl], 'pr sync', `unexpected argument "${prUrl}"`],
+      ['an extra argument to round open', ['round', 'open', '--no-base', 'x'], 'round open', 'unexpected argument "x"'],
+      ['an extra argument to finding list', ['finding', 'list', 'F1'], 'finding list', 'unexpected argument "F1"'],
+      ['an extra argument to finding show', ['finding', 'show', 'F1', 'F2'], 'finding show', 'unexpected argument "F2"'],
+      ['an extra argument to link pending', ['link', 'pending', 'r1001'], 'link pending', 'unexpected argument "r1001"'],
+      ['an extra argument to link remove', ['link', 'remove', 'r1001', 'r1002'], 'link remove', 'unexpected argument "r1002"'],
+      ['an extra argument to report render', ['report', 'render', 'x.md'], 'report render', 'unexpected argument "x.md"'],
+      ['an option without its value', ['finding', 'list', '--state'], 'finding list', '--state needs a value'],
+      ['a round without its value', ['finding', 'update', 'F1', 'x', '--round'], 'finding update', '--round needs a value'],
+      [
+        'a value that starts with a dash',
+        ['pr', 'sync', '--db', '--now'],
+        'pr sync',
+        '--db needs a value; a value that starts with "-" is written --db=<value>',
+      ],
+      ['a flag with a value', ['finding', 'list', '--unposted=yes'], 'finding list', '--unposted is a flag and takes no value'],
+      ['--help with a value', ['finding', 'list', '--help=yes'], 'finding list', '--help is a flag and takes no value'],
+    ];
+
+    it.each(MISTAKES)('refuses %s with the problem and the one usage line, and creates nothing', async (_what, argv, words, problem) => {
+      const before = await tree();
+
+      await expect(step(...argv)).rejects.toThrow(mistake(words, problem));
+
+      expect(printed).toBe('');
+      expect(warned).toBe('');
+      expect(await tree()).toEqual(before);
+    });
+
+    it('accepts a text that starts with "-" when options such as --db come before --', async () => {
+      expect(await run(['round', 'update', '--db', review, '--', '-x note'], env)).toBe(0);
+      expect(printed).toBe('Round 1 updated\n');
+    });
+
+    it('names no other command in the message of a mistake', async () => {
+      const error = await run(['finding', 'list', '--bogus'], env).then(
+        () => new Error('it did not fail'),
+        (caught: unknown) => caught as Error,
+      );
+      expect(error.message.split('\n')).toHaveLength(3);
+      expect(error.message).not.toContain('finding add');
+      expect(error.message).not.toContain('pr-comments init');
+    });
+
+    it('takes a text that starts with a dash after --, and a value that starts with a dash after =', async () => {
+      await step('finding', 'update', 'F3', '--', '-5 is wrong');
+      expect(printed).toBe('F3: note added\n');
+      expect((await findingOf('F3'))?.updates.at(-1)).toMatchObject({ kind: 'note', note: '-5 is wrong' });
+
+      await step('finding', 'set-severity', 'F3', 'high', '--note=-ish');
+      expect((await findingOf('F3'))?.updates.at(-1)).toMatchObject({ kind: 'severity', note: '-ish' });
+    });
+
+    it('allows --ref to be repeated, and nothing else', async () => {
+      expect(await step('report', 'comments', '--ref', 'r1001', '--ref', 'r1004')).toBe(0);
+    });
+
+    describe('help', () => {
+      const ofHelp = (problem: string) => new Error(`${problem}\nUsage: pr-comments help [<command>]\nRun "pr-comments help --help" for details.`);
+
+      it.each([
+        [['help', '--bogus'], 'unknown option --bogus'],
+        [['help', 'finding', '--bogus'], 'unknown option --bogus'],
+        [['help', '-x'], 'unknown option -x'],
+        [['help', '--pending'], '--pending does not apply to help'],
+        [['help', 'finding', 'list', '--state', 'approved'], '--state does not apply to help'],
+        [['help', '--db', 'x.sqlite'], '--db does not apply to help'],
+        [['help', '--state'], '--state needs a value'],
+        [['help', '--unposted=yes'], '--unposted is a flag and takes no value'],
+        [['help', '--help=yes'], '--help is a flag and takes no value'],
+      ])('refuses %j like any other command: the problem, the usage line of help and exit code 1', async (argv, problem) => {
+        await expect(step(...argv)).rejects.toThrow(ofHelp(problem));
+        expect(printed).toBe('');
+      });
+
+      it('refuses options on a group line with the group name and its --help hint', async () => {
+        const ofGroup = (problem: string) => new Error(`${problem}\nRun "pr-comments finding --help" for the commands of the group.`);
+        await expect(step('finding', '--db', 'x.sqlite')).rejects.toThrow(ofGroup('--db does not apply to the finding group'));
+        await expect(step('finding', '--pr', prUrl)).rejects.toThrow(ofGroup('--pr does not apply to the finding group'));
+        await expect(step('finding', '--help=yes')).rejects.toThrow(ofGroup('--help is a flag and takes no value'));
+        await expect(step('finding', '-x')).rejects.toThrow(ofGroup('unknown option -x'));
+        expect(printed).toBe('');
+      });
+
+      it('keeps help --help and help -h valid, and --help wins over what else is wrong', async () => {
+        for (const argv of [['help', '--help'], ['help', '-h'], ['help', '--bogus', '--help'], ['help', 'finding', '--unposted', '-h']]) {
+          expect(await step(...argv), argv.join(' ')).toBe(0);
+          expect(printed).toContain('Usage: pr-comments help [<command>]\n');
+        }
+      });
+
+      it('still prints what it was asked for when the options are right', async () => {
+        expect(await step('help', 'finding', 'list')).toBe(0);
+        expect(printed).toContain(`Usage: ${synopsis(command('finding list'))}`);
+        expect(await step('help')).toBe(0);
+        expect(printed).toContain('Usage: pr-comments <command> [options]');
+      });
+    });
+
+    it('takes the options before, between and after the words of the command', async () => {
+      await step('--db', review, 'finding', 'list', '--severity', 'low');
+      expect(printed).toBe('F3  ⏳ ⚪  Waiting\n1 of 3 findings\n');
+      await step('finding', '--unposted', 'list', '--db', review, '--state', 'awaiting');
+      expect(printed).toBe('F3  ⏳ ⚪  Waiting\n1 of 3 findings\n');
+    });
+
+    it('answers an unknown command with its name and the way to the commands', async () => {
+      await expect(step('frobnicate')).rejects.toThrow(new Error('unknown command "frobnicate"\nRun "pr-comments help" for the commands.'));
+      await expect(step('frobnicate', prUrl, '--db', review)).rejects.toThrow(
+        new Error('unknown command "frobnicate"\nRun "pr-comments help" for the commands.'),
+      );
+      await expect(step('help', 'frobnicate')).rejects.toThrow('unknown command "frobnicate"');
+      await expect(step('help', 'finding', 'frobnicate')).rejects.toThrow(
+        new Error('unknown command "finding frobnicate"\nRun "pr-comments finding --help" for the commands of the group.'),
+      );
+      await expect(step('help', 'finding', 'list', 'extra')).rejects.toThrow('unknown command "finding list extra"');
+      expect(printed).toBe('');
+    });
+
+    // The commands that were: each is an unknown command now, with no alias and no usage dump.
+    it.each([
+      [['sync', prUrl], 'sync', undefined],
+      [['render', prUrl], 'render', undefined],
+      [['post', prUrl, 'F1.md'], 'post', undefined],
+      [['threads'], 'threads', undefined],
+      [['verify'], 'verify', undefined],
+      [['status', 'close', '--revision', 'HEAD'], 'status', undefined],
+      [['new-id'], 'new-id', undefined],
+      [['report', 'check'], 'report check', 'report'],
+      [['report', 'verify'], 'report verify', 'report'],
+      [['report', 'list'], 'report list', 'report'],
+      [['report', 'show', 'F1'], 'report show', 'report'],
+      [['report', 'post', 'F1'], 'report post', 'report'],
+      [['report', 'reply', 'r1001'], 'report reply', 'report'],
+      [['report', 'link', 'own'], 'report link', 'report'],
+      [['report', 'threads'], 'report threads', 'report'],
+      [['report', 'pr'], 'report pr', 'report'],
+      [['report', 'init', 'Demo'], 'report init', 'report'],
+      [['report', 'import', 'a.md'], 'report import', 'report'],
+      [['report', 'dump'], 'report dump', 'report'],
+      [['import', 'a.md'], 'import', undefined],
+      [['finding', 'retitle', 'F1', 'x'], 'finding retitle', 'finding'],
+      [['finding', 'note', 'F1', 'x'], 'finding note', 'finding'],
+      [['commit', 'record', 'abc1234'], 'commit', undefined],
+      [['rule', 'add', 'a rule'], 'rule', undefined],
+      [['commit', 'add', 'HEAD', '--note', 'the Round 1 report'], 'commit', undefined],
+    ])('answers the old command %j as unknown', async (argv, text, group) => {
+      const hint = group === undefined ? 'Run "pr-comments help" for the commands.' : `Run "pr-comments ${group} --help" for the commands of the group.`;
+      await expect(step(...argv, '--db', review)).rejects.toThrow(new Error(`unknown command "${text}"\n${hint}`));
+      expect(printed).toBe('');
+    });
+
+    it('answers no command with the short usage, and an option alone as unknown', async () => {
+      await expect(step()).rejects.toThrow(new Error('Usage: pr-comments <command> [options]\nRun "pr-comments help" for the commands.'));
+      await expect(step('--db', 'x.sqlite')).rejects.toThrow(
+        new Error('Usage: pr-comments <command> [options]\nRun "pr-comments help" for the commands.'),
+      );
+      await expect(step('--help=yes')).rejects.toThrow(new Error('--help is a flag and takes no value\nRun "pr-comments help" for the commands.'));
+      await expect(step('--bogus')).rejects.toThrow(new Error('unknown option --bogus\nRun "pr-comments help" for the commands.'));
+      await expect(step('-x')).rejects.toThrow(new Error('unknown option -x\nRun "pr-comments help" for the commands.'));
+      await expect(step('--version', 'x')).rejects.toThrow('unknown option --version');
+      await expect(step('pr', 'show', '--version')).rejects.toThrow(mistake('pr show', 'unknown option --version'));
+    });
+
+    it('exits with 1 from a real process, with the message on standard error and nothing on standard output', () => {
+      const result = spawnSync(process.execPath, [CLI, 'finding', 'list', '--bogus'], { encoding: 'utf8', cwd: work });
+      expect(result).toMatchObject({ status: 1, stdout: '', stderr: `${mistake('finding list', 'unknown option --bogus').message}\n` });
+    });
+
+    it.each([
+      [['rule', 'add', 'a rule'], 'rule'],
+      [['commit', 'add'], 'commit'],
+    ])('exits with 1 from a real process for the removed command %j, naming it', (argv, name) => {
+      const result = spawnSync(process.execPath, [CLI, ...argv], { encoding: 'utf8', cwd: work });
+      expect(result).toMatchObject({ status: 1, stdout: '', stderr: `unknown command "${name}"\nRun "pr-comments help" for the commands.\n` });
+    });
+
+    it('exits with 1 from a real process for import, which is no command any more, and creates nothing', async () => {
+      const report = join(docs, 'old_review.md');
+      await writeFile(report, '# Review\n', 'utf8');
+      const before = await tree();
+
+      const result = spawnSync(process.execPath, [CLI, 'import', report], { encoding: 'utf8', cwd: work });
+
+      expect(result).toMatchObject({ status: 1, stdout: '', stderr: 'unknown command "import"\nRun "pr-comments help" for the commands.\n' });
+      expect(await tree()).toEqual(before);
+    });
+  });
+
+  describe('the database', () => {
+    describe('--db', () => {
+      it.each(WORDS)('refuses a file for %s that does not end in .sqlite, and creates nothing', async (words) => {
+        const before = await tree();
+        for (const name of ['report.md', 'report.txt', 'review']) {
+          await expect(step(...valid(words), '--db', name), name).rejects.toThrow(`--db must be a file ending in .sqlite: ${name}`);
+        }
+        expect(printed).toBe('');
+        expect(warned).toBe('');
+        expect(await tree()).toEqual(before);
+      });
+
+      it('accepts the extension in any case', async () => {
+        const named = join(docs, 'Other.SQLITE');
+        expect(await step('init', 'Other', '--db', named)).toBe(0);
+        expect(await exists(named)).toBe(true);
+      });
+    });
+
+    describe('a database that does not exist', () => {
+      it.each(DATABASE_COMMANDS)('is an error for %s, and is never created', async (words) => {
+        const missing = join(docs, 'missing_review.sqlite');
+        const before = await tree();
+
+        await expect(step(...valid(words), '--db', missing)).rejects.toThrow(`${missing} does not exist`);
+
+        expect(printed).toBe('');
+        expect(warned).toBe('');
+        expect(await exists(missing)).toBe(false);
+        expect(await tree()).toEqual(before);
+      });
+    });
+
+    describe('without --db', () => {
+      it.each(DATABASE_COMMANDS)('requires --db for %s, and changes nothing', async (words) => {
+        const before = await bytes();
+        const listing = await tree();
+        printed = '';
+        warned = '';
+
+        await expect(run(valid(words), env)).rejects.toThrow(mistake(words, '--db is required'));
+
+        expect(printed).toBe('');
+        expect(warned).toBe('');
+        expect((await bytes()).equals(before)).toBe(true);
+        expect(await tree()).toEqual(listing);
+      });
+
+      it('is not asked for by init, which creates a database in .ai/review-with-docs/', async () => {
+        const repo = join(work, 'repo');
+        await mkdir(join(repo, '.git', 'refs'), { recursive: true });
+        await mkdir(join(repo, '.git', 'objects'), { recursive: true });
+        await writeFile(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
+        env.cwd = () => repo;
+
+        expect(await run(['init', 'PR 44'], env)).toBe(0);
+
+        expect(await exists(join(repo, '.ai', 'review-with-docs', '2026-10-09_pr-44_review.sqlite'))).toBe(true);
+        expect(warned).toBe('');
+      });
+    });
+
+    describe('the commands that read', () => {
+      it.each(READONLY)('%s leaves the database byte for byte as it was, and names no database', async (words) => {
+        const before = await bytes();
+        const listing = await tree(docs);
+
+        expect(await step(...valid(words), '--db', review)).toBe(0);
+
+        expect((await bytes()).equals(before)).toBe(true);
+        // Only the report of `report render` is new next to it: no journal, no copy.
+        expect(await tree(docs)).toEqual(words === 'report render' ? [...listing, 'demo_review.md'].sort() : listing);
+        expect(warned).toBe('');
+      });
+
+      it('work on a database that cannot be written at all', async () => {
+        await chmod(review, 0o444);
+        try {
+          for (const words of READONLY) {
+            expect(await step(...valid(words), '--db', review), words).toBe(0);
+          }
+        } finally {
+          await chmod(review, 0o666);
+        }
+      });
+
+      it('do not create a database for a file that is none: they refuse it', async () => {
+        const junk = join(docs, 'junk.sqlite');
+        await writeFile(junk, 'not a database', 'utf8');
+
+        for (const words of READONLY) {
+          await expect(step(...valid(words), '--db', junk), words).rejects.toThrow();
+        }
+
+        expect(await readFile(junk, 'utf8')).toBe('not a database');
+        expect(await tree(docs)).toEqual(['demo_review.sqlite', 'junk.sqlite']);
+      });
+    });
+
+    describe('the review database line', () => {
+      // Every command that changes the database, in an order in which each one can work, and what it prints.
+      const CHANGES: [string[], string][] = [
+        [['pr', 'connect', 'https://ghe.example.com/acme/widgets/pull/158'], 'Connected to https://ghe.example.com/acme/widgets/pull/158\n'],
+        [['pr', 'connect', prUrl], `Connected to ${prUrl}\n`],
+        [['pr', 'sync'], 'Synced acme/widgets#157: 2 reviews, 2 threads, 5 comments, 4 annotations\n'],
+        [['round', 'open', '--revision', 'HEAD', '--base', 'origin/main'], 'Round 2 opened\n'],
+        [['round', 'update', 'no findings'], 'Round 2 updated\n'],
+        [['finding', 'add', '--severity', 'low', '--title', 'Four', '--description-file', '-'], 'Added F4\n'],
+        [['finding', 'set-state', 'F3', 'approved'], 'F3: ⏳ → ✅\n'],
+        [['finding', 'set-severity', 'F3', 'high'], 'F3: ⚪ → 🔴\n'],
+        [['finding', 'set-title', 'F3', 'Other'], 'F3: retitled\n'],
+        [['finding', 'set-description', 'F3', '--description-file', '-'], 'F3: description replaced\n'],
+        [['finding', 'update', 'F3', 'a note'], 'F3: note added\n'],
+        [['link', 'own', 'F3', 'r1001'], 'F3: own comment r1001 linked\n'],
+        [['link', 'duplicate', 'F3', 'r1002'], 'F3: duplicate r1002 linked\n'],
+        [['link', 'note', 'r1004', 'a bot'], 'r1004: noted\n'],
+        [['link', 'remove', 'r1004'], 'r1004 unlinked\n'],
+      ];
+
+      it('follows every command that changes the database, on stderr, and leaves the output as it was', async () => {
+        // `finding post` and `link reply` have their own tests, with the fakes they need.
+        const covered = new Set(CHANGES.map(([argv]) => argv.slice(0, 2).join(' ')));
+        expect([...covered].sort()).toEqual(CHANGING.filter((words) => !['finding post', 'link reply'].includes(words)).sort());
+        for (const [argv, output] of CHANGES) {
+          expect(await step(...argv, '--db', review), argv.join(' ')).toBe(0);
+          expect(printed, argv.join(' ')).toBe(output);
+          expect(warned, argv.join(' ')).toBe(line());
+        }
+      });
+
+      it('does not follow a command that ran but changed nothing: connecting to the pull request it is connected to already', async () => {
+        const before = await bytes();
+
+        for (const url of [prUrl, `${prUrl}/`, 'https://GHE.example.com/Acme/Widgets/pull/157']) {
+          expect(await step('pr', 'connect', url, '--db', review), url).toBe(0);
+          expect(printed, url).toBe(`Already connected to ${prUrl}\n`);
+          expect(warned, url).toBe('');
+        }
+        expect((await bytes()).equals(before)).toBe(true);
+      });
+
+      it('follows no command that only reads, and none that failed, and the database stays as it was', async () => {
+        const before = await bytes();
+        for (const words of READONLY) {
+          expect(await step(...valid(words), '--db', review), words).toBe(0);
+          expect(warned, words).toBe('');
+        }
+        for (const argv of [
+          ['finding', 'update', 'F3', ' '],
+          ['finding', 'set-state', 'F9', 'approved'],
+          ['finding', 'set-state', 'F3', 'nonsense'],
+          ['round', 'open', '--revision', 'nope', '--no-base'],
+          ['pr', 'connect', 'nonsense'],
+          ['link', 'remove', 'r1001'],
+          ['link', 'own', 'F1', 'r999'],
+          ['pr', 'sync', 'extra'],
+        ]) {
+          await expect(step(...argv, '--db', review), argv.join(' ')).rejects.toThrow();
+          expect(warned, argv.join(' ')).toBe('');
+        }
+        expect((await bytes()).equals(before)).toBe(true);
+      });
+
+      it('shows the path as given when it was typed relative, relative to the working directory when it is below it, and absolute otherwise', async () => {
+        await step('finding', 'update', '--db', review, 'F3', 'one');
+        expect(warned).toBe(`Review database: ${join('docs', 'demo_review.sqlite')}\n`);
+
+        const typed = relative(process.cwd(), review);
+        await step('finding', 'update', '--db', typed, 'F3', 'two');
+        expect(warned).toBe(`Review database: ${typed}\n`);
+
+        env.cwd = () => join(docs, 'deeper');
+        await step('finding', 'update', '--db', review, 'F3', 'three');
+        expect(warned).toBe(`Review database: ${review}\n`);
+      });
+
+      it.each([
+        ['finding update', ['finding', 'update', 'F3', 'saved'], async () => undefined],
+        ['link duplicate', ['link', 'duplicate', 'F1', 'r1002'], async () => undefined],
+        [
+          'finding post',
+          ['finding', 'post', 'F1'],
+          async () => {
+            env.publish = async () => ({
+              action: 'created',
+              dryRun: false,
+              comment: 'r2001',
+              url: `${prUrl}#discussion_r2001`,
+              state: 'pending',
+              path: 'src/app.ts',
+              lines: '10-12',
+            });
+          },
+        ],
+        [
+          'link reply',
+          ['link', 'reply', 'r1002'],
+          async () => {
+            await step('link', 'own', '--db', review, 'F1', 'r1001');
+            await step('link', 'duplicate', '--db', review, 'F1', 'r1002');
+            env.reply = async () => ({
+              action: 'created',
+              dryRun: false,
+              state: 'pending',
+              comment: 'r546201',
+              url: `${prUrl}#discussion_r546201`,
+            });
+          },
+        ],
+      ])('warns on stderr when %s commits a change that cannot refresh the report file', async (_name, argv, setup) => {
+        await setup();
+        const reportPath = reviewPaths(review).report;
+        await step('report', 'render', '--db', review);
+        await chmod(reportPath, 0o444);
+        try {
+          expect(await step(...argv, '--db', review)).toBe(0);
+          expect(warned).toMatch(
+            /^Warning: the report .*demo_review\.md was not refreshed \(.*\); run "pr-comments report render --db .*demo_review\.sqlite"\nReview database: /u,
+          );
+        } finally {
+          await chmod(reportPath, 0o666);
+        }
+      });
+    });
+  });
+
+  describe('init', () => {
+    const created = (path: string) => `Created ${shown(path)}\nReport: ${shown(reviewPaths(path).report)}\n`;
+
+    it('creates the database and report where --db says, and names no database on stderr', async () => {
+      const named = join(docs, 'named.sqlite');
+
+      expect(await step('init', 'PR 43', '--db', named)).toBe(0);
+
+      expect(printed).toBe(created(named));
+      expect(warned).toBe('');
+      expect(await tree(docs)).toEqual(['demo_review.sqlite', 'named.md', 'named.sqlite']);
+      expect((await loadReviewFile(named)).data).toMatchObject({ target: 'PR 43', findings: [] });
+    });
+
+    it('warns on stderr and keeps the created database when the initial report file cannot be written', async () => {
+      const readonlyDb = join(docs, 'readonly_review.sqlite');
+      vi.mocked(writeFile).mockRejectedValueOnce(new Error('EPERM: report locked'));
+
+      expect(await step('init', 'PR 42', '--db', readonlyDb)).toBe(0);
+      expect(printed).toBe(`Created ${shown(readonlyDb)}\n`);
+      expect(warned).toMatch(
+        /^Warning: the report .*readonly_review\.md was not refreshed \(EPERM: report locked\); run "pr-comments report render --db .*readonly_review\.sqlite"\n$/u,
+      );
+      expect((await loadReviewFile(readonlyDb)).data.target).toBe('PR 42');
+    });
+
+    it('refuses an existing report file without overwriting it or creating a database', async () => {
+      const existingMd = join(docs, 'notes_review.md');
+      await writeFile(existingMd, 'my important notes\n', 'utf8');
+
+      await expect(step('init', 'PR 42', '--db', join(docs, 'notes_review.sqlite'))).rejects.toThrow(
+        `${existingMd} already exists; init will not overwrite an existing report file`,
+      );
+      expect(await readFile(existingMd, 'utf8')).toBe('my important notes\n');
+      expect(await exists(join(docs, 'notes_review.sqlite'))).toBe(false);
+    });
+
+    it('connects the review to the pull request with --pr and prints the canonical URL', async () => {
+      const named = join(docs, 'chain_review.sqlite');
+
+      expect(await step('init', 'PR 42', '--db', named, '--pr', `${prUrl}/`)).toBe(0);
+
+      expect(printed).toBe(`Created ${shown(named)}\nPull request: ${prUrl}\nReport: ${shown(reviewPaths(named).report)}\n`);
+      expect((await loadReviewFile(named)).pullRequest).toBe(prUrl);
+    });
+
+    it('creates .ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite at the git root without --db, shown relative to the working directory', async () => {
+      const repo = join(work, 'repo');
+      await mkdir(join(repo, '.git', 'refs'), { recursive: true });
+      await mkdir(join(repo, '.git', 'objects'), { recursive: true });
+      await writeFile(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
+      env.cwd = () => repo;
+
+      expect(await step('init', 'PR 42 — tenant registry')).toBe(0);
+
+      const db = join(repo, '.ai', 'review-with-docs', '2026-10-09_pr-42-tenant-registry_review.sqlite');
+      const below = relative(repo, db);
+      const belowReport = relative(repo, reviewPaths(db).report);
+      expect(printed).toBe(`Created ${below}\nReport: ${belowReport}\n`);
+      expect(await exists(db)).toBe(true);
+    });
+
+    it('refuses an existing database and leaves it alone, a blank name, and a pull request URL that is none', async () => {
+      const before = await bytes();
+
+      await expect(step('init', 'PR 43', '--db', review)).rejects.toThrow(/demo_review\.sqlite already exists; the database is the source of truth/u);
+      expect((await bytes()).equals(before)).toBe(true);
+
+      await expect(step('init', '  ', '--db', join(docs, 'blank.sqlite'))).rejects.toThrow('the name must not be empty');
+      await expect(step('init', 'PR 44', '--db', join(docs, 'bad.sqlite'), '--pr', 'not a url')).rejects.toThrow('Not a valid URL: not a url');
+      expect(await tree(docs)).toEqual(['demo_review.sqlite']);
+      expect(printed).toBe('');
+    });
+  });
+
+  describe('pr', () => {
+    // A review that is connected to no pull request.
+    const bare = async () => {
+      const db = join(docs, 'bare_review.sqlite');
+      await step('init', 'Bare', '--db', db);
+      return db;
+    };
+
+    describe('connect', () => {
+      it('connects the review and prints the canonical URL, and names the database', async () => {
+        const db = await bare();
+
+        expect(await step('pr', 'connect', `${prUrl}/`, '--db', db)).toBe(0);
+
+        expect(printed).toBe(`Connected to ${prUrl}\n`);
+        expect(warned).toBe(line(db));
+        expect((await loadReviewFile(db)).pullRequest).toBe(prUrl);
+      });
+
+      it('says it is connected already, and changes nothing, for the same pull request', async () => {
+        const before = await bytes();
+
+        await step('pr', 'connect', `${prUrl}/`, '--db', review);
+        expect(printed).toBe(`Already connected to ${prUrl}\n`);
+        expect(warned).toBe('');
+        expect((await bytes()).equals(before)).toBe(true);
+      });
+
+      it('refuses a URL that is not a pull request, and changes nothing', async () => {
+        await fails(['pr', 'connect', 'nonsense', '--db', review], 'Not a valid URL: nonsense');
+      });
+    });
+
+    describe('show', () => {
+      it('says the review is not connected, and how to connect it, on standard output with exit 0', async () => {
+        const db = await bare();
+        const before = await readFile(db);
+
+        expect(await step('pr', 'show', '--db', db)).toBe(0);
+
+        expect(printed).toBe(`not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"\n`);
+        expect(warned).toBe('');
+        expect((await readFile(db)).equals(before)).toBe(true);
+      });
+
+      it('says the pull request is not synced yet, and how to sync it', async () => {
+        const db = await bare();
+        await step('pr', 'connect', prUrl, '--db', db);
+
+        expect(await step('pr', 'show', '--db', db)).toBe(0);
+        expect(printed).toBe(`${prUrl}\nnot synced yet; run "pr-comments pr sync --db ${db}"\n`);
+      });
+
+      it('quotes a database path with spaces in command hints', async () => {
+        const spacedDir = join(work, 'my reviews');
+        await mkdir(spacedDir, { recursive: true });
+        const db = join(spacedDir, 'spaced_review.sqlite');
+        await step('init', 'Spaced', '--db', db);
+
+        expect(await step('pr', 'show', '--db', db)).toBe(0);
+        expect(printed).toBe(`not connected to a pull request; connect it with "pr-comments pr connect --db '${db}' <url>"\n`);
+        await expect(step('pr', 'sync', '--db', db)).rejects.toThrow(
+          `the review is not connected to a pull request; connect it first with "pr-comments pr connect --db '${db}' <url>"`,
+        );
+      });
+
+      it('prints the pull request, when it was synced, its head and what the database holds of it', async () => {
+        expect(await step('pr', 'show')).toBe(0);
+        expect(printed).toBe(`${prUrl}\nsynced 2026-01-06T12:00:00Z, head cccccccc\n2 reviews, 2 threads, 5 comments, 4 annotations\n`);
+        expect(warned).toBe('');
+      });
+    });
+
+    describe('sync', () => {
+      it('downloads the connected pull request, stores it and says how much, and names the database', async () => {
+        expect(await step('pr', 'sync')).toBe(0);
+
+        expect(printed).toBe('Synced acme/widgets#157: 2 reviews, 2 threads, 5 comments, 4 annotations\n');
+        expect(warned).toBe(line());
+        expect(downloads).toEqual([PR_REF]);
+        expect((await loadSnapshot(review))?.checkRuns).toEqual(checkRuns());
+      });
+
+      it('needs a connected pull request, and the one it downloaded must be the connected one', async () => {
+        const db = join(docs, 'bare_review.sqlite');
+        await step('init', 'Bare', '--db', db);
+        await expect(step('pr', 'sync', '--db', db)).rejects.toThrow(
+          `the review is not connected to a pull request; connect it first with "pr-comments pr connect --db ${db} <url>"`,
+        );
+        expect(downloads).toEqual([]);
+
+        snapshot = { ...samplePullRequest(), pullRequest: { ...samplePullRequest().pullRequest, number: 158 } };
+        await fails(['pr', 'sync', '--db', review], /connected to .*157, not to .*158/u);
+      });
+
+      it('changes nothing when the download fails', async () => {
+        env.getPullRequest = async () => {
+          throw new Error('GitHub says no');
+        };
+
+        await fails(['pr', 'sync', '--db', review], 'GitHub says no');
+      });
+    });
+  });
+
+  describe('round open', () => {
+    it('opens round 2, 3, … from HEAD, resolves what git names, and stores the hashes, never the words', async () => {
+      expect(await step('round', 'open', '--base', 'origin/main')).toBe(0);
+      expect(printed).toBe('Round 2 opened\n');
+      expect(warned).toBe(line());
+      expect(revisions).toEqual(['HEAD', 'origin/main']);
+
+      await step('round', 'open', '--revision', 'feature', '--no-base', '--note', 'scope: src/ only');
+      expect(printed).toBe('Round 3 opened\n');
+      expect((await loaded()).data.intro.reviewed.items).toMatchObject([
+        { round: 1, revision: '1a2b3c4d', base: null },
+        { round: 2, revision: '1a2b3c4d', base: '5e6f7a8b' },
+        { round: 3, revision: '9c0d1e2f', base: null, notes: ['scope: src/ only'] },
+      ]);
+    });
+
+    it('fails on a revision that git does not know, before it changes anything', async () => {
+      await fails(['round', 'open', '--revision', 'nope', '--no-base', '--db', review], 'revision "nope" does not exist in this repository');
+      await fails(['round', 'open', '--base', 'nope', '--db', review], 'revision "nope" does not exist in this repository');
+      await fails(['round', 'open', '--revision', ' ', '--no-base', '--db', review], '--revision must not be empty');
+      await fails(['round', 'open', '--base', ' ', '--db', review], '--base must not be empty');
+      await fails(['round', 'open', '--no-base', '--note', ' ', '--db', review], '--note must not be empty');
+      expect((await loaded()).data.intro.reviewed.items).toHaveLength(1);
+    });
+
+    it('updates the latest or a named round, and refuses invalid rounds or empty text', async () => {
+      await step('round', 'open', '--no-base', '--db', review);
+      expect(await step('round', 'update', 'no new findings', '--db', review)).toBe(0);
+      expect(printed).toBe('Round 2 updated\n');
+      expect((await loaded()).data.intro.reviewed.items[1]?.notes).toEqual(['no new findings']);
+
+      expect(await step('round', 'update', '11 fixed', '--round', '1', '--db', review)).toBe(0);
+      expect(printed).toBe('Round 1 updated\n');
+      expect((await loaded()).data.intro.reviewed.items[0]?.notes).toEqual(['11 fixed']);
+
+      await fails(['round', 'update', ' ', '--db', review], 'the text must not be empty');
+      await fails(['round', 'update', 'note', '--round', '9', '--db', review], 'round 9 was never opened; the latest round is 2');
+      await fails(['round', 'update', 'note', '--round', '0', '--db', review], '--round must be a positive whole number');
+    });
+
+    describe('with a real git repository', () => {
+      let repo: string;
+      let first: string;
+      let second: string;
+      const git = (...args: string[]) =>
+        execFileAsync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd: repo });
+      const hashOf = async (revision: string) => (await git('rev-parse', '--short=8', revision)).stdout.trim();
+
+      beforeEach(async () => {
+        repo = join(work, 'repo');
+        await mkdir(repo);
+        await git('init', '-q');
+        await git('commit', '--allow-empty', '-q', '-m', 'first');
+        first = await hashOf('HEAD');
+        await git('tag', 'v1');
+        await git('commit', '--allow-empty', '-q', '-m', 'second');
+        second = await hashOf('HEAD');
+        env.resolveRevision = (revision) => resolveRevision(revision, repo);
+      });
+
+      it('stores the short hash of HEAD, of a tag, of an abbreviation and of an expression', async () => {
+        expect(first).not.toBe(second);
+
+        await step('round', 'open', '--revision', 'HEAD', '--base', 'v1', '--db', review);
+        await step('round', 'open', '--revision', second.slice(0, 7), '--base', 'HEAD~1', '--db', review);
+
+        expect((await loaded()).data.intro.reviewed.items).toMatchObject([
+          { round: 1 },
+          { round: 2, revision: second, base: first },
+          { round: 3, revision: second, base: first },
+        ]);
+      });
+
+      it('fails on a revision the repository does not have, and changes nothing', async () => {
+        await fails(['round', 'open', '--revision', 'nope', '--no-base', '--db', review], 'revision "nope" does not exist in this repository');
+        await fails(['round', 'open', '--revision', 'deadbeef', '--no-base', '--db', review], 'revision "deadbeef" does not exist in this repository');
+      });
+    });
+  });
+
+  describe('finding add', () => {
+    const add = (...options: string[]) => ['finding', 'add', '--db', review, '--severity', 'high', '--title', 'T', ...options];
+    const textFile = async (name: string, text: string | Uint8Array) => {
+      const path = join(work, name);
+      await writeFile(path, text);
+      return path;
+    };
+
+    it('needs an open round', async () => {
+      const db = join(docs, 'bare_review.sqlite');
+      await step('init', 'Bare', '--db', db);
+
+      await expect(step('finding', 'add', '--db', db, '--severity', 'high', '--title', 'T', '--description-file', '-')).rejects.toThrow(
+        'no round is open yet',
+      );
+    });
+
+    it('takes the description from a file or from standard input, without BOM, CRLF and surrounding blank lines', async () => {
+      const file = await textFile('d.md', '\uFEFF\r\n\r\n  indented first line\r\nsecond\r\n\r\n');
+      await step(...add('--description-file', file));
+      expect(printed).toBe('Added F4\n');
+      expect(warned).toBe(line());
+      stdin = '\n\nFrom stdin.\n\n';
+      await step('finding', 'add', '--db', review, '--severity', 'Medium', '--title', 'From stdin', '--description-file', '-');
+
+      expect((await findingOf('F4'))?.description).toBe('  indented first line\nsecond');
+      expect((await findingOf('F5'))?.description).toBe('From stdin.');
+      expect((await findingOf('F5'))?.severity).toBe('🟡');
+    });
+
+    it('opens at ⏳ awaiting triage, or at ❓ with --unverified, and passes --note', async () => {
+      await step(...add('--description-file', '-'));
+      await step(...add('--description-file', '-', '--unverified', '--note', 'seen in a log'));
+
+      expect((await findingOf('F4'))?.state).toBe('⏳');
+      expect(await findingOf('F5')).toMatchObject({
+        state: '❓',
+        updates: [{ kind: 'raised', round: 1, state: '❓', note: 'seen in a log' }],
+      });
+    });
+
+    it('refuses a severity that is none, an empty title or description, and a file that is not there, and changes nothing', async () => {
+      await fails(['finding', 'add', '--db', review, '--severity', 'critical', '--title', 'T', '--description-file', '-'], '"critical" is not a severity; use one of: high, medium, low');
+      await fails(['finding', 'add', '--db', review, '--severity', 'high', '--title', ' ', '--description-file', '-'], '--title must not be empty');
+      stdin = ' \r\n\t\n';
+      await fails(add('--description-file', '-'), 'the description in standard input is empty');
+      const empty = await textFile('empty.md', '\uFEFF\n');
+      await fails(add('--description-file', empty), `the description in ${empty} is empty`);
+      const missing = join(work, 'missing.md');
+      await fails(add('--description-file', missing), new Error(`cannot read ${missing}: no such file`));
+    });
+
+    describe('says in a few words why a description file cannot be read', () => {
+      it('names the file as typed, for finding add and for set-description, and changes nothing', async () => {
+        await fails(add('--description-file', 'no-such-description.md'), new Error('cannot read no-such-description.md: no such file'));
+        await fails(
+          ['finding', 'set-description', 'F3', '--description-file', 'no-such-description.md', '--db', review],
+          new Error('cannot read no-such-description.md: no such file'),
+        );
+        const typed = join(docs, 'nope.md');
+        await fails(['finding', 'set-description', 'F3', '--description-file', typed, '--db', review], new Error(`cannot read ${typed}: no such file`));
+      });
+
+      it('says that the file is a directory', async () => {
+        await fails(add('--description-file', docs), new Error(`cannot read ${docs}: is a directory`));
+      });
+
+      it.each([
+        ['ENOENT', 'no such file'],
+        ['EACCES', 'permission denied'],
+        ['EPERM', 'permission denied'],
+        ['EISDIR', 'is a directory'],
+        ['EMFILE', 'too many open files'],
+      ])('gives %s as "%s", and any other error as its own message', (code, reason) => {
+        const error = Object.assign(new Error('too many open files'), { code });
+        expect(readFailure(error)).toBe(reason);
+      });
+    });
+
+    describe('refuses text that is not UTF-8, before it changes anything', () => {
+      const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+
+      it.each([
+        ['UTF-16LE with a BOM, as Windows PowerShell 5.1 writes it', Buffer.from('\uFEFFLooks fine', 'utf16le'), 'is UTF-16 text, not UTF-8'],
+        ['UTF-16BE with a BOM', Buffer.from([0xfe, 0xff, 0x00, 0x4c]), 'is UTF-16 text, not UTF-8'],
+        ['a PNG image', PNG, 'is not valid UTF-8'],
+        ['Latin-1 text', Buffer.from('café', 'latin1'), 'is not valid UTF-8'],
+      ])('a description file with %s', async (_what, content, problem) => {
+        const file = await textFile('d.bin', content);
+        await fails(add('--description-file', file), new Error(`${file} ${problem}; save the file as UTF-8`));
+      });
+
+      it.each([
+        ['UTF-16LE', Buffer.from('\uFEFFLooks fine', 'utf16le'), 'is UTF-16 text, not UTF-8'],
+        ['invalid UTF-8', Buffer.from([0x54, 0xe9, 0x78, 0x74]), 'is not valid UTF-8'],
+      ])('standard input with %s', async (_what, content, problem) => {
+        stdin = content;
+        await fails(add('--description-file', '-'), new Error(`standard input ${problem}; pipe it as UTF-8`));
+      });
+
+      it('still takes UTF-8 text that is not ASCII', async () => {
+        const file = await textFile('d.md', '\uFEFFnaïve — 🔴 日本語');
+        await step(...add('--description-file', file));
+        expect((await findingOf('F4'))?.description).toBe('naïve — 🔴 日本語');
+      });
+
+      it('exits with 1 and the message on standard error from a real process', async () => {
+        const before = await bytes();
+        const result = spawnSync(process.execPath, [CLI, ...add('--description-file', '-')], {
+          input: PNG,
+          encoding: 'utf8',
+          cwd: work,
+        });
+        expect(result).toMatchObject({ status: 1, stdout: '', stderr: 'standard input is not valid UTF-8; pipe it as UTF-8\n' });
+        expect((await bytes()).equals(before)).toBe(true);
+      });
+    });
+  });
+
+  describe('finding list and show', () => {
+    const ALL = ['F1  ✅ 🔴  Missing timeout', 'F2  ✅ 🟡  Remark', 'F3  ⏳ ⚪  Waiting'];
+
+    it('lists the findings and filters by --state, --severity, and --unposted', async () => {
+      expect(await step('finding', 'list')).toBe(0);
+      expect(printed).toBe(`${ALL.join('\n')}\n3 of 3 findings\n`);
+
+      await step('finding', 'list', '--state', 'approved', '--severity', 'medium');
+      expect(printed).toBe(`${ALL[1]}\n1 of 3 findings\n`);
+
+      await step('link', 'own', 'F1', 'r1001');
+      await step('link', 'duplicate', 'F2', 'r1002');
+      await step('finding', 'list', '--unposted', '--state', 'approved');
+      expect(printed).toBe(`${ALL[1]}\n1 of 3 findings\n`);
+    });
+
+    it('refuses a state or a severity that is none', async () => {
+      await expect(step('finding', 'list', '--state', 'nonsense')).rejects.toThrow('--state "nonsense" is not a state; use one of:');
+      await expect(step('finding', 'list', '--severity', 'critical')).rejects.toThrow('--severity "critical" is not a severity; use one of:');
+    });
+
+    it('shows a finding in text, and refuses an unknown finding', async () => {
+      await step('link', 'own', 'F1', 'r1001');
+      await step('link', 'duplicate', 'F1', COMPLEXITY_REF);
+
+      expect(await step('finding', 'show', 'f1')).toBe(0);
+      expect(printed).toContain(`### ✅ 🔴 F1 — Missing timeout\nLinked: own r1001, duplicate ${COMPLEXITY_REF}\n\n`);
+      expect(warned).toBe('');
+
+      await expect(step('finding', 'show', 'F9')).rejects.toThrow('unknown finding "F9"; the report has F1, F2, F3');
+    });
+  });
+
+  describe('finding changes', () => {
+    it('moves a finding to another state, with --note, --round, and --revision', async () => {
+      expect(await step('finding', 'set-state', 'f3', 'approved', '--note', 'agreed')).toBe(0);
+      expect(printed).toBe('F3: ⏳ → ✅\n');
+      expect(warned).toBe(line());
+
+      await step('finding', 'set-state', 'F3', 'discarded', '--round', '1');
+      expect(printed).toBe('F3: ✅ → ❌\n');
+      expect(revisions).toEqual([]);
+      expect((await findingOf('F3'))?.updates.slice(1)).toMatchObject([
+        { kind: 'state', from: '⏳', to: '✅', note: 'agreed' },
+        { kind: 'state', round: 1, from: '✅', to: '❌' },
+      ]);
+
+      await step('finding', 'set-state', 'F1', 'fixed', '--revision', 'abc1234');
+      expect(printed).toBe('F1: ✅ → 🔧\n');
+      expect(revisions).toEqual(['abc1234']);
+      expect((await findingOf('F1'))?.updates.at(-1)).toMatchObject({ kind: 'state', from: '✅', to: '🔧', revision: 'abc12345' });
+    });
+
+    it('changes the severity, the title, the description, and adds an update', async () => {
+      await step('finding', 'set-severity', 'F1', 'medium');
+      expect(printed).toBe('F1: 🔴 → 🟡\n');
+      await step('finding', 'set-title', 'F1', 'Missing retry timeout', '--note', 'clearer');
+      expect(printed).toBe('F1: retitled\n');
+      stdin = 'The retry loop never gives up.\n\n`src/a.ts:3-5`\n\nMore detail.\n';
+      await step('finding', 'set-description', 'F1', '--description-file', '-', '--round', '1');
+      expect(printed).toBe('F1: description replaced\n');
+      expect(await step('finding', 'update', 'F1', 'Asked the author', '--round', '1')).toBe(0);
+      expect(printed).toBe('F1: note added\n');
+
+      expect(await findingOf('F1')).toMatchObject({
+        severity: '🟡',
+        title: 'Missing retry timeout',
+        description: 'The retry loop never gives up.\n\n`src/a.ts:3-5`\n\nMore detail.',
+      });
+      expect((await findingOf('F1'))?.updates.at(-1)).toMatchObject({ kind: 'note', round: 1, note: 'Asked the author' });
+    });
+
+    it('refuses invalid CLI inputs or unknown findings, and leaves the database as it was', async () => {
+      await fails(['finding', 'set-state', 'F9', 'approved', '--db', review], 'unknown finding "F9"');
+      await fails(['finding', 'set-state', 'F3', ' ', '--db', review], 'the state must not be empty');
+      await fails(['finding', 'set-state', 'F2', 'fixed', '--revision', 'nope', '--db', review], 'revision "nope" does not exist in this repository');
+      await fails(['finding', 'set-state', 'F2', 'fixed', '--revision', ' ', '--db', review], '--revision must not be empty');
+      await fails(['finding', 'set-severity', 'F1', 'critical', '--db', review], '"critical" is not a severity; use one of: high, medium, low');
+      await fails(['finding', 'set-title', 'F1', ' ', '--db', review], 'the title must not be empty');
+      await fails(['finding', 'update', 'F1', ' ', '--db', review], 'the text must not be empty');
+      for (const round of ['0', '-1', '1.5', 'abc', '']) {
+        await fails(['finding', 'update', 'F1', 'x', `--round=${round}`, '--db', review], '--round must be a positive whole number');
+      }
+    });
+  });
+
+  describe('link', () => {
+    it('routes link own, duplicate, note, and remove, normalizes upper-case refs, and prints one line each', async () => {
+      expect(await step('link', 'own', 'f3', 'R1001', '--note', 'written by hand')).toBe(0);
+      expect(printed).toBe('F3: own comment r1001 linked\n');
+      expect(warned).toBe(line());
+
+      expect(await step('link', 'duplicate', 'F1', ELSE_IF_REF.toUpperCase())).toBe(0);
+      expect(printed).toBe(`F1: duplicate ${ELSE_IF_REF} linked\n`);
+
+      expect(await step('link', 'note', 'C2001', 'a bot summary')).toBe(0);
+      expect(printed).toBe('c2001: noted\n');
+
+      expect(await step('link', 'remove', 'C2001')).toBe(0);
+      expect(printed).toBe('c2001 unlinked\n');
+
+      expect((await loaded()).links).toEqual([
+        { ref: 'r1001', role: 'own', finding: 'F3', seenDigest: digestBody('Should this be configurable?') },
+        { ref: ELSE_IF_REF, role: 'duplicate', finding: 'F1' },
+      ]);
+    });
+
+    it('surfaces link refusals with the database path in hints and leaves the database as it was', async () => {
+      await fails(['link', 'own', 'F1', 'r999', '--db', review], `r999 is not in the database; run "pr-comments pr sync --db ${review}" first, or check the id`);
+      await fails(['link', 'own', 'F9', 'r1001', '--db', review], 'unknown finding "F9"; the report has F1, F2, F3');
+      await fails(['link', 'own', 'F1', 'r1001', '--note', ' ', '--db', review], '--note must not be empty');
+      await fails(['link', 'remove', 'r1001', '--db', review], 'r1001 is not linked in this review; the review has no links');
+    });
+  });
+
+  describe('link pending', () => {
+    const REFS = ['r1001', 'r1002', 'r1003', 'r1004', 'c2001', 'v1', COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF];
+
+    it('prints the comments (roots and replies), nonempty review bodies and check annotations that are not linked yet', async () => {
+      expect(await step('link', 'pending')).toBe(0);
+
+      const expected = pendingLines(pendingItems({ links: [], data: withChecks() }));
+      expect(printed).toBe(`${expected.join('\n')}\n`);
+      expect(expected).toHaveLength(REFS.length);
+      for (const ref of REFS) expect(printed, ref).toContain(ref);
+      // Empty-body approval review rev-2 (v2) is not linkable and is not listed.
+      expect(printed).not.toContain('v2');
+      expect(warned).toBe('');
+    });
+
+    it('lists what is not linked yet, and prints nothing at all when everything is processed, with exit 0', async () => {
+      await step('link', 'own', 'F1', 'r1001');
+      await step('link', 'note', 'r1002', 'author ack');
+      await step('link', 'note', 'r1003', 'reviewer follow-up');
+      await step('link', 'note', 'r1004', 'a bot');
+      await step('link', 'duplicate', 'F1', 'v1');
+      await step('link', 'duplicate', 'F1', COMPLEXITY_REF);
+
+      expect(await step('link', 'pending')).toBe(0);
+      for (const done of ['r1001', 'r1002', 'r1003', 'r1004', 'v1', COMPLEXITY_REF]) expect(printed).not.toContain(done);
+      for (const ref of ['c2001', ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) expect(printed, ref).toContain(ref);
+
+      await step('link', 'note', 'c2001', 'a thank you');
+      for (const ref of [ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'F2', ref);
+      expect(await step('link', 'pending')).toBe(0);
+      expect(printed).toBe('');
+      expect(warned).toBe('');
+    });
+
+    it('says to sync first when the database holds no pull request, with exit 1', async () => {
+      const db = join(docs, 'bare_review.sqlite');
+      await step('init', 'Bare', '--db', db, '--pr', prUrl);
+
+      await expect(step('link', 'pending', '--db', db)).rejects.toThrow(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
+      expect(printed).toBe('');
+    });
+  });
+
+  describe('report', () => {
+    describe('render', () => {
+      const report = () => join(docs, 'demo_review.md');
+
+      it('says created, unchanged and updated, and writes the report the database renders to', async () => {
+        expect(await step('report', 'render')).toBe(0);
+        expect(printed).toBe(`created   ${report()}\n`);
+        const text = await readFile(report(), 'utf8');
+        expect(text).toBe(renderReport((await loaded()).data));
+
+        await step('report', 'render');
+        expect(printed).toBe(`unchanged ${report()}\n`);
+
+        await step('finding', 'set-state', 'F3', 'approved');
+        expect(await readFile(report(), 'utf8')).toContain('### ✅ ⚪ F3 — Waiting');
+        await step('report', 'render');
+        expect(printed).toBe(`unchanged ${report()}\n`);
+      });
+
+      it('replaces a report that was edited by hand, with no hand-edit guard and no --force', async () => {
+        await step('report', 'render');
+        await writeFile(report(), 'A hand-written text.\n', 'utf8');
+
+        await step('report', 'render');
+
+        expect(printed).toBe(`updated   ${report()}\n`);
+        expect(await readFile(report(), 'utf8')).toBe(renderReport((await loaded()).data));
+        await expect(step('report', 'render', '--force')).rejects.toThrow(mistake('report render', 'unknown option --force'));
+      });
+    });
+
+    describe('comments', () => {
+      it('prints the pull request as markdown, from the database, with the check annotations as the last section', async () => {
+        expect(await step('report', 'comments')).toBe(0);
+
+        expect(printed).toBe(renderMarkdown(withChecks()));
+        expect(printed).toContain('# Add retry policy');
+        expect(printed).toContain('  Should this be configurable?');
+        const checks = printed.split('\n## Checks\n\n')[1];
+        expect(checks).toBe(
+          [
+            '### Lint — neutral',
+            '',
+            '`github-actions` · commit `ccccccc` · 1 annotation',
+            '',
+            `- \`${UNUSED_REF}\` **warning** \`src/util.ts:7\` — ${UNUSED}`,
+            '',
+            '### SonarQube Code Analysis — failure',
+            '',
+            '`sq-community-pr-decoration` · commit `ccccccc` · 3 annotations · [link](https://sonar.example.com/dashboard?id=widgets&pullRequest=157)',
+            '',
+            `- \`${COMMENTED_OUT_REF}\` **notice** \`docs/readme.md:5\` — ${COMMENTED_OUT}`,
+            `- \`${COMPLEXITY_REF}\` **failure** \`src/retry.ts:42\` — ${COMPLEXITY}`,
+            `- \`${ELSE_IF_REF}\` **warning** \`src/retry.ts:50-55\` — ${ELSE_IF}`,
+            '',
+          ].join('\n'),
+        );
+        expect(warned).toBe('');
+      });
+
+      it('takes several refs from a comma-separated list or a repeated option', async () => {
+        for (const args of [['--ref=r1004,r1001'], ['--ref', 'r1004', '--ref', 'r1001'], ['--ref', ' r1004 , r1001 ,'], ['--ref=r1004 r1001']]) {
+          await step('report', 'comments', ...args);
+          expect(printed, args.join(' ')).toContain('- Filter: only refs `r1004`, `r1001`');
+          expect(printed).toContain('Typo here.');
+          expect(printed).toContain('Should this be configurable?');
+          expect(printed).toContain('Yes, added an option.');
+        }
+        expect(warned).toBe('');
+      });
+
+      it('filters by --ref and --pending, and validates ref format', async () => {
+        await step('link', 'note', 'r1001', 'handled');
+        await step('link', 'note', 'r1002', 'handled');
+        await step('link', 'note', 'r1003', 'handled');
+        await step('report', 'comments', '--pending');
+        expect(printed).toContain('- Filter: only pending comments, reviews and check annotations');
+        expect(printed).toContain('`r1004`');
+        expect(printed).toContain('`v1`');
+        expect(printed).not.toContain('`r1001`');
+
+        await step('report', 'comments', '--ref', `r1001,v1,${COMPLEXITY_REF},r9999`);
+        expect(warned).toBe('Warning: no comment, review or check annotation r9999 in this pull request\n');
+        expect(printed).toContain(`- Filter: only refs \`r1001\`, \`v1\`, \`${COMPLEXITY_REF}\`, \`r9999\``);
+        expect(printed).toContain('`r1001`');
+        expect(printed).toContain('`v1`');
+        expect(printed).toContain(`\`${COMPLEXITY_REF}\``);
+        expect(printed).not.toContain('`r1004`');
+
+        await expect(step('report', 'comments', '--ref', ' , ')).rejects.toThrow('--ref needs at least one ref');
+        await expect(step('report', 'comments', '--ref', 'bogus')).rejects.toThrow(
+          '"bogus" is not a comment, review or check annotation id; expected r544830, c623843, v91204 or a3f9c2d1e',
+        );
+      });
+
+      it('surfaces a newly synced reply on an already-linked thread in link pending and report comments --pending with _(context)_ on linked comments', async () => {
+        await step('link', 'duplicate', 'F1', 'r1001');
+        await step('link', 'note', 'r1002', 'author ack');
+        await step('link', 'note', 'r1003', 'reviewer ack');
+        const current = withChecks();
+        const root = current.comments.find((comment) => comment.url.endsWith('#discussion_r1001'))!;
+        snapshot = {
+          ...current,
+          pullRequest: { ...current.pullRequest, fetchedAt: '2026-01-06T12:05:00Z' },
+          comments: [
+            ...current.comments,
+            {
+              ...root,
+              id: 'id-r1005',
+              threadPosition: 3,
+              replyToId: root.id,
+              author: 'erin',
+              body: 'Follow-up reply with new counter-evidence.',
+              createdAt: '2026-01-05T11:00:00Z',
+              updatedAt: '2026-01-05T11:00:00Z',
+              url: `${prUrl}#discussion_r1005`,
+            },
+          ],
+        };
+        await step('pr', 'sync');
+
+        await step('link', 'pending');
+        expect(printed).toContain('r1005');
+        expect(printed).toContain('reply, thread resolved');
+        expect(printed).not.toContain('r1001');
+
+        await step('report', 'comments', '--pending');
+        expect(printed).toContain('- **@bob** _(context)_ · `r1001`');
+        expect(printed).toContain('  - ↳ **@alice** _(context)_ · `r1002`');
+        expect(printed).toContain('  - ↳ **@bob** _(context)_ · `r1003`');
+        expect(printed).toContain('  - ↳ **@erin** · `r1005`');
+        expect(printed).toContain('Follow-up reply with new counter-evidence.');
+
+        await step('link', 'note', 'r1005', 'counter-evidence recorded');
+        await step('report', 'comments', '--pending');
+        expect(printed).not.toContain('`r1001`');
+        expect(printed).not.toContain('`r1005`');
+      });
+
+      it('surfaces and clears a substantive CHANGES_REQUESTED review body v<id> on a PR with zero comments', async () => {
+        const db = join(docs, 'reviews_only_review.sqlite');
+        await step('init', 'Reviews only', '--db', db, '--pr', prUrl);
+        await step('round', 'open', '--no-base', '--db', db);
+        stdin = 'Cap retries.\n\n`src/retry.ts:42`\n';
+        await step('finding', 'add', '--severity', 'high', '--title', 'Cap retries', '--description-file', '-', '--db', db);
+
+        const base = samplePullRequest();
+        snapshot = {
+          ...base,
+          threads: [],
+          comments: [],
+          checkRuns: [],
+          reviews: [
+            {
+              id: 'rev-91204',
+              author: 'carol',
+              state: 'CHANGES_REQUESTED',
+              body: 'Please cap retries before merging.',
+              submittedAt: '2026-01-05T10:00:00Z',
+              editedAt: null,
+              commitSha: 'a'.repeat(40),
+              url: `${prUrl}#pullrequestreview-91204`,
+            },
+          ],
+        };
+        await step('pr', 'sync', '--db', db);
+
+        await step('link', 'pending', '--db', db);
+        expect(printed).toBe('  v91204  carol  review  changes requested — "Please cap retries before merging."\n');
+
+        await step('report', 'comments', '--pending', '--db', db);
+        expect(printed).toContain('**@carol** requested changes · `v91204`');
+        expect(printed).toContain('Please cap retries before merging.');
+
+        await step('report', 'comments', '--ref', 'V91204', '--db', db);
+        expect(printed).toContain('**@carol** requested changes · `v91204`');
+        expect(warned).toBe('');
+
+        await expect(step('link', 'own', 'F1', 'v91204', '--db', db)).rejects.toThrow(
+          'pull request review v91204 cannot be the own comment of a finding; link it with "link duplicate" or "link note"',
+        );
+        await expect(step('link', 'reply', 'v91204', '--db', db)).rejects.toThrow(
+          'v91204 is a pull request review, not a comment; only a comment (r… or c…) can be answered',
+        );
+
+        await step('link', 'duplicate', 'F1', 'V91204', '--db', db);
+        expect(printed).toBe('F1: duplicate v91204 linked\n');
+
+        await step('link', 'pending', '--db', db);
+        expect(printed).toBe('');
+      });
+
+      it('surfaces edited linked comments and review bodies in link pending and report comments --pending, ignores updatedAt-only changes, and clears edits on re-link or remove+link', async () => {
+        await step('link', 'duplicate', 'F1', 'r1001');
+        await step('link', 'note', 'r1002', 'author ack');
+        await step('link', 'note', 'r1003', 'reviewer ack');
+        await step('link', 'note', 'r1004', 'typo');
+        await step('link', 'note', 'c2001', 'just thanks');
+        await step('link', 'duplicate', 'F1', 'v1');
+        for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) {
+          await step('link', 'duplicate', 'F2', ref);
+        }
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        // updatedAt/editedAt-only sync without normalized body changes does not surface anything.
+        const base = withChecks();
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:05:00Z' },
+          comments: base.comments.map((c) => ({
+            ...c,
+            body: `  \r\n${c.body}  \r\n`,
+            updatedAt: '2026-01-06T12:04:00Z',
+            editedAt: '2026-01-06T12:04:00Z',
+          })),
+          reviews: base.reviews.map((r) => ({ ...r, editedAt: '2026-01-06T12:04:00Z' })),
+        };
+        await step('pr', 'sync');
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        // Edit linked note c2001, linked duplicate r1001, and linked review body v1 (cleared to empty text).
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:10:00Z' },
+          comments: base.comments.map((c) => {
+            if (c.id === 'ic-1') return { ...c, body: 'Wait, retries can also deadlock on shutdown!' };
+            if (c.id === 'rc-1') return { ...c, body: 'Should this be configurable with a hard cap of 5?' };
+            return c;
+          }),
+          reviews: base.reviews.map((r) => (r.id === 'rev-1' ? { ...r, body: '' } : r)),
+        };
+        await step('pr', 'sync');
+
+        await step('link', 'pending');
+        expect(printed).toContain('r1001');
+        expect(printed).toContain('edited, thread resolved, 2 replies — "Should this be configurable with a hard cap of 5?"');
+        expect(printed).toContain('c2001');
+        expect(printed).toContain('edited — "Wait, retries can also deadlock on shutdown!"');
+        expect(printed).toContain('v1');
+        expect(printed).toContain('edited, changes requested');
+        expect(printed).not.toContain('r1002');
+
+        await step('report', 'comments', '--pending');
+        expect(printed).toContain('**@carol** requested changes · `v1`');
+        expect(printed).toContain('  _(no text)_');
+        expect(printed).toContain('- **@alice** · `c2001`');
+        expect(printed).toContain('Wait, retries can also deadlock on shutdown!');
+        expect(printed).toContain('- **@bob** · `r1001`');
+        expect(printed).toContain('  - ↳ **@alice** _(context)_ · `r1002`');
+
+        // Re-confirming r1001 as duplicate of F1 with --note clears r1001 and logs the note without duplicating linked.
+        await step('link', 'duplicate', 'F1', 'r1001', '--note', 'edited to suggest cap of 5');
+        expect((await findingOf('F1'))?.updates.filter((u) => u.kind === 'linked' && u.ref === 'r1001')).toHaveLength(1);
+        expect((await findingOf('F1'))?.updates.at(-1)).toMatchObject({ kind: 'note', note: 'edited to suggest cap of 5' });
+
+        // Changing c2001 from note to duplicate requires link remove + link duplicate.
+        await fails(['link', 'duplicate', 'F2', 'c2001', '--db', review], 'c2001 is already linked as a note (just thanks)');
+        await step('link', 'remove', 'c2001');
+        await step('link', 'duplicate', 'F2', 'c2001');
+
+        // Removing the cleared review v1 link leaves link pending empty.
+        await step('link', 'remove', 'v1');
+        await step('link', 'pending');
+        expect(printed).toBe('');
+      });
+
+      it('does not falsely flag an own comment updated by finding post (with or without --by-agent), while surfacing external edits on pr sync', async () => {
+        for (const ref of ['r1002', 'r1003', 'r1004', 'c2001', 'v1']) await step('link', 'note', ref, 'handled');
+        for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'F2', ref);
+        await step('link', 'own', 'F1', 'r1001');
+
+        let publishedBody = '';
+        env.publish = async (_ref, comment, options) => {
+          publishedBody = options.byAgent ? `${AGENT_DISCLAIMER}\n\n${comment.body}` : comment.body;
+          return {
+            action: 'updated',
+            dryRun: false,
+            comment: 'r1001',
+            url: `${prUrl}#discussion_r1001`,
+            state: 'pending',
+            path: 'src/app.ts',
+            lines: '10-12',
+          };
+        };
+
+        // Post without --by-agent: neither before nor after pr sync is r1001 marked edited.
+        expect(await step('finding', 'post', 'F1')).toBe(0);
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        const base = withChecks();
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:15:00Z' },
+          comments: base.comments.map((c) => (c.id === 'rc-1' ? { ...c, body: publishedBody } : c)),
+        };
+        await step('pr', 'sync');
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        // Post with --by-agent: neither before nor after pr sync is r1001 marked edited.
+        expect(await step('finding', 'post', 'F1', '--by-agent')).toBe(0);
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:20:00Z' },
+          comments: base.comments.map((c) => (c.id === 'rc-1' ? { ...c, body: publishedBody } : c)),
+        };
+        await step('pr', 'sync');
+        await step('link', 'pending');
+        expect(printed).toBe('');
+
+        // External edit to r1001 in GitHub UI surfaces r1001 as edited on pr sync, and link own F1 r1001 confirms it.
+        snapshot = {
+          ...base,
+          pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:25:00Z' },
+          comments: base.comments.map((c) => (c.id === 'rc-1' ? { ...c, body: `${publishedBody}\n\nEdited by user.` } : c)),
+        };
+        await step('pr', 'sync');
+        await step('link', 'pending');
+        expect(printed).toContain('r1001');
+        expect(printed).toContain('edited, thread resolved, 2 replies');
+
+        await step('link', 'own', 'F1', 'r1001', '--note', 'accepted user wording tweak');
+        await step('link', 'pending');
+        expect(printed).toBe('');
+      });
+
+      it('writes the markdown to a file, creating the folder, and refuses to overwrite a database', async () => {
+        const out = join(work, 'reports', 'pr-157.md');
+
+        await step('report', 'comments', '--out', out);
+
+        expect(printed).toBe(`Wrote ${out}\n`);
+        expect(await readFile(out, 'utf8')).toBe(renderMarkdown(withChecks()));
+
+        await fails(['report', 'comments', '--out', review, '--db', review], `refusing to write the report over the database ${review}`);
+        await fails(['report', 'comments', '--out', join(docs, 'new.sqlite'), '--db', review], '--out must be a report file, not a database');
+      });
+
+      it('says to sync first when the database holds no pull request', async () => {
+        const db = join(docs, 'bare_review.sqlite');
+        await step('init', 'Bare', '--db', db, '--pr', prUrl);
+
+        await expect(step('report', 'comments', '--db', db)).rejects.toThrow(`no pull request data in the database; run "pr-comments pr sync --db ${db}" first`);
+        expect(printed).toBe('');
+      });
+    });
+  });
+
+  describe('finding post', () => {
+    const F1_BODY = [
+      '🔴 **F1 — Missing timeout**',
+      '',
+      'Crash when the list is empty; see the helper.',
+      '',
+      '`src/app.ts:10-12`',
+      '',
+      'Second place, same cause.',
+      '',
+      '`src/other.ts:7`',
+    ].join('\n');
+    const GENERAL_WARNING = 'Warning: F2 has no path:lines anchor; it becomes a general comment (posting it needs --now)\n';
+    let calls: { ref: unknown; comment: PublishComment; options: PublishOptions }[];
+
+    // What GitHub would answer for the one comment: a dry run has no comment for what it would create.
+    const answer = (comment: PublishComment, options: PublishOptions, action: 'created' | 'updated' | 'unchanged', ref: string): PublishResult => {
+      const { path, lines } = comment;
+      const planned = options.dryRun && action === 'created';
+      return {
+        action,
+        dryRun: options.dryRun,
+        ...(planned ? {} : { comment: ref, url: ref.startsWith('c') ? `${prUrl}#issuecomment-${ref.slice(1)}` : `${prUrl}#discussion_${ref}` }),
+        state: options.now ? 'posted' : 'pending',
+        ...(path === undefined ? {} : { path }),
+        ...(lines === undefined ? {} : { lines: lines.start === lines.end ? `${lines.start}` : `${lines.start}-${lines.end}` }),
+      };
+    };
+
+    const engine = (reply: (comment: PublishComment, options: PublishOptions) => PublishResult) => {
+      env.publish = async (ref, comment, options) => {
+        calls.push({ ref, comment, options });
+        return reply(comment, options);
+      };
+    };
+    const creates = (ref = 'r2001') => engine((comment, options) => answer(comment, options, 'created', ref));
+    const post = (...args: string[]) => step('finding', 'post', '--db', review, ...args);
+    const url = (comment: string) => (comment.startsWith('c') ? `${prUrl}#issuecomment-${comment.slice(1)}` : `${prUrl}#discussion_${comment}`);
+
+    beforeEach(() => {
+      calls = [];
+    });
+
+    it('posts the finding to the pull request of the review and prints the result and the anchors', async () => {
+      creates();
+
+      expect(await post('f1')).toBe(0);
+
+      expect(printed).toBe(`created    pending  r2001  src/app.ts:10-12  ${url('r2001')}\nanchor 1 of 2: src/app.ts:10-12\n  2. src/other.ts:7\nlinks removed: 1\n`);
+      expect(warned).toBe(line());
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.ref).toEqual(PR_REF);
+      expect(calls[0]!.options).toEqual({ byAgent: false, now: false, dryRun: false });
+      expect(calls[0]!.comment).toMatchObject({ path: 'src/app.ts', lines: { start: 10, end: 12 }, body: F1_BODY });
+      expect(downloads).toEqual([]);
+    });
+
+    it('publishes at once with --now, starts with the agent line with --by-agent, and takes --anchor and --commit', async () => {
+      creates();
+
+      expect(await post('F1', '--now', '--by-agent', '--anchor', '2', '--commit', 'abcdef1')).toBe(0);
+
+      expect(printed).toBe(`created    posted   r2001  src/other.ts:7  ${url('r2001')}\nanchor 2 of 2: src/other.ts:7\n  1. src/app.ts:10-12\nlinks removed: 1\n`);
+      expect(calls[0]!.options).toEqual({ byAgent: true, now: true, dryRun: false });
+      expect(calls[0]!.comment).toMatchObject({ path: 'src/other.ts', lines: { start: 7, end: 7 }, commit: 'abcdef1', body: F1_BODY });
+    });
+
+    it('with --dry-run prints what would happen and the exact text, writes nothing, downloads nothing and names no database', async () => {
+      creates();
+      const before = await bytes();
+
+      expect(await post('F1', '--dry-run', '--by-agent')).toBe(0);
+
+      const label = 'would create'.padEnd('would leave unchanged'.length);
+      expect(printed).toBe(
+        [
+          `${label}  pending  -  src/app.ts:10-12`,
+          'anchor 1 of 2: src/app.ts:10-12',
+          '  2. src/other.ts:7',
+          'links removed: 1',
+          '----- comment text -----',
+          `${AGENT_DISCLAIMER}\n\n${F1_BODY}`,
+          '-----',
+          '',
+        ].join('\n'),
+      );
+      expect(calls[0]!.options).toEqual({ byAgent: true, now: false, dryRun: true });
+      expect(downloads).toEqual([]);
+      expect(warned).toBe('');
+      expect((await bytes()).equals(before)).toBe(true);
+    });
+
+    it('prints unchanged and updated outcomes when run again', async () => {
+      creates();
+      await post('F1');
+
+      engine((comment, options) => answer(comment, options, 'unchanged', 'r2001'));
+      expect(await post('F1')).toBe(0);
+      expect(printed.startsWith(`unchanged  pending  r2001  src/app.ts:10-12  ${url('r2001')}\n`)).toBe(true);
+
+      engine((comment, options) => answer(comment, options, 'updated', 'r2001'));
+      expect(await post('F1')).toBe(0);
+      expect(printed.startsWith(`updated    pending  r2001  src/app.ts:10-12  ${url('r2001')}\n`)).toBe(true);
+    });
+
+    it('prints an error result and the anchors, exits with 1, records nothing and names no database', async () => {
+      engine((_comment, options) => ({ action: 'error', dryRun: options.dryRun, message: 'rejected by GitHub' }));
+      const before = await bytes();
+
+      expect(await post('F1')).toBe(1);
+
+      expect(printed).toBe(
+        `${'error'.padEnd(9)}  ${''.padEnd('pending'.length)}  -  rejected by GitHub\nanchor 1 of 2: src/app.ts:10-12\n  2. src/other.ts:7\nlinks removed: 1\n`,
+      );
+      expect(warned).toBe('');
+      expect(downloads).toEqual([]);
+      expect((await bytes()).equals(before)).toBe(true);
+    });
+
+    it('prints a finding with no anchor as a general comment, and the warnings on stderr', async () => {
+      creates('c2002');
+
+      expect(await post('F2', '--now')).toBe(0);
+
+      expect(printed).toBe(`created    posted   c2002  (general)  ${url('c2002')}\nno anchor: general comment\n`);
+      expect(warned).toBe(`${GENERAL_WARNING}${line()}`);
+    });
+
+    it('refuses a bad --anchor or an unknown finding before it publishes anything', async () => {
+      creates();
+
+      await fails(['finding', 'post', 'F9', '--db', review], 'unknown finding "F9"; the report has F1, F2, F3');
+      for (const value of ['0', '-1', '1.5', 'abc', '', '+1']) {
+        await fails(['finding', 'post', 'F1', `--anchor=${value}`, '--db', review], new Error('--anchor must be a positive whole number'));
+      }
+      expect(calls).toEqual([]);
+    });
+  });
+
+  describe('link reply', () => {
+    const OWN_LINK = `${prUrl}#discussion_r1001`;
+    const TEXT = `Duplicate of ${OWN_LINK}.`;
+    const WITH_DISCLAIMER = `${AGENT_DISCLAIMER}\n\n${TEXT}`;
+    const THREAD: ReplyTarget = { ref: 'r1004', author: 'carol', kind: 'review', path: 'docs/readme.md', lines: '7', resolved: false };
+    const CONVERSATION: ReplyTarget = { ref: 'c2001', author: 'alice', kind: 'issue' };
+    const NEEDS_NOW = 'a conversation comment can only be answered with a new conversation comment, which is visible at once; add --now to do that';
+    const urlOf = (reply: string) => (reply.startsWith('c') ? `${prUrl}#issuecomment-${reply.slice(1)}` : `${prUrl}#discussion_${reply}`);
+    type Answer = (request: ReplyRequest, options: ReplyOptions) => ReplyResult;
+    let calls: { ref: unknown; request: ReplyRequest; options: ReplyOptions }[];
+
+    const engine = (answer: Answer) => {
+      env.reply = async (ref, request, options) => {
+        calls.push({ ref, request, options });
+        return answer(request, options);
+      };
+    };
+    // A reply that is made; a dry run has no reply yet.
+    const made =
+      (reply: string, target: ReplyTarget, state: 'pending' | 'posted'): Answer =>
+      (_request, options) => ({
+        action: 'created',
+        dryRun: options.dryRun,
+        state,
+        ...(options.dryRun ? {} : { comment: reply, url: urlOf(reply) }),
+        target,
+      });
+    const identical =
+      (reply: string, target: ReplyTarget): Answer =>
+      (_request, options) => ({
+        action: 'unchanged',
+        dryRun: options.dryRun,
+        state: 'pending',
+        comment: reply,
+        url: urlOf(reply),
+        target,
+        message: 'an identical reply of yours already exists',
+      });
+    const refused =
+      (message: string, target?: ReplyTarget): Answer =>
+      (_request, options) => ({ action: 'error', dryRun: options.dryRun, ...(target ? { target } : {}), message });
+    const reply = (...args: string[]) => step('link', 'reply', '--db', review, ...args);
+
+    beforeEach(async () => {
+      calls = [];
+      await step('link', 'own', 'F1', 'r1001');
+      await step('link', 'duplicate', 'F1', 'r1004');
+      await step('link', 'duplicate', 'F1', 'c2001');
+    });
+
+    it('answers the duplicate for the pull request of the review and prints the result and what it answers', async () => {
+      engine(made('r546201', THREAD, 'pending'));
+
+      expect(await reply('r1004')).toBe(0);
+
+      expect(printed).toBe(`created    pending  r546201  docs/readme.md:7  ${urlOf('r546201')}\nanswers r1004 (carol, thread open)\n`);
+      expect(warned).toBe(line());
+      expect(calls).toMatchObject([{ ref: PR_REF, request: { commentRef: 'r1004', body: TEXT, requires: { ref: 'r1001' } }, options: { now: false, dryRun: false } }]);
+      expect(downloads).toEqual([]);
+    });
+
+    it('shows the thread as resolved, the path alone for a file-level thread, and conversation for a conversation comment', async () => {
+      engine(made('r546201', { ...THREAD, resolved: true }, 'pending'));
+      await reply('r1004');
+      expect(printed).toBe(`created    pending  r546201  docs/readme.md:7  ${urlOf('r546201')}\nanswers r1004 (carol, thread resolved)\n`);
+
+      engine(made('r546201', { ...THREAD, lines: undefined }, 'pending'));
+      await reply('r1004');
+      expect(printed).toBe(`created    pending  r546201  docs/readme.md  ${urlOf('r546201')}\nanswers r1004 (carol, thread open)\n`);
+
+      engine(made('c624100', CONVERSATION, 'posted'));
+      await reply('c2001', '--now');
+      expect(printed).toBe(`created    posted   c624100  conversation  ${urlOf('c624100')}\nanswers c2001 (alice)\n`);
+    });
+
+    it('passes --now and --by-agent on', async () => {
+      engine(made('c624100', CONVERSATION, 'posted'));
+
+      expect(await reply('c2001', '--now', '--by-agent')).toBe(0);
+
+      expect(calls).toMatchObject([{ ref: PR_REF, request: { commentRef: 'c2001', body: WITH_DISCLAIMER }, options: { now: true, dryRun: false } }]);
+      expect(warned).toBe(line());
+    });
+
+    it('reports an identical reply as unchanged and still names the database', async () => {
+      engine(identical('r546201', THREAD));
+
+      expect(await reply('r1004')).toBe(0);
+
+      expect(printed).toBe(
+        `unchanged  pending  r546201  docs/readme.md:7  ${urlOf('r546201')}  an identical reply of yours already exists\nanswers r1004 (carol, thread open)\n`,
+      );
+      expect(warned).toBe(line());
+    });
+
+    it('prints an error result with the answered comment when it is known, exits with 1, records nothing and names no database', async () => {
+      const before = await bytes();
+
+      engine(refused('GitHub rejected the reply (is the thread still there?)'));
+      expect(await reply('r1004')).toBe(1);
+      expect(printed).toBe(`${'error'.padEnd(9)}  ${''.padEnd('pending'.length)}  -  GitHub rejected the reply (is the thread still there?)\n`);
+
+      engine(refused(NEEDS_NOW, CONVERSATION));
+      expect(await reply('c2001')).toBe(1);
+      expect(printed).toBe(`${'error'.padEnd(9)}  ${''.padEnd('pending'.length)}  -  ${NEEDS_NOW}\nanswers c2001 (alice)\n`);
+
+      expect(warned).toBe('');
+      expect(downloads).toEqual([]);
+      expect((await bytes()).equals(before)).toBe(true);
+    });
+
+    it('with --dry-run prints what would happen and the exact text, writes nothing, downloads nothing and names no database', async () => {
+      engine(made('r546201', THREAD, 'pending'));
+      const before = await bytes();
+
+      expect(await reply('r1004', '--dry-run', '--by-agent')).toBe(0);
+
+      const label = 'would create'.padEnd('would leave unchanged'.length);
+      expect(printed).toBe(
+        [`${label}  pending  -  docs/readme.md:7`, 'answers r1004 (carol, thread open)', '----- reply text -----', WITH_DISCLAIMER, '-----', ''].join('\n'),
+      );
+      expect(calls).toMatchObject([{ request: { commentRef: 'r1004', body: WITH_DISCLAIMER }, options: { now: false, dryRun: true } }]);
+      expect(warned).toBe('');
+      expect(downloads).toEqual([]);
+      expect((await bytes()).equals(before)).toBe(true);
+    });
+
+    it('auto-links the posted reply as a note so link pending stays empty after pr sync', async () => {
+      for (const ref of ['r1002', 'r1003', 'v1']) await step('link', 'note', ref, 'handled');
+      for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'F2', ref);
+      await step('link', 'pending');
+      expect(printed).toBe('');
+
+      engine(made('r546201', THREAD, 'pending'));
+      expect(await reply('r1004')).toBe(0);
+
+      const current = withChecks();
+      const target = current.comments.find((c) => c.url.endsWith('#discussion_r1004'))!;
+      snapshot = {
+        ...current,
+        pullRequest: { ...current.pullRequest, fetchedAt: '2026-01-06T12:10:00Z' },
+        comments: [
+          ...current.comments,
+          {
+            ...target,
+            id: 'rc-reply-546201',
+            threadPosition: 1,
+            replyToId: target.id,
+            author: 'alice',
+            body: TEXT,
+            createdAt: '2026-01-06T12:09:00Z',
+            updatedAt: '2026-01-06T12:09:00Z',
+            url: `${prUrl}#discussion_r546201`,
+          },
+        ],
+      };
+      await step('pr', 'sync');
+
+      await step('link', 'pending');
+      expect(printed).toBe('');
+    });
+
+    it('lets a refusal of the review through before it asks GitHub for anything, and changes nothing', async () => {
+      engine(made('r546201', THREAD, 'pending'));
+
+      await fails(['link', 'reply', 'r999', '--db', review], 'r999 is not linked in this review');
+      expect(calls).toEqual([]);
+    });
+  });
+});

@@ -6,83 +6,86 @@ description: Runs a review as a document the user triages over rounds. Invoke on
 # Review with docs
 
 The review lives in one SQLite database: findings, evidence, triage states,
-round history, and links to pull request comments. The report is its
-rendering — the document the user reads; the conversation only steers the
-database.
+round history, and links to pull request comments. The `.md` report is a
+write-only rendering for user convenience and post-session discoverability
+(when future sessions or tools search past reviews); during an active review,
+agents query and change the review through `pr-comments` commands against the
+SQLite database and never read or parse the `.md` report.
 
 The target is any changeset or text inside a git repository — a commit, a
 range, a PR, a working tree, a set of files. The protocol does not assume a
 PR; where the target has one, [pull-request.md](pull-request.md) adds reading
 its comments and publishing findings.
 
-**The user's call** is a stop: put the evidence and the options to the user,
-and act on the answer.
+**The user's call** is a stop — put the evidence and the options to the user,
+and act on the answer — and is the default for any situation these
+instructions do not cover or leave in doubt.
 
 ## The tool
 
 `pr-comments` below is `node <skill-dir>/pr-comments.mjs`, one file that
-needs Node 24.2 or newer. Check `node --version` before the first command;
+needs Node 24.15 or newer. Check `node --version` before the first command;
 where Node is missing or older, it is the user's call — installing Node is
 the expected outcome.
 
 - Options and examples live in `pr-comments <command> --help`; read it before
-  a command's first use.
+  a command's first use. Every command after `init` requires
+  `--db <file.sqlite>` (the path `init` created or the continuation selected).
+- The **review folder** is `<session-folder>/files/review-with-docs/` where the
+  host provides a session folder, and `.ai/review-with-docs/` (the `init`
+  default, with no `--db`) where it does not.
 - Every title, description, update, and `--note` renders as Markdown in the
   report, so keep `<...>` tokens inside backticks or code fences. Pass
   descriptions as UTF-8 files and text arguments in single quotes: PowerShell
   rewrites backticks and `$` inside double quotes, and non-ASCII text piped to
   `--description-file -` can arrive as `?`.
-- `report render` overwrites the report each time: change the review with
-  commands, since an edit made in the report is lost.
-- The orchestrator alone runs commands that change the review.
+- Each command that changes the review updates the report: change the review
+  with commands, since an edit made in the report is lost.
+- The orchestrator alone runs commands that change the review or render the
+  report, one at a time.
 - Run every command in the reviewed repository: revisions resolve with git in
   the working directory.
 
 ## Protocol
 
-A review database already in the repository means the request continues it:
-read `finding list`, then start at the step the request calls for — a verdict
-is step 5, a publish or sync request step 6, new changes (a moved PR head
-included) step 7, a fix request the paragraph under States.
+A review database whose title or `pr show --db <file.sqlite>` matches the
+target — in the review folder, in `.ai/review-with-docs/`, or in an earlier
+session's `files/review-with-docs/` folder that the user names — means the
+request continues it: read `finding list` and start at the step the request
+calls for — a verdict is step 5, a publish or sync request step 6, new changes
+(a moved PR head included) step 7, a fix request **Fixed** under
+[States](#states). With no match, step 1 starts a new review.
 
 1. **Scope.** Take the target from the user or confirm it explicitly. Git is
-   required — the rounds pin revisions and the review is committed — so where
-   the target is not in a repository, it is the user's call; `git init` and a
-   first commit of the target are the expected outcome. Pin the reviewed
-   revision and the base it is read against: the first parent for a single
-   commit, the endpoints for a range, the merge-base with the target branch
-   for a PR, HEAD plus a dirty-tree note for an uncommitted tree, none for
-   files reviewed as they stand. One attempt to resolve an ambiguous target
-   or base, then the user's call — a wrong base silently changes the changeset
-   under review.
-   Where several review databases live in the repository, take the one whose
-   title or `pr show` matches the target and pass `--db` on every command.
-   With none, create one. Git must track the database and the report: before
-   `init`, `git check-ignore` on the intended paths reports nothing — where
-   it reports one, it is the user's call. Then `init <name>` — the report's
-   title, derived from the review context (PR number, PR author, feature
-   name) — with `--pr <url>` where the target is a pull request. That first
-   pass — fleet briefs included — reads the changeset without the PR's
-   existing comments, so they cannot frame it; the user asks for the sync, and
-   even when requested up front, the comments enrich the report only after the
-   pass ([pull-request.md](pull-request.md)).
-   **Ready when:** the database exists, and git ignores neither its path nor
-   its report's (the `.md` it renders to, beside it by default); the reviewed
-   revision and its base (or none) are pinned; on a pull request target,
-   `pr show` names that pull request; and the user's target and base were
-   confirmed or unambiguous.
+   required — the rounds pin revisions — so where the target is not in a
+   repository, it is the user's call; `git init` and a first commit of the
+   target are the expected outcome. Pin the reviewed revision and the base it
+   is read against: the first parent for a single commit, the endpoints for a
+   range, the merge-base with the target branch for a PR, HEAD plus a
+   dirty-tree note for an uncommitted tree, none for files reviewed as they
+   stand. One attempt to resolve an ambiguous target or base, then the user's
+   call — a wrong base silently changes the changeset under review.
+   `init <name>` creates the database in the review folder — `<name>` the
+   report's title, derived from the review context (PR number, PR author,
+   feature name), with
+   `--db <review-folder>/<yyyy-mm-dd>_<slug>_review.sqlite` where the host
+   provides a session folder and `--pr <url>` where the target is a pull
+   request.
+   **Ready when:** the database and report exist in the review folder, the
+   reviewed revision and its base (or none) are pinned, on a pull request
+   target `pr show` names that pull request, and the user's target and base
+   were confirmed or unambiguous.
 2. **Instructions.** Enumerate every instruction file covering the changed
    paths — `AGENTS.md`, `CLAUDE.md`, editor rule files; repositories carry
    several, per directory — and pair each with the paths inside its scope.
    A review question the user raises opens a discussion; the check it settles
    on joins the rule set, is named in the note of the round that first applies
    it, in a few words, and carries into later rounds only where the user says
-   so. A scope that is genuinely unclear is the user's call. The database
-   stores no rules: the pairing travels in the briefs of a fleet
-   ([fleet.md](fleet.md)). Then
+   so. The database stores no rules: the pairing travels in the briefs of a
+   fleet ([fleet.md](fleet.md)). Then
    `round open --revision <pinned> (--base <rev> | --no-base) --note <text>`
-   records round 1. The note cannot be amended, so it carries the dirty-tree
-   remark, the scope with its exclusions, and the rule sources in one line —
+   records round 1, carrying the dirty-tree remark, the scope with its
+   exclusions, and the rule sources in one line —
    `dirty tree; scope: src/ without generated files; rules: AGENTS.md,
    src/AGENTS.md; agreed check: no network calls`.
    **Ready when:** every changed path is paired with every instruction file
@@ -91,74 +94,166 @@ included) step 7, a fix request the paragraph under States.
    note naming the rule sources — or `rules: none apply`, so an empty rule set
    never reads as an unfinished step.
 3. **Validate.** Apply the rule set to the changeset under the Validation
-   rules below.
+   rules below. Round 1 — fleet briefs included — reads the changeset
+   without the PR's existing comments, so they cannot frame it.
    **Ready when:** every rule applied to every path its scope covers, every
    changed line outside the exclusions read for purpose and the ecosystem's
    best practices, and every finding evidenced or opened as ❓ unverified;
-   with a fleet, the round's folder holds a coverage file per agent: one per
-   rule, plus purpose fit and best practices.
-4. **Record.** `finding add --severity --title --description-file` records
-   each finding in the open round, with `--unverified` where its evidence
-   stayed unsettled — a fleet's reply line marks it ❓; the description follows
-   [Evidence](#evidence). With a fleet, findings on a shared anchor merge per
-   [fleet.md](fleet.md). An empty pass is a result: render the report and tell
-   the user.
-   **Ready when:** every finding carries severity, evidence, and a suggested
-   fix in its description, `finding list` shows each of them, the review is
-   [checkpointed](#checkpoint), and the user has the report's path.
+   with a fleet, the round's folder holds a coverage file per agent — one per
+   rule, plus purpose fit, best practices, and `recheck` (or `recheck-<i>`
+   shards) in a later round — and the index shows the tier bound of
+   [fleet.md](fleet.md) for each dispatch.
+4. **Record.** Filter out candidates already covered by open (⏳ ❓ ✅)
+   findings or by 🔧 fixed findings whose fix holds — if discovery surfaces
+   concrete proof that a 🔧 fixed finding still fails, reopen `<F>`
+   (`reopen <F>`) instead of dropping it — and apply the **closed-finding
+   gate** (step 7, reading `<F>`'s `Updates` via `finding show <F>`) to
+   candidates touching closed findings (❌ 📌 🔀). With a fleet, merge
+   candidates that report the **same defect** (on a shared anchor or shared
+   root cause — never merge a qualifying `reopen <F>` with a distinct `new`
+   defect that merely shares a line) into
+   `<report-stem>/round-<n>/merged/<slug>.md` and run this filtering and gating
+   per [fleet.md](fleet.md): when a round surfaces more than 10 candidate
+   findings or the review already carries more than 30 findings in
+   `finding list`, dispatch a deduplication agent (or a sharded deduplication
+   fleet when there are more than 20 candidate findings or
+   `candidates × existing findings > 500`) with access to the
+   candidate finding files, `finding list` / `finding show`, and the codebase
+   before recording results. Record each qualifying `reopen <F>` with
+   `finding set-description <F> --description-file <file> --round <n>` where
+   the description changed, `finding set-severity <F> <severity> --round <n>`
+   where severity changed, and
+   `finding set-state <F> (awaiting | unverified) --round <n> --note <new proof or causal change, and why prior rationale no longer holds>`,
+   and record each surviving new defect in the open round with
+   `finding add --severity --title --description-file`, adding `--unverified`
+   where its evidence stayed unsettled — a fleet's reply line marks it ❓;
+   descriptions follow [Evidence](#evidence). Where the user asked up front for
+   a sync, run it now and record what others wrote
+   ([pull-request.md](pull-request.md)). A round that neither adds nor reopens
+   a finding is a result: record it with `round update 'no findings'`
+   (`'no new findings'` in a later round). Then tell the user and hand over the
+   report's path.
+   **Ready when:** same-defect candidates are merged (keeping any `reopen <F>`
+   separate from distinct `new` defects), candidates covered by open findings
+   or by 🔧 fixed findings whose fix holds are filtered out (with any 🔧 fixed
+   finding proven still to fail reopened), and candidates touching closed
+   findings (❌ 📌 🔀) are resolved under the closed-finding gate (via the
+   deduplication dispatch of [fleet.md](fleet.md) where triggered); every added
+   or reopened finding carries severity, evidence, and a suggested fix in its
+   description (with reopened findings moved to `awaiting` or `unverified` with
+   a `Round <n>:` note recording the new proof or causal change) and
+   `finding list` shows each of them — or, where the round neither adds nor
+   reopens a finding, it records `no findings` (`no new findings` in a later
+   round) — where the user asked up front for a sync, the pull request's
+   comments are reconciled and the `tier bound` condition holds (step 6), and
+   the user has the report's path.
 5. **Triage.** The user triages from the report — handed over at the end of
    step 4 — in the order and at the pace the user chooses; the agent answers
    the questions that precede a verdict, walks through findings when asked,
    and records each verdict the user gives. Write each verdict with
-   `finding set-state <F> <state> --note <why> --round <n>`, `<n>` the round
-   being triaged: ✅ approved, ❌ discarded, 📌 deferred, 🔀 routed out as an
+   `finding set-state <F> <state> --note <why> --round <n>`, `<n>` the open
+   round: ✅ approved, ❌ discarded, 📌 deferred, 🔀 routed out as an
    improvement. An answer that changes a finding rewrites it —
    `set-description`, `set-severity`, `set-title`, each with a note; a
    question or a remark that moves nothing goes in as `finding update`. A
    finding the user brings in, or one a triage question surfaces, is a
    `finding add` carrying the same evidence — text or screenshots from the
-   user are transcribed in substance — and is filed in the round just triaged.
+   user are transcribed in substance.
    The user may rule on part of the findings; the rest keep their state.
    **Ready when:** every finding the user ruled on carries its state and an
-   Updates entry saying why, every finding raised during the triage is
-   recorded, and the review is checkpointed.
+   Updates entry saying why, and every finding raised during the triage is
+   recorded.
 6. **Publish** — a pull request target, on the user's request: approved
    findings go to the PR as comments, and what others wrote is linked to the
    review. The triage batch the user just ruled on may be partial, and its
    approved findings can go out before the rest are ruled. Follow
    [pull-request.md](pull-request.md).
-   **Ready when:** `finding list --state approved --unposted` lists only
-   findings the user chose to hold back or whose refused post is the user's
-   call; `link pending` prints nothing; the user knows the pending review
-   waits for their submit; and the review is checkpointed.
+   **Ready when:**
+   - **posts:** `finding list --state approved --unposted` lists only findings
+     the user chose to hold back or whose refused post is the user's call;
+   - the pull request's comments, review bodies, and check annotations are
+     **reconciled**: `link pending` prints nothing;
+   - **tier bound:** where a PR-comment dispatch ran, the index shows the tier
+     bound of [fleet.md](fleet.md);
+   - the user knows the pending review waits for their submit.
 7. **Re-review.** A round opens on the user's call: new changes landed in the
-   reviewed area, which the user reports or picks up by syncing the PR;
-   where in doubt, it is the user's call. A pull request target is synced
-   first (`pr sync`, then `link pending` for what is new), so the round sees
-   what others wrote. Where the new work is really a different target, that
-   is the user's call.
+   reviewed area, which the user reports or picks up by syncing the PR. A pull
+   request target runs `pr sync` first. `round open --revision --base --note`
+   opens round `<n>` — the note carries the scope, the rule sources where the
+   instruction files changed, the agreed checks the round applies, and any
+   narrowing (the user may narrow a round to some findings or paths; the
+   re-check covers that subset). On a pull request target, reconcile what is
+   new ([pull-request.md](pull-request.md)) against round `<n>` before
+   verification and discovery, so `reopen <F>` (`--round <n>`) and
+   `finding add` record in round `<n>` and the round sees what others wrote.
    Every round reads the **full changeset** at the new revision — never a
    diff between revisions, because authors amend and force-push and
-   per-commit attribution misleads. `round open --revision --base --note`
-   records it — the note carries the scope, the rule sources where the
-   instruction files changed, the agreed checks the round applies, and any
-   narrowing — then every open finding (⏳ ❓ ✅) and every fixed one, since a
-   fix regresses, is re-checked, and the changeset is searched afresh for what
-   nobody has raised yet. A closed finding (❌ 📌 🔀) is re-checked where
-   the code it points at changed: only changed ground overturns the user's
-   ruling, and a concern that returns with better evidence is a new finding
-   naming the old one, whose state stands until the user rules. Each outcome
-   is an Updates entry carrying `--round <n>` — `finding update`, or
-   `set-state` where the state moves, `fixed` per [States](#states). Comparing
-   revisions serves one purpose: telling where the code the findings point at
-   changed.
-   The user may narrow a round to some findings or paths; the re-check covers
-   that subset.
+   per-commit attribution misleads. Comparing revisions serves one purpose:
+   telling where a finding's code or causal path changed. Every open finding
+   (⏳ ❓ ✅) and every 🔧 fixed one, since a fix regresses, is re-checked; a
+   closed finding (❌ 📌 🔀) is re-checked where its causal path changed or
+   concrete new proof is brought. Before deciding on any re-check or candidate
+   covered by a closed finding (❌ discarded, 📌 deferred, 🔀 improvement),
+   read `<F>`'s `Updates` via `finding show <F>` and apply the
+   **closed-finding gate**:
+   - **Drop** (`holds` in `recheck`): drop rephrased arguments, extra static
+     occurrences of the same pattern, or disagreements with a design or
+     preference ruling in `Updates`. For 📌 deferred and 🔀 improvement (where
+     the user already accepted the defect exists), stronger proof alone still
+     drops.
+   - **Reopen `<F>`** (recorded with
+     `finding set-description <F> --description-file <file> --round <n>` where
+     the description changed, `finding set-severity <F> <severity> --round <n>`
+     where severity changed, and
+     `finding set-state <F> (awaiting | unverified) --round <n> --note <new proof or causal change, and why prior rationale no longer holds>` —
+     `unverified` where qualifying new ground is established under this gate
+     but the defect remains unsettled under [Evidence](#evidence)): use for the
+     **same defect** instead of filing a duplicate ID, preserving `<F>`'s prior
+     rationale and new proof in its `Updates`:
+     - **❌ discarded:** reopen only when changed code in its causal path
+       creates a new material failure, or concrete proof (failing test,
+       execution trace, reproduction) refutes a **factual premise** recorded in
+       the discard note.
+     - **📌 deferred / 🔀 improvement:** reopen only when code changed since
+       the verdict and introduced a new regression or crossed a higher severity
+       boundary.
+     - Where the prior rationale or baseline is unavailable or genuinely
+       ambiguous, surface it as **the user's call** rather than dropping it
+       silently.
+   - **New finding** (recorded with `finding add`, naming `<F>` where
+     relevant): file a new finding only when the candidate is a **distinct,
+     independently actionable defect** in the same area, not the same defect.
+   Execute the round in two ordered phases ([fleet.md](fleet.md)):
+   1. **Verification phase (`recheck`).** First, verify every open finding
+      (⏳ ❓ ✅), every 🔧 fixed finding, and any closed finding (❌ 📌 🔀)
+      where its causal path changed or concrete new proof is brought against
+      the full changeset and codebase — one `recheck` agent up to 15 findings
+      in re-check scope; past 15 findings, shard verification across parallel
+      `recheck-1`, `recheck-2`, … agents (~15–20 findings per agent, each with
+      full codebase access and its own
+      `<report-stem>/round-<n>/recheck-<i>.md` coverage file). Record all
+      outcomes in the database — each an Updates entry carrying `--round <n>`
+      (`finding update`, `finding set-state` where the state moves with `fixed`
+      per [States](#states), or `finding set-state` — plus
+      `finding set-description` where the description changed — for a reopened
+      closed finding) plus step 4 (`finding add`) for any new finding from a
+      defective fix or distinct defect.
+   2. **Discovery phase.** Only after the verification phase is recorded in the
+      database, dispatch the round's discovery fleet (`purpose-fit`,
+      `best-practices`, and rule agents, step 3), passing the updated finding
+      list from `finding list` / `finding show` so discovery agents see the
+      post-verification states and descriptions, and record any reopenings
+      (`set-state`, plus `set-description` where the description changed) and
+      newly discovered findings in step 4.
    **Ready when:** the round stands in the database with its revision, its
-   base, and a note carrying any narrowing; step 3's Ready-when holds for the
-   round's scope at the new revision; every finding the re-check covers
-   carries a `Round <n>:` entry; on a pull request target, `link pending`
-   prints nothing; and the review is checkpointed.
+   base, and a note carrying any narrowing; the verification phase is recorded
+   in the database before the discovery fleet is dispatched; step 3's and step
+   4's Ready-when hold for the round's scope at the new revision (with a fleet,
+   `recheck` or `recheck-<i>` in the index on a family other than the
+   orchestrator's where the orchestrator wrote the fixes); every finding the
+   re-check covers carries a `Round <n>:` entry; and on a pull request target,
+   the pull request's comments are reconciled and the `tier bound` condition
+   holds (step 6).
 
 Steps 5 to 7 are a loop: the round step 7 opens is triaged from step 5.
 
@@ -181,12 +276,14 @@ in the finding's own history.
 **Fixed** is reached two ways. When the PR moves, the user's sync opens a
 round (step 7), and the agent decides, finding by finding, from the code at
 the new revision: wide, the findings step 7 re-checks unless the round note
-narrows it. When the user asks for a fix, the agent implements it, commits it
-apart from the review files, and verifies it the way the finding was verified
-— the same test, trace or measurement now comes out clean: narrow, the finding
-named, and the next round's re-check at the pushed head confirms it. Both end
-in `set-state <F> fixed --revision <rev> --note <how verified>`, with
-`--round <n>` for the first only, and the review is checkpointed.
+narrows it. When the user asks for a fix, the agent implements it, stages and
+commits its paths by name (`git add -- <paths>` and
+`git commit -m <message> -- <paths>`) so unrelated work stays out, and verifies
+it the way the finding was verified — the same test, trace or measurement now
+comes out clean: narrow, the finding named, and the next round's re-check at
+the pushed head confirms it. Both end in
+`set-state <F> fixed --revision <rev> --note <how verified>`, with
+`--round <n>` for the first only.
 
 ## Validation
 
@@ -202,7 +299,7 @@ in `set-state <F> fixed --revision <rev> --note <how verified>`, with
   `linguist-generated` or `linguist-vendored` in `.gitattributes` or by a
   "generated — do not edit" header. A changed generated file gets one check:
   did its source change with it? The round note's scope names the exclusions,
-  so the user can overrule them; a file in doubt is the user's call.
+  so the user can overrule them.
 - Challenge the implementation. A review that summarizes the diff finds
   nothing.
 - Past a handful of files or a few hundred changed lines, dispatch a fleet
@@ -228,8 +325,10 @@ more. It is laid out as:
   only changes it: GitHub takes a comment only inside a diff hunk.
 - The explanation, the snippet in a closed code fence, the suggested fix.
 - Each further occurrence gets its own anchor line and snippet.
-- Headings (`#`) stay inside code fences, and links stay absolute: a
-  relative link points into the review, which the PR's author cannot open.
+- Headings (a `#` line, or a text line underlined with `===` or `---`) stay
+  inside code fences; put a blank line above a `---` rule. Links stay
+  absolute: a relative link points into the review, which the PR's author
+  cannot open.
 
 Verify before claiming: run the test, trace the call path, measure the value.
 An assumption reaches the review along one of two paths — verified (a case
@@ -240,14 +339,3 @@ user's call: it opens as a ❓ unverified finding that states the mechanism,
 what was tried to prove it and to refute it and why each failed, and what
 would settle it. Its severity is its impact if it holds. An unproven concern
 dropped silently is a defect of the review.
-
-## Checkpoint
-
-Commit what the review produced, nothing else. A checkpoint is
-`report render`, then one commit of the database, the report and the round's
-folder to the current branch, which the user prepares for the review: the
-commits are a backup that stays out of the main branch. Only the database
-and the report together are a complete state. Every commit the agent makes,
-a fix commit included, adds its paths by name (`git add -- <paths>`) and
-commits them by name (`git commit -m <message> -- <paths>`), so that new
-files go in and staged work stays out.

@@ -1,0 +1,5 @@
+/.ai/
+node_modules/
+*.sqlite
+out/
+dist/

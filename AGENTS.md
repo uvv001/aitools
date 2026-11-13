@@ -1,7 +1,7 @@
 # aitools
 
 A library of skill, prompt, and agent definitions. Each skill lives in its own
-directory under `skills/`.
+directory under `skills/`; tools that a skill ships live under `tools/`.
 
 ## Skill authoring
 
@@ -16,10 +16,13 @@ Subject line, 75 characters or fewer: `<category>: <entity> — <summary>`.
 Anything longer belongs in the body, after a blank line.
 
 Category and entity come from the path: `skills/progress-tracking/` gives
-`skill: progress-tracking`, `agents/web-ui-inspector.md` gives
-`agent: web-ui-inspector`, and a root-level file gives `repo: AGENTS.md`.
-The summary is optional when the entity name already carries the change.
+`skill: progress-tracking`, `tools/pr-comments/` gives `tool: pr-comments`,
+`agents/web-ui-inspector.md` gives `agent: web-ui-inspector`, and a root-level
+file gives `repo: AGENTS.md`. The summary is optional when the entity name
+already carries the change. A source change under `tools/` and the rebuilt
+skill bundle go in separate commits, each named by its own path.
 
 - `skill: progress-tracking — require _progress file suffix`
+- `tool: pr-comments — default reviews to .ai/`
 - `agent: web-ui-inspector`
 - `repo: AGENTS.md — document the commit message format`
