@@ -485,6 +485,7 @@ describe('cli', () => {
 
       expect(printed).toContain('(default: .ai/review-with-docs/<yyyy-mm-dd>_<slug of the name>_review.sqlite at the git root)');
       expect(printed).toContain('the title of the report (a slug of it names the files by default)');
+      expect(printed).toContain('commands that change rounds or findings update that report');
       expect(printed).not.toContain('--report');
       for (const { words, args, options, summary, description } of COMMANDS) {
         const texts = [summary, description, ...args.map(({ description: text }) => text), ...options.map(({ description: text }) => text)];
@@ -499,6 +500,7 @@ describe('cli', () => {
       await step('link', 'reply', '--help');
       expect(printed).toContain('records the returned reply ref (linked as a note) and update in the database');
       expect(printed).toContain('run\n"pr-comments pr sync --db <file.sqlite>"');
+      expect(printed).toContain('Example:\n  pr-comments link reply r544830 --dry-run --db review.sqlite\n');
     });
 
     it.each([[['--help']], [['-h']], [['help']]])('%j prints the overview: the groups and one line per command, without the options', async (argv) => {

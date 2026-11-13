@@ -40,7 +40,7 @@ Put the token in a file, on one line:
 ~/.config/tokens/<host>              any owner on that host, e.g. github.com
 ```
 
-On Windows the folder is `%USERPROFILE%\.config\tokens`. Or use an environment variable: `PR_COMMENTS_TOKEN_<HOST>__<OWNER>` or `PR_COMMENTS_TOKEN_<HOST>` (upper case, other characters as `_`, e.g. `PR_COMMENTS_TOKEN_GITHUB_COM__ACME`). The most specific one is tried first, and a token is only sent to the host of the pull request.
+On Windows the folder is `%USERPROFILE%\.config\tokens`. Or use an environment variable: `PR_COMMENTS_TOKEN_<HOST>__<OWNER>` or `PR_COMMENTS_TOKEN_<HOST>` (upper case, other characters as `_`, e.g. `PR_COMMENTS_TOKEN_GITHUB_COM__ACME`). `pr-comments` tries the remembered working `token_source` first (`~/.cache/pr-comments/token-sources.json`), and on an access-denied error falls back to candidate tokens in specificity order (`<host>_<owner>` before `<host>`, environment variable before file). It sends a token only to the host of the pull request.
 
 A classic token with the `repo` scope is the simplest. `finding post` and `link reply` need write permission. The full rules (several tokens, fine-grained tokens, the memo file) are in [docs/technical.md](docs/technical.md#7-tokens).
 
@@ -57,7 +57,7 @@ Pull request: https://github.com/acme/widgets/pull/42
 Report: .ai/review-with-docs/2026-10-29_pr-42-tenant-registry_review.md
 ```
 
-Both the database and the report are created, and every change updates the report after the database change commits (if writing the report file fails afterwards, the database change stays saved, the command exits `0`, and `stderr` prints `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"`). Without `--db`, the files go to `.ai/review-with-docs/<yyyy-mm-dd>_<name as a slug>_review.{sqlite,md}` at the git root; whenever `init` places a review under `.ai/review-with-docs/` (subfolders included), it checks with `git check-ignore`, adds `/.ai/review-with-docs/` to `.git/info/exclude` when not already ignored (while `.ai/` itself can remain versioned), and fails if a `.gitignore` rule still exposes the folder. Pass `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` when storing the review in a session folder. Every subsequent command takes `--db <file.sqlite>` (`$DB` below). If the pull request does not exist yet, leave out `--pr`, and connect it later:
+`init` creates both the database and the `.md` report, and commands that change rounds or findings update the `.md` report after the database change commits (`link note`, `pr connect`, and `pr sync` do not; if writing the report file fails afterwards, the database change stays saved, the command exits `0`, and `stderr` prints `Warning: the report <report> was not refreshed (<reason>); run "pr-comments report render --db <db>"`). Without `--db`, the files go to `.ai/review-with-docs/<yyyy-mm-dd>_<name as a slug>_review.{sqlite,md}` at the git root; whenever `init` places a review under `.ai/review-with-docs/` (subfolders included), it checks with `git check-ignore`, adds `/.ai/review-with-docs/` to `.git/info/exclude` when not already ignored (while `.ai/` itself can remain versioned), and fails if a `.gitignore` rule still exposes the folder. Pass `--db <session-folder>/files/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` when storing the review in a session folder. Every subsequent command takes `--db <file.sqlite>` (`$DB` below). If the pull request does not exist yet, leave out `--pr`, and connect it later:
 
 ```
 pr-comments pr connect https://github.com/acme/widgets/pull/42 --db $DB
@@ -212,7 +212,7 @@ Every command also has `pr-comments <command> --help` (or `pr-comments help <com
 
 ### Start a review
 
-**`init`**: creates the review database. Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request. It never replaces an existing database or report file. The report (markdown) is written next to the database (`<stem>`.md) and updated on every change.
+**`init`**: creates the review database. Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request. It never replaces an existing database or report file. It writes the markdown report next to the database (`<stem>`.md), and commands that change rounds or findings update that report ("link note", "pr connect", and "pr sync" do not).
 
 ```
 pr-comments init <name> [--pr <url>] [--db <file.sqlite>]
@@ -442,7 +442,7 @@ pr-comments link remove r544861 --db review.sqlite
 
 ```
 pr-comments link reply <ref> [--by-agent] [--now] [--dry-run] --db <file.sqlite>
-pr-comments link reply c623843 --dry-run --db review.sqlite
+pr-comments link reply r544830 --dry-run --db review.sqlite
 ```
 
 - `<ref>`: the comment that is linked as a duplicate: r544830 or c623843.
@@ -492,7 +492,7 @@ pr-comments --version
 
 ### States and severities
 
-A finding has a state and a severity. The report shows them as markers. In commands you write the name (the first word is enough, any case) or the marker.
+A finding has a state and a severity. The report shows them as markers. For states (`finding set-state` and `finding list --state`), write the state name (the first word is enough, any case) or its marker. For severities, `finding add` and `finding set-severity` take severity names (`high`, `medium`, `low`, any case), while `finding list --severity` accepts either a name or its marker (`🔴`, `🟡`, `⚪`).
 
 | Marker | `--state` / `<state>` | Meaning |
 | --- | --- | --- |
@@ -536,7 +536,7 @@ The GitHub web UI cannot search a comment or review by id, so the Updates of the
 - `--db <file.sqlite>` is required on every command except `init`. The name must end in `.sqlite`.
 - A command that changes the database prints `Review database: <path>` on stderr after it succeeded, so you can see which review it changed. A dry run does not, and neither does `pr connect` to the pull request the review is already connected to.
 - `init` uses `--db` to name the file it creates, defaulting to `.ai/review-with-docs/<yyyy-mm-dd>_<slug>_review.sqlite` at the git root.
-- Several commands at once are safe: they wait for each other, up to 10 seconds. The read commands (`finding list`, `finding show`, `link pending`, `pr show`, and the `report` commands) open the file read-only and change nothing in it.
+- Mutating commands and `report render` run one at a time per database: wait for each command to finish before starting the next. Read-only commands (`finding list`, `finding show`, `link pending`, `pr show`, `report render`, and `report comments`) open the database read-only and change nothing in it. If a conflicting SQLite lock is held, read-only commands wait up to SQLite's 10-second busy timeout.
 
 ### Strict arguments and help
 

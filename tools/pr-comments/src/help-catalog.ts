@@ -142,7 +142,8 @@ export const COMMAND_SPECS: CommandSpec[] = [
     'init',
     'creates the review database',
     'Creates the SQLite database that holds the review (findings, rounds, links) and, later, the downloaded pull request.\n' +
-      'It never replaces an existing database or report file. The report (markdown) is written next to the database (<stem>.md) and updated on every change.',
+      'It never replaces an existing database or report file. It writes the markdown report next to the database (<stem>.md),\n' +
+      'and commands that change rounds or findings update that report ("link note", "pr connect", and "pr sync" do not).',
     {
       args: [arg('<name>', 'what is under review; the title of the report (a slug of it names the files by default)')],
       options: [
@@ -343,7 +344,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
         'A conversation comment (`c…`) has no thread and is answered with a new conversation comment visible at once, so it needs `--now`.',
         'The output says whether the thread is open or resolved, as information only. A rerun does not reply twice. The exit code is 1 when the result is an error.',
       ],
-      example: 'c623843 --dry-run',
+      example: 'r544830 --dry-run',
     },
   ),
   spec(
