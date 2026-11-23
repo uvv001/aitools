@@ -77,9 +77,9 @@ The revision is `HEAD` unless you say `--revision`. The tool stores the short ha
 
 ```
 pr-comments finding add --severity high --title "Tenant lookup never gives up" --description-file notes/retry.md --db $DB
-Added F1
+Added AB1
 pr-comments finding add --severity medium --title "Failed lookups are swallowed" --description-file - --db $DB
-Added F2
+Added AB2
 ```
 
 Here `notes/retry.md` starts with `` `src/tenants/registry.ts:22-32` ``, then the explanation, then a code block. The second description comes from standard input. A finding starts as ⏳ awaiting triage. A round must be open.
@@ -88,16 +88,16 @@ Here `notes/retry.md` starts with `` `src/tenants/registry.ts:22-32` ``, then th
 
 ```
 pr-comments finding list --db $DB
-F1  ⏳ 🔴  Tenant lookup never gives up
-F2  ⏳ 🟡  Failed lookups are swallowed
+AB1  ⏳ 🔴  Tenant lookup never gives up
+AB2  ⏳ 🟡  Failed lookups are swallowed
 2 of 2 findings
-pr-comments finding show F1 --db $DB
-pr-comments finding set-state F1 approved --note "the user agreed" --db $DB
-F1: ⏳ → ✅
-pr-comments finding set-state F2 approved --db $DB
-F2: ⏳ → ✅
-pr-comments finding update F2 "Asked the author about the log level" --round 1 --db $DB
-F2: note added
+pr-comments finding show AB1 --db $DB
+pr-comments finding set-state AB1 approved --note "the user agreed" --db $DB
+AB1: ⏳ → ✅
+pr-comments finding set-state AB2 approved --db $DB
+AB2: ⏳ → ✅
+pr-comments finding update AB2 "Asked the author about the log level" --round 1 --db $DB
+AB2: note added
 ```
 
 `finding show` prints the description and the Updates. `finding set-severity`, `set-title` and `set-description` change the rest. Every change is logged under the Updates of the finding.
@@ -132,22 +132,22 @@ Go through the list. Each line gets a link:
 - A new issue: first `finding add`, then link it to that finding. A check annotation is always linked as a duplicate of a finding. It is never a note.
 
 ```
-pr-comments link own F1 r544861 --note "written by hand" --db $DB
-F1: own comment r544861 linked
-pr-comments link duplicate F1 v91204 --db $DB
-F1: duplicate v91204 linked
-pr-comments link duplicate F1 r544900 --db $DB
-F1: duplicate r544900 linked
+pr-comments link own AB1 r544861 --note "written by hand" --db $DB
+AB1: own comment r544861 linked
+pr-comments link duplicate AB1 v91204 --db $DB
+AB1: duplicate v91204 linked
+pr-comments link duplicate AB1 r544900 --db $DB
+AB1: duplicate r544900 linked
 pr-comments link note r544901 "author status reply" --db $DB
 r544901: noted
 pr-comments link note c623843 "a wish, not a finding" --db $DB
 c623843: noted
 pr-comments finding add --severity low --title "Cognitive complexity of Registry.resolve" --description-file - --db $DB
-Added F3
-pr-comments link duplicate F3 a126305ce --db $DB
-F3: duplicate a126305ce linked
-pr-comments link duplicate F2 a8d5d4a2a --db $DB
-F2: duplicate a8d5d4a2a linked
+Added AB3
+pr-comments link duplicate AB3 a126305ce --db $DB
+AB3: duplicate a126305ce linked
+pr-comments link duplicate AB2 a8d5d4a2a --db $DB
+AB2: duplicate a8d5d4a2a linked
 ```
 
 When `link pending` prints nothing, every comment, nonempty submitted review body, and check annotation is linked at its current text. Re-run the matching `link` command to confirm an `edited` item (or `link remove <ref>` and a new `link` command if its classification changed). The exit code is 0 whether it printed something or not, so pending work is never a failure. (Before the first `pr sync` it is an error instead.)
@@ -156,10 +156,10 @@ When `link pending` prints nothing, every comment, nonempty submitted review bod
 
 ```
 pr-comments finding list --state approved --unposted --db $DB
-F2  ✅ 🟡  Failed lookups are swallowed
+AB2  ✅ 🟡  Failed lookups are swallowed
 1 of 3 findings
-pr-comments finding post F2 --dry-run --db $DB
-pr-comments finding post F2 --db $DB
+pr-comments finding post AB2 --dry-run --db $DB
+pr-comments finding post AB2 --db $DB
 ```
 
 `--dry-run` checks everything and prints the exact text and the place, and writes nothing. A real post adds the comment to your **pending review**. Nobody else sees it until you submit that review. The tool links the comment to the finding as its own comment. `--now` publishes at once instead, but GitHub allows that only when you have no pending review. A finding without a `path:lines` anchor becomes a general comment, which needs `--now`. A finding in any state can be posted, for example one that is already ✅ approved or 🔧 fixed: the state is not part of the comment.
@@ -171,7 +171,7 @@ pr-comments link reply r544900 --dry-run --db $DB
 pr-comments link reply r544900 --db $DB
 ```
 
-`F1` has the own comment `r544861`, so the reply to the duplicate `r544900` points to it (and `link reply` automatically links the reply comment itself as a `note` so `link pending` stays empty). A conversation comment (`c…`) can only be answered at once, so it needs `--now`. Review bodies (`v…`) and check annotations (`a…`) are never answered.
+`AB1` has the own comment `r544861`, so the reply to the duplicate `r544900` points to it (and `link reply` automatically links the reply comment itself as a `note` so `link pending` stays empty). A conversation comment (`c…`) can only be answered at once, so it needs `--now`. Review bodies (`v…`) and check annotations (`a…`) are never answered.
 
 **9. Submit the pending review in the GitHub web UI.** One submit sends all your comments and replies to the author at once. This is one round of review. The tool never submits for you.
 
@@ -191,8 +191,8 @@ Wrote .ai/review-with-docs/pr-42_comments.md
 pr-comments pr sync --db $DB
 pr-comments link pending --db $DB
 pr-comments round open --base origin/main --db $DB
-pr-comments finding set-state F2 fixed --revision HEAD --note "retry now logs" --db $DB
-F2: ✅ → 🔧
+pr-comments finding set-state AB2 fixed --revision HEAD --note "retry now logs" --db $DB
+AB2: ✅ → 🔧
 ```
 
 `fixed` needs the revision that fixes the finding. Repeat from step 3 for new findings.
@@ -302,19 +302,19 @@ pr-comments finding list --state approved --unposted --db review.sqlite
 
 ```
 pr-comments finding show <finding> --db <file.sqlite>
-pr-comments finding show F7 --db review.sqlite
+pr-comments finding show AB7 --db review.sqlite
 ```
 
-- `<finding>`: the finding, such as F7 (any case).
+- `<finding>`: the finding, such as AB7 (any case).
 
 **`finding set-state`**: moves a finding to another state. Moves the finding to another state (any state except the one it is already in). A change is logged under the Updates of the finding, with the time. The state fixed needs the revision that fixes it. A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the short hash (at least 8 characters) of the commit.
 
 ```
 pr-comments finding set-state <finding> <state> [--revision <rev>] [--note <text>] [--round <n>] --db <file.sqlite>
-pr-comments finding set-state F7 fixed --revision HEAD --db review.sqlite
+pr-comments finding set-state AB7 fixed --revision HEAD --db review.sqlite
 ```
 
-- `<finding>`: the finding, such as F7 (any case).
+- `<finding>`: the finding, such as AB7 (any case).
 - `<state>`: awaiting, unverified, approved, fixed, discarded, deferred or improvement.
 - `--revision <rev>`: the revision the change is about.
 - `--note <text>`: why.
@@ -324,10 +324,10 @@ pr-comments finding set-state F7 fixed --revision HEAD --db review.sqlite
 
 ```
 pr-comments finding set-severity <finding> <severity> [--note <text>] [--round <n>] --db <file.sqlite>
-pr-comments finding set-severity F7 medium --db review.sqlite
+pr-comments finding set-severity AB7 medium --db review.sqlite
 ```
 
-- `<finding>`: the finding, such as F7 (any case).
+- `<finding>`: the finding, such as AB7 (any case).
 - `<severity>`: high, medium or low.
 - `--note <text>`: why.
 - `--round <n>`: write "Round `<n>`: " at the start of the Updates entry (a round that was opened).
@@ -336,10 +336,10 @@ pr-comments finding set-severity F7 medium --db review.sqlite
 
 ```
 pr-comments finding set-title <finding> <title> [--note <text>] [--round <n>] --db <file.sqlite>
-pr-comments finding set-title F7 "Missing retry timeout" --db review.sqlite
+pr-comments finding set-title AB7 "Missing retry timeout" --db review.sqlite
 ```
 
-- `<finding>`: the finding, such as F7 (any case).
+- `<finding>`: the finding, such as AB7 (any case).
 - `<title>`: the new title, one line.
 - `--note <text>`: why.
 - `--round <n>`: write "Round `<n>`: " at the start of the Updates entry (a round that was opened).
@@ -348,10 +348,10 @@ pr-comments finding set-title F7 "Missing retry timeout" --db review.sqlite
 
 ```
 pr-comments finding set-description <finding> --description-file <file|-> [--note <text>] [--round <n>] --db <file.sqlite>
-pr-comments finding set-description F7 --description-file - --db review.sqlite
+pr-comments finding set-description AB7 --description-file - --db review.sqlite
 ```
 
-- `<finding>`: the finding, such as F7 (any case).
+- `<finding>`: the finding, such as AB7 (any case).
 - `--description-file <file|->`: the new description, read from a UTF-8 file or from standard input (-).
 - `--note <text>`: why.
 - `--round <n>`: write "Round `<n>`: " at the start of the Updates entry (a round that was opened).
@@ -360,10 +360,10 @@ pr-comments finding set-description F7 --description-file - --db review.sqlite
 
 ```
 pr-comments finding update <finding> <text> [--round <n>] --db <file.sqlite>
-pr-comments finding update F7 "Asked the author" --round 1 --db review.sqlite
+pr-comments finding update AB7 "Asked the author" --round 1 --db review.sqlite
 ```
 
-- `<finding>`: the finding, such as F7 (any case).
+- `<finding>`: the finding, such as AB7 (any case).
 - `<text>`: the update.
 - `--round <n>`: write "Round `<n>`: " at the start of the Updates entry (a round that was opened).
 
@@ -371,16 +371,16 @@ pr-comments finding update F7 "Asked the author" --round 1 --db review.sqlite
 
 ```
 pr-comments finding post <finding> [--anchor <n>] [--commit <sha>] [--by-agent] [--now] [--dry-run] --db <file.sqlite>
-pr-comments finding post F7 --dry-run --db review.sqlite
+pr-comments finding post AB7 --dry-run --db review.sqlite
 ```
 
-- `<finding>`: the finding, such as F7 (any case).
+- `<finding>`: the finding, such as AB7 (any case).
 - `--anchor <n>`: use the n-th path:lines anchor of the description (default: 1).
 - `--commit <sha>`: pin the comment to this commit, 7-40 hex digits (default: the head of the pull request).
 - `--by-agent`: start the comment with a line saying an agent wrote it.
 - `--now`: publish immediately instead of adding to your pending review.
 - `--dry-run`: check everything and say what would happen, without writing anything.
-- The comment is `<severity> **<id> — <title>**` and the description (e.g. `🔴 **F7 — Missing timeout**`). Only the description goes to GitHub, never the Updates; relative links pointing into the review are replaced by their text.
+- The comment is `<severity> **<id> — <title>**` and the description (e.g. `🔴 **AB7 — Missing timeout**`). Only the description goes to GitHub, never the Updates; relative links pointing into the review are replaced by their text.
 - The place is the first `` `path:lines` `` anchor of the description (`--anchor <n>` picks another; a whole-file finding uses `path:1` when line 1 is in the diff).
 - `--now` publishes at once (not possible while you have a pending review); `--commit <sha>` pins the comment when no pending review exists yet.
 - The exit code is 1 when the result is an error.
@@ -400,10 +400,10 @@ pr-comments link pending --db review.sqlite
 
 ```
 pr-comments link own <finding> <ref> [--note <text>] --db <file.sqlite>
-pr-comments link own F7 r544861 --db review.sqlite
+pr-comments link own AB7 r544861 --db review.sqlite
 ```
 
-- `<finding>`: the finding, such as F7 (any case).
+- `<finding>`: the finding, such as AB7 (any case).
 - `<ref>`: the comment: r544830 or c623843.
 - `--note <text>`: why.
 
@@ -411,10 +411,10 @@ pr-comments link own F7 r544861 --db review.sqlite
 
 ```
 pr-comments link duplicate <finding> <ref> [--note <text>] --db <file.sqlite>
-pr-comments link duplicate F7 c623843 --db review.sqlite
+pr-comments link duplicate AB7 c623843 --db review.sqlite
 ```
 
-- `<finding>`: the finding, such as F7 (any case).
+- `<finding>`: the finding, such as AB7 (any case).
 - `<ref>`: the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e.
 - `--note <text>`: why.
 
@@ -516,7 +516,7 @@ Any state can follow any other. A resolved thread on GitHub does not change a fi
 
 | Id | What it is | Where it comes from |
 | --- | --- | --- |
-| `F7` | A finding of the review | The next free number. Never reused. Any case on input |
+| `AB7` | A finding of the review | A random two-letter prefix for the review, then the next free number. Never reused. Any case on input |
 | `r544830` | A review comment (inline or on a file, root or reply) | The number in the comment's link: `#discussion_r544830` |
 | `c623843` | A conversation comment | `#issuecomment-623843` |
 | `v91204` | A nonempty submitted pull request review body | `#pullrequestreview-91204` |

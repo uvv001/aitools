@@ -26,7 +26,7 @@ export interface PostFindingDeps {
 }
 
 export interface PostedFinding {
-  // The finding, as named in the review ("F4").
+  // The finding, as named in the review ("AB4").
   finding: string;
   // What happened to its one comment (or would, in a dry run), with the ref and the place, as `post` reports.
   result: PublishResult;

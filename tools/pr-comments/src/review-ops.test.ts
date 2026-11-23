@@ -84,7 +84,7 @@ const FINDING: AddFindingInput = {
   description: 'See `src/a.ts:3`.',
 };
 
-const fresh = (): ReviewData => newReview('PR 42 — tenant registry 🚀');
+const fresh = (): ReviewData => newReview('PR 42 — tenant registry 🚀', 'AB');
 const open = (): ReviewData => openRound(fresh(), { revision: 'abc1234', base: 'def5678' });
 
 function reviewWith(count: number): ReviewData {
@@ -123,15 +123,17 @@ describe('formatStamp', () => {
 
 describe('newReview', () => {
   it('has no rounds and no findings: Reviewed is the one intro entry, and it is empty', () => {
-    expect(sound(newReview('PR 42'))).toStrictEqual({
+    const data = sound(newReview('PR 42', 'AB'));
+    expect(data).toStrictEqual({
       target: 'PR 42',
+      findingPrefix: 'AB',
       intro: { reviewed: { items: [] } },
       findings: [],
     });
   });
 
   it('renders the bare Reviewed label above the empty dashboard and findings', () => {
-    expect(renderReport(newReview('PR 42'))).toBe(
+    expect(renderReport(newReview('PR 42', 'AB'))).toBe(
       `${lines(
         '# Review — PR 42',
         '',
@@ -152,6 +154,14 @@ describe('newReview', () => {
 
   it('trims the target and keeps its emoji and dashes', () => {
     expect(sound(newReview('  PR 42 — tenant registry 🚀  ')).target).toBe('PR 42 — tenant registry 🚀');
+  });
+
+  it('generates a two-letter uppercase ASCII finding prefix', () => {
+    for (let run = 0; run < 20; run++) expect(newReview('PR 42').findingPrefix).toMatch(/^[A-Z]{2}$/u);
+  });
+
+  it.each(['', 'A', 'ABC', 'ab', 'A1', 'ÄB'])('refuses the invalid supplied finding prefix %j', (prefix) => {
+    expect(() => newReview('PR 42', prefix)).toThrow(new Error(`finding prefix "${prefix}" must be two uppercase ASCII letters`));
   });
 
   it('refuses a blank target and a target of several lines', () => {
@@ -258,12 +268,12 @@ describe('updateRound', () => {
 });
 
 describe('addFinding', () => {
-  it('raises F1 at ⏳ in the latest round', () => {
+  it('raises AB1 at ⏳ in the latest round', () => {
     const { data, id } = raise(open(), FINDING, at(1));
-    expect(id).toBe('F1');
+    expect(id).toBe('AB1');
     expect(data.findings).toStrictEqual([
       {
-        id: 'F1',
+        id: 'AB1',
         state: '⏳',
         severity: '🔴',
         title: 'Unguarded `resource.value()` crashes',
@@ -297,18 +307,26 @@ describe('addFinding', () => {
     refuses(open(), (input) => addFinding(input, { ...FINDING, severity: 'urgent' as SeverityName }, at()), /^--severity "urgent" is not a severity/u);
   });
 
-  it('numbers the ids from the highest one, numerically: F9 then F10 then F11', () => {
-    let { data, id } = raise(withFindings('F9'), FINDING);
-    expect(id).toBe('F10');
+  it('numbers the ids from the highest one, numerically: AB9 then AB10 then AB11', () => {
+    let { data, id } = raise(withFindings('AB9'), FINDING);
+    expect(id).toBe('AB10');
     ({ data, id } = raise(data, FINDING));
-    expect(id).toBe('F11');
-    expect(data.findings.map((finding) => finding.id)).toStrictEqual(['F9', 'F10', 'F11']);
-    expect(raise(withFindings('F2', 'F10'), FINDING).id).toBe('F11');
+    expect(id).toBe('AB11');
+    expect(data.findings.map((finding) => finding.id)).toStrictEqual(['AB9', 'AB10', 'AB11']);
+    expect(raise(withFindings('AB2', 'AB10'), FINDING).id).toBe('AB11');
   });
 
   it('never reuses an id, however sparse the ones there are', () => {
-    expect(raise(withFindings('F1', 'F3'), FINDING).id).toBe('F4');
-    expect(raise(withFindings('F7'), FINDING).id).toBe('F8');
+    expect(raise(withFindings('AB1', 'AB3'), FINDING).id).toBe('AB4');
+    expect(raise(withFindings('AB7'), FINDING).id).toBe('AB8');
+  });
+
+  it('increments large suffixes without losing precision', () => {
+    expect(raise(withFindings('AB9007199254740993'), FINDING).id).toBe('AB9007199254740994');
+  });
+
+  it('counts only ids with the review prefix', () => {
+    expect(raise(withFindings('CD100', 'AB2'), FINDING).id).toBe('AB3');
   });
 
   it('joins the latest of three rounds', () => {
@@ -352,7 +370,7 @@ describe('addFinding', () => {
       '```md',
       '# Title',
       '## Intro',
-      '### ✅ 🔴 F9 — quoted',
+      '### ✅ 🔴 AB9 — quoted',
       '#### Updates',
       '```',
       '~~~',
@@ -383,11 +401,11 @@ describe('addFinding', () => {
     expect(formatUpdateItem(first(data).updates[0]!)).toBe(`2026-10-08 09:06 — Round 1: raised ⏳ — ${indented}`);
 
     const updatedBlocks = `${blocks}\nmore`;
-    data = pure(data, (input) => setDescription(input, 'F1', { description: updatedBlocks, note: blocks }, at(2)));
+    data = pure(data, (input) => setDescription(input, 'AB1', { description: updatedBlocks, note: blocks }, at(2)));
     expect(first(data).description).toBe(updatedBlocks);
     expect(formatUpdateItem(first(data).updates[1]!)).toBe(`2026-10-08 09:07 — description revised — ${indented}`);
 
-    data = pure(data, (input) => addUpdate(input, 'F1', { text: blocks }, at(3)));
+    data = pure(data, (input) => addUpdate(input, 'AB1', { text: blocks }, at(3)));
     expect(formatUpdateItem(first(data).updates[2]!)).toBe(`2026-10-08 09:08 — ${indented}`);
   });
 
@@ -408,7 +426,7 @@ describe('setState', () => {
 
   it.each(STATES.slice(1))('moves ⏳ to $marker $label', ({ marker, label }) => {
     const input = marker === '🔧' ? { state: label, revision: 'abc1234' } : { state: label };
-    const data = state(reviewWith(1), 'F1', input);
+    const data = state(reviewWith(1), 'AB1', input);
     const revision = marker === '🔧' ? ' at `abc1234`' : '';
     expect(first(data).state).toBe(marker);
     expect(first(data).updates.at(-1)).toStrictEqual({
@@ -424,17 +442,17 @@ describe('setState', () => {
 
   it('reads the state by marker, label, first word, in any case', () => {
     for (const name of ['✅', 'approved', 'Approved', '  APPROVED  ']) {
-      expect(first(state(reviewWith(1), 'F1', { state: name })).state).toBe('✅');
+      expect(first(state(reviewWith(1), 'AB1', { state: name })).state).toBe('✅');
     }
-    const approved = state(reviewWith(1), 'F1', { state: 'approved' });
+    const approved = state(reviewWith(1), 'AB1', { state: 'approved' });
     for (const name of ['⏳', 'awaiting', 'awaiting triage']) {
-      expect(first(state(approved, 'F1', { state: name })).state).toBe('⏳');
+      expect(first(state(approved, 'AB1', { state: name })).state).toBe('⏳');
     }
   });
 
   it('writes the round, the revision and the note: `Round 2: 🔧 → ✅ at `rev` — note`', () => {
-    const fixed = state(inRound(2), 'F1', { state: 'fixed', revision: 'aaa1111' });
-    const data = state(fixed, 'F1', { state: 'approved', revision: 'bbb2222', round: 2, note: 'regressed in the rebase' }, 6);
+    const fixed = state(inRound(2), 'AB1', { state: 'fixed', revision: 'aaa1111' });
+    const data = state(fixed, 'AB1', { state: 'approved', revision: 'bbb2222', round: 2, note: 'regressed in the rebase' }, 6);
     expect(first(data).updates.at(-1)).toStrictEqual({
       kind: 'state',
       at: '2026-10-08 09:11',
@@ -450,7 +468,7 @@ describe('setState', () => {
   });
 
   it('indents a multi-line note', () => {
-    const data = state(reviewWith(1), 'F1', { state: 'deferred', note: 'later:\n\n- after the release\r\n- not now' });
+    const data = state(reviewWith(1), 'AB1', { state: 'deferred', note: 'later:\n\n- after the release\r\n- not now' });
     expect(formatUpdateItem(first(data).updates.at(-1)!)).toBe(
       lines('2026-10-08 09:10 — ⏳ → 📌 — later:', '', '  - after the release', '  - not now'),
     );
@@ -458,7 +476,7 @@ describe('setState', () => {
 
   it('changes only the finding it names', () => {
     const before = reviewWith(3);
-    const data = state(before, 'f2', { state: 'discarded' });
+    const data = state(before, 'ab2', { state: 'discarded' });
     expect(data.findings[0]).toStrictEqual(before.findings[0]);
     expect(data.findings[2]).toStrictEqual(before.findings[2]);
     expect(data.findings[1]?.state).toBe('❌');
@@ -466,33 +484,33 @@ describe('setState', () => {
   });
 
   it('needs the revision to move to fixed', () => {
-    refuses(reviewWith(1), (input) => setState(input, 'F1', { state: 'fixed' }, at()), 'moving F1 to 🔧 fixed needs the revision that fixes it');
-    refuses(reviewWith(1), (input) => setState(input, 'F1', { state: '🔧', revision: 'a b' }, at()), 'revision "a b" must be one word, without backticks');
+    refuses(reviewWith(1), (input) => setState(input, 'AB1', { state: 'fixed' }, at()), 'moving AB1 to 🔧 fixed needs the revision that fixes it');
+    refuses(reviewWith(1), (input) => setState(input, 'AB1', { state: '🔧', revision: 'a b' }, at()), 'revision "a b" must be one word, without backticks');
   });
 
   it('refuses the state the finding is in', () => {
-    refuses(reviewWith(1), (input) => setState(input, 'F1', { state: 'awaiting' }, at()), 'F1 is already ⏳ awaiting triage');
-    const approved = state(reviewWith(1), 'F1', { state: 'approved' });
-    refuses(approved, (input) => setState(input, 'F1', { state: '✅' }, at()), 'F1 is already ✅ approved');
+    refuses(reviewWith(1), (input) => setState(input, 'AB1', { state: 'awaiting' }, at()), 'AB1 is already ⏳ awaiting triage');
+    const approved = state(reviewWith(1), 'AB1', { state: 'approved' });
+    refuses(approved, (input) => setState(input, 'AB1', { state: '✅' }, at()), 'AB1 is already ✅ approved');
   });
 
   it('refuses a state that is no state, listing the valid ones', () => {
     refuses(
       reviewWith(1),
-      (input) => setState(input, 'F1', { state: 'done' }, at()),
+      (input) => setState(input, 'AB1', { state: 'done' }, at()),
       '"done" is not a state; use one of: ⏳ awaiting (awaiting triage), ❓ unverified, ✅ approved, 🔧 fixed, ❌ discarded, 📌 deferred, 🔀 improvement',
     );
   });
 
   it('refuses an unknown finding, listing the ones there are', () => {
-    refuses(reviewWith(2), (input) => setState(input, 'F9', { state: 'approved' }, at()), 'unknown finding "F9"; the report has F1, F2');
-    refuses(open(), (input) => setState(input, 'F1', { state: 'approved' }, at()), 'unknown finding "F1"; the report has no findings');
-    expect(first(state(reviewWith(1), ' f1 ', { state: 'approved' })).state).toBe('✅');
+    refuses(reviewWith(2), (input) => setState(input, 'AB9', { state: 'approved' }, at()), 'unknown finding "AB9"; the report has AB1, AB2');
+    refuses(open(), (input) => setState(input, 'AB1', { state: 'approved' }, at()), 'unknown finding "AB1"; the report has no findings');
+    expect(first(state(reviewWith(1), ' ab1 ', { state: 'approved' })).state).toBe('✅');
   });
 
   it('refuses a round that is not a whole number from 1', () => {
     for (const round of [0, -1, 1.5, Number.NaN]) {
-      refuses(reviewWith(1), (input) => setState(input, 'F1', { state: 'approved', round }, at()), `round ${round} is not a round number; rounds count from 1`);
+      refuses(reviewWith(1), (input) => setState(input, 'AB1', { state: 'approved', round }, at()), `round ${round} is not a round number; rounds count from 1`);
     }
   });
 });
@@ -500,7 +518,7 @@ describe('setState', () => {
 describe('setSeverity', () => {
   it('moves the severity and logs `severity 🟡 → 🔴`', () => {
     const before = raise(open(), { ...FINDING, severity: 'medium' }).data;
-    const data = pure(before, (input) => setSeverity(input, 'F1', { severity: 'high' }, at(5)));
+    const data = pure(before, (input) => setSeverity(input, 'AB1', { severity: 'high' }, at(5)));
     expect(first(data).severity).toBe('🔴');
     expect(first(data).updates.at(-1)).toStrictEqual({
       kind: 'severity',
@@ -512,7 +530,7 @@ describe('setSeverity', () => {
   });
 
   it('writes the round and the note, and reads a marker as well as a name', () => {
-    const data = pure(inRound(2), (input) => setSeverity(input, 'F1', { severity: '⚪' as SeverityName, round: 2, note: 'polish only' }, at(5)));
+    const data = pure(inRound(2), (input) => setSeverity(input, 'AB1', { severity: '⚪' as SeverityName, round: 2, note: 'polish only' }, at(5)));
     expect(first(data).severity).toBe('⚪');
     expect(first(data).updates.at(-1)).toStrictEqual({
       kind: 'severity',
@@ -526,15 +544,15 @@ describe('setSeverity', () => {
   });
 
   it('refuses the severity the finding has, and one that is no severity', () => {
-    refuses(reviewWith(1), (input) => setSeverity(input, 'F1', { severity: 'high' }, at()), 'F1 already has severity 🔴');
-    refuses(reviewWith(1), (input) => setSeverity(input, 'F1', { severity: 'urgent' as SeverityName }, at()), /^--severity "urgent" is not a severity/u);
-    refuses(reviewWith(1), (input) => setSeverity(input, 'F2', { severity: 'low' }, at()), 'unknown finding "F2"; the report has F1');
+    refuses(reviewWith(1), (input) => setSeverity(input, 'AB1', { severity: 'high' }, at()), 'AB1 already has severity 🔴');
+    refuses(reviewWith(1), (input) => setSeverity(input, 'AB1', { severity: 'urgent' as SeverityName }, at()), /^--severity "urgent" is not a severity/u);
+    refuses(reviewWith(1), (input) => setSeverity(input, 'AB2', { severity: 'low' }, at()), 'unknown finding "AB2"; the report has AB1');
   });
 });
 
 describe('setTitle', () => {
   it('changes the title and logs both', () => {
-    const data = pure(reviewWith(1), (input) => setTitle(input, 'F1', { title: '  Fixed “title” ✨ ' }, at(5)));
+    const data = pure(reviewWith(1), (input) => setTitle(input, 'AB1', { title: '  Fixed “title” ✨ ' }, at(5)));
     expect(first(data).title).toBe('Fixed “title” ✨');
     expect(first(data).updates.at(-1)).toStrictEqual({
       kind: 'title',
@@ -548,7 +566,7 @@ describe('setTitle', () => {
   });
 
   it('writes the round and the note', () => {
-    const data = pure(inRound(3), (input) => setTitle(input, 'F1', { title: 'Better', round: 3, note: 'the old one misled' }, at(5)));
+    const data = pure(inRound(3), (input) => setTitle(input, 'AB1', { title: 'Better', round: 3, note: 'the old one misled' }, at(5)));
     expect(first(data).updates.at(-1)).toStrictEqual({
       kind: 'title',
       at: '2026-10-08 09:10',
@@ -563,16 +581,16 @@ describe('setTitle', () => {
   });
 
   it('refuses the same title, an empty one, and one of several lines', () => {
-    refuses(reviewWith(1), (input) => setTitle(input, 'F1', { title: ' Title 1 ' }, at()), 'F1 already has the title "Title 1"');
-    refuses(reviewWith(1), (input) => setTitle(input, 'F1', { title: '' }, at()), 'title is empty');
-    refuses(reviewWith(1), (input) => setTitle(input, 'F1', { title: 'a\nb' }, at()), 'title must be one line, it contains a line break');
+    refuses(reviewWith(1), (input) => setTitle(input, 'AB1', { title: ' Title 1 ' }, at()), 'AB1 already has the title "Title 1"');
+    refuses(reviewWith(1), (input) => setTitle(input, 'AB1', { title: '' }, at()), 'title is empty');
+    refuses(reviewWith(1), (input) => setTitle(input, 'AB1', { title: 'a\nb' }, at()), 'title must be one line, it contains a line break');
   });
 });
 
 describe('setDescription', () => {
   it('holds the latest description and logs `description revised`', () => {
     const description = 'New text.\n\n```ts\nconst a = 1;\n```';
-    const data = pure(reviewWith(1), (input) => setDescription(input, 'F1', { description }, at(5)));
+    const data = pure(reviewWith(1), (input) => setDescription(input, 'AB1', { description }, at(5)));
     expect(first(data).description).toBe(description);
     expect(first(data).updates.at(-1)).toStrictEqual({ kind: 'description', at: '2026-10-08 09:10' });
     expect(formatUpdateItem(first(data).updates.at(-1)!)).toBe('2026-10-08 09:10 — description revised');
@@ -580,7 +598,7 @@ describe('setDescription', () => {
 
   it('writes the round and the note, and cleans the text as a new finding is', () => {
     const data = pure(inRound(2), (input) =>
-      setDescription(input, 'F1', { description: '\r\nNew  \r\n\r\n', round: 2, note: 'the user answered:\n- yes' }, at(5)),
+      setDescription(input, 'AB1', { description: '\r\nNew  \r\n\r\n', round: 2, note: 'the user answered:\n- yes' }, at(5)),
     );
     expect(first(data).description).toBe('New  ');
     expect(first(data).updates.at(-1)).toStrictEqual({
@@ -595,19 +613,19 @@ describe('setDescription', () => {
   });
 
   it('refuses the same description, also behind other blank lines and line breaks', () => {
-    refuses(reviewWith(1), (input) => setDescription(input, 'F1', { description: 'See `src/a.ts:3`.' }, at()), 'F1 already has this description');
-    refuses(reviewWith(1), (input) => setDescription(input, 'F1', { description: '\r\n\r\nSee `src/a.ts:3`.\n\n' }, at()), 'F1 already has this description');
+    refuses(reviewWith(1), (input) => setDescription(input, 'AB1', { description: 'See `src/a.ts:3`.' }, at()), 'AB1 already has this description');
+    refuses(reviewWith(1), (input) => setDescription(input, 'AB1', { description: '\r\n\r\nSee `src/a.ts:3`.\n\n' }, at()), 'AB1 already has this description');
   });
 
   it('refuses an empty description and a lone carriage return', () => {
-    refuses(reviewWith(1), (input) => setDescription(input, 'F1', { description: '' }, at()), 'description is empty');
-    refuses(reviewWith(1), (input) => setDescription(input, 'F1', { description: 'a\rb' }, at()), 'description contains a carriage return or line separator that is not a line break');
+    refuses(reviewWith(1), (input) => setDescription(input, 'AB1', { description: '' }, at()), 'description is empty');
+    refuses(reviewWith(1), (input) => setDescription(input, 'AB1', { description: 'a\rb' }, at()), 'description contains a carriage return or line separator that is not a line break');
   });
 });
 
 describe('addUpdate', () => {
   it('adds one entry stamped with the time', () => {
-    const data = pure(reviewWith(1), (input) => addUpdate(input, 'F1', { text: 'the user asked why; answered in the description' }, at(5)));
+    const data = pure(reviewWith(1), (input) => addUpdate(input, 'AB1', { text: 'the user asked why; answered in the description' }, at(5)));
     expect(first(data).updates.at(-1)).toStrictEqual({
       kind: 'note',
       at: '2026-10-08 09:10',
@@ -620,7 +638,7 @@ describe('addUpdate', () => {
   });
 
   it('stores the round when given, and treats a `Round <n>:` prefix in the text as plain note text', () => {
-    const given = pure(inRound(2), (input) => addUpdate(input, 'F1', { text: 're-checked at `bbb2222`: unchanged', round: 2 }, at(5)));
+    const given = pure(inRound(2), (input) => addUpdate(input, 'AB1', { text: 're-checked at `bbb2222`: unchanged', round: 2 }, at(5)));
     expect(first(given).updates.at(-1)).toStrictEqual({
       kind: 'note',
       at: '2026-10-08 09:10',
@@ -630,7 +648,7 @@ describe('addUpdate', () => {
     expect(formatUpdateItem(first(given).updates.at(-1)!)).toBe(
       '2026-10-08 09:10 — Round 2: re-checked at `bbb2222`: unchanged',
     );
-    const written = pure(inRound(1), (input) => addUpdate(input, 'F1', { text: 'Round 99: literal note text' }, at(5)));
+    const written = pure(inRound(1), (input) => addUpdate(input, 'AB1', { text: 'Round 99: literal note text' }, at(5)));
     expect(first(written).updates.at(-1)).toStrictEqual({
       kind: 'note',
       at: '2026-10-08 09:10',
@@ -640,26 +658,26 @@ describe('addUpdate', () => {
 
   it('indents a multi-line text, a fenced block included', () => {
     const text = 'checked:\r\n\r\n```ts\nconst a = 1;\n```\n- done 🎉';
-    const data = pure(reviewWith(1), (input) => addUpdate(input, 'F1', { text }, at(5)));
+    const data = pure(reviewWith(1), (input) => addUpdate(input, 'AB1', { text }, at(5)));
     expect(formatUpdateItem(first(data).updates.at(-1)!)).toBe(
       lines('2026-10-08 09:10 — checked:', '', '  ```ts', '  const a = 1;', '  ```', '  - done 🎉'),
     );
   });
 
   it('refuses an empty text and an unknown finding', () => {
-    refuses(reviewWith(1), (input) => addUpdate(input, 'F1', { text: ' \n' }, at()), 'update text is empty');
-    refuses(reviewWith(1), (input) => addUpdate(input, 'F3', { text: 'x' }, at()), 'unknown finding "F3"; the report has F1');
-    refuses(reviewWith(1), (input) => addUpdate(input, 'F1', { text: 'x', round: 0 }, at()), 'round 0 is not a round number; rounds count from 1');
+    refuses(reviewWith(1), (input) => addUpdate(input, 'AB1', { text: ' \n' }, at()), 'update text is empty');
+    refuses(reviewWith(1), (input) => addUpdate(input, 'AB3', { text: 'x' }, at()), 'unknown finding "AB3"; the report has AB1');
+    refuses(reviewWith(1), (input) => addUpdate(input, 'AB1', { text: 'x', round: 0 }, at()), 'round 0 is not a round number; rounds count from 1');
   });
 });
 
 describe('a round that was never opened', () => {
   const changes: [string, (data: ReviewData, round: number) => ReviewData][] = [
-    ['setState', (data, round) => setState(data, 'F1', { state: 'approved', round }, at(5))],
-    ['setSeverity', (data, round) => setSeverity(data, 'F1', { severity: 'low', round }, at(5))],
-    ['setTitle', (data, round) => setTitle(data, 'F1', { title: 'Better', round }, at(5))],
-    ['setDescription', (data, round) => setDescription(data, 'F1', { description: 'Revised.', round }, at(5))],
-    ['addUpdate', (data, round) => addUpdate(data, 'F1', { text: 'a question', round }, at(5))],
+    ['setState', (data, round) => setState(data, 'AB1', { state: 'approved', round }, at(5))],
+    ['setSeverity', (data, round) => setSeverity(data, 'AB1', { severity: 'low', round }, at(5))],
+    ['setTitle', (data, round) => setTitle(data, 'AB1', { title: 'Better', round }, at(5))],
+    ['setDescription', (data, round) => setDescription(data, 'AB1', { description: 'Revised.', round }, at(5))],
+    ['addUpdate', (data, round) => addUpdate(data, 'AB1', { text: 'a question', round }, at(5))],
   ];
 
   it.each(changes)('%s refuses a round after the latest', (_name, run) => {
@@ -668,7 +686,7 @@ describe('a round that was never opened', () => {
   });
 
   it.each(changes)('%s refuses every round while no round is open', (_name, run) => {
-    const data = { ...fresh(), findings: [raw('F1')] };
+    const data = { ...fresh(), findings: [raw('AB1')] };
     refuses(data, (input) => run(input, 1), 'round 1 was never opened; no round is open yet');
   });
 
@@ -683,13 +701,13 @@ describe('a round that was never opened', () => {
   it.each(changes)('%s accepts a round below the latest that the review skipped', (_name, run) => {
     const data = open();
     const items: ReviewedItem[] = [{ round: 5, revision: 'e5', base: null }];
-    const gap: ReviewData = { ...data, intro: { ...data.intro, reviewed: { ...data.intro.reviewed, items } }, findings: [raw('F1')] };
+    const gap: ReviewData = { ...data, intro: { ...data.intro, reviewed: { ...data.intro.reviewed, items } }, findings: [raw('AB1')] };
     expect(first(pure(gap, (input) => run(input, 3))).updates.at(-1)?.round).toBe(3);
   });
 
   it('updateRound accepts an opened round and refuses one that is after the latest, skipped, or while none is open', () => {
     refuses(reviewWith(1), (input) => updateRound(input, { text: 'no findings', round: 2 }), 'round 2 was never opened; the latest round is 1');
-    refuses({ ...fresh(), findings: [raw('F1')] }, (input) => updateRound(input, { text: 'no findings', round: 1 }), 'round 1 was never opened; no round is open yet');
+    refuses({ ...fresh(), findings: [raw('AB1')] }, (input) => updateRound(input, { text: 'no findings', round: 1 }), 'round 1 was never opened; no round is open yet');
     const data = inRound(3);
     for (const round of [1, 2, 3]) {
       const updated = pure(data, (input) => updateRound(input, { text: 'no findings', round }));
@@ -702,25 +720,25 @@ describe('a round that was never opened', () => {
   });
 
   it('does not confuse a `Round <n>:` prefix in a note with a structured round number', () => {
-    const updated = pure(reviewWith(1), (input) => addUpdate(input, 'F1', { text: 'Round 7: unchanged' }, at(5)));
+    const updated = pure(reviewWith(1), (input) => addUpdate(input, 'AB1', { text: 'Round 7: unchanged' }, at(5)));
     expect(first(updated).updates.at(-1)?.round).toBeUndefined();
     expect(formatUpdateItem(first(updated).updates.at(-1)!)).toBe('2026-10-08 09:10 — Round 7: unchanged');
   });
 
   it('leaves an entry with no round alone, whatever the rounds', () => {
-    const data = { ...fresh(), findings: [raw('F1')] };
-    expect(first(pure(data, (input) => addUpdate(input, 'F1', { text: 'a question' }, at(5)))).updates.at(-1)?.round).toBeUndefined();
-    expect(first(pure(data, (input) => setSeverity(input, 'F1', { severity: 'low' }, at(5)))).updates.at(-1)?.round).toBeUndefined();
+    const data = { ...fresh(), findings: [raw('AB1')] };
+    expect(first(pure(data, (input) => addUpdate(input, 'AB1', { text: 'a question' }, at(5)))).updates.at(-1)?.round).toBeUndefined();
+    expect(first(pure(data, (input) => setSeverity(input, 'AB1', { severity: 'low' }, at(5)))).updates.at(-1)?.round).toBeUndefined();
   });
 });
 
 describe('the text of a review', () => {
   it('reads as the documented report', () => {
-    let data = newReview('PR 42');
+    let data = newReview('PR 42', 'AB');
     data = openRound(data, { revision: 'abc1234', base: 'def5678', note: 'tracked tree clean.' });
     data = addFinding(data, { ...FINDING, title: 'Missing timeout', note: 'reproduced in the running app' }, at(1)).data;
     data = openRound(data, { revision: 'bbb2222', base: 'def5678' });
-    data = setState(data, 'F1', { state: 'fixed', revision: 'bbb2222', round: 2, note: 'guard added' }, at(20));
+    data = setState(data, 'AB1', { state: 'fixed', revision: 'bbb2222', round: 2, note: 'guard added' }, at(20));
     const report = renderReport(sound(data)).split('\n');
     expect(report.slice(0, report.indexOf('## Dashboard'))).toStrictEqual([
       '# Review — PR 42',
@@ -736,7 +754,7 @@ describe('the text of a review', () => {
     expect(report.slice(report.indexOf('## Findings'))).toStrictEqual([
       '## Findings',
       '',
-      '### 🔧 🔴 F1 — Missing timeout',
+      '### 🔧 🔴 AB1 — Missing timeout',
       '',
       '#### Description',
       '',
@@ -753,20 +771,20 @@ describe('the text of a review', () => {
 
 describe('a whole review', () => {
   it('goes from the first round to the second, every step sound', () => {
-    let data = sound(newReview('PR 42 — tenant registry 🚀'));
+    let data = sound(newReview('PR 42 — tenant registry 🚀', 'AB'));
     data = pure(data, (input) => openRound(input, { revision: 'abc1234', base: 'def5678', note: 'tracked tree clean.' }));
     data = raise(data, { severity: 'high', title: 'First', description: 'One.' }, at(1)).data;
     data = raise(data, { severity: 'medium', title: 'Second', description: 'Two.\n\n```ts\nx\n```', note: 'seen twice' }, at(2)).data;
     data = raise(data, { severity: 'low', title: 'Third', description: 'Three.', unverified: true }, at(3)).data;
     expect(data.findings.map(({ id, state, severity }) => [id, state, severity])).toStrictEqual([
-      ['F1', '⏳', '🔴'],
-      ['F2', '⏳', '🟡'],
-      ['F3', '❓', '⚪'],
+      ['AB1', '⏳', '🔴'],
+      ['AB2', '⏳', '🟡'],
+      ['AB3', '❓', '⚪'],
     ]);
 
     const path = ['approved', 'fixed', 'discarded', 'deferred', 'improvement', 'unverified', 'awaiting triage'];
     path.forEach((name, index) => {
-      data = pure(data, (input) => setState(input, 'F1', { state: name, ...(name === 'fixed' ? { revision: 'abc1234' } : {}) }, at(10 + index)));
+      data = pure(data, (input) => setState(input, 'AB1', { state: name, ...(name === 'fixed' ? { revision: 'abc1234' } : {}) }, at(10 + index)));
     });
     expect(first(data).state).toBe('⏳');
     expect(first(data).updates.map((update) => formatUpdateItem(update).slice(19))).toStrictEqual([
@@ -780,14 +798,14 @@ describe('a whole review', () => {
       '❓ → ⏳',
     ]);
 
-    data = pure(data, (input) => setSeverity(input, 'F2', { severity: 'high', note: 'it crashes' }, at(20)));
-    data = pure(data, (input) => setTitle(input, 'F2', { title: 'Second, reworded' }, at(21)));
-    data = pure(data, (input) => setDescription(input, 'F3', { description: 'Three, revised.\n\n- a\n- b' }, at(22)));
-    data = pure(data, (input) => addUpdate(input, 'F3', { text: 'the user asked about it' }, at(23)));
+    data = pure(data, (input) => setSeverity(input, 'AB2', { severity: 'high', note: 'it crashes' }, at(20)));
+    data = pure(data, (input) => setTitle(input, 'AB2', { title: 'Second, reworded' }, at(21)));
+    data = pure(data, (input) => setDescription(input, 'AB3', { description: 'Three, revised.\n\n- a\n- b' }, at(22)));
+    data = pure(data, (input) => addUpdate(input, 'AB3', { text: 'the user asked about it' }, at(23)));
 
     data = pure(data, (input) => openRound(input, { revision: 'bbb2222', base: null }));
-    for (const id of ['F1', 'F3']) data = pure(data, (input) => addUpdate(input, id, { text: 'unchanged', round: 2 }, at(30)));
-    data = pure(data, (input) => setState(input, 'F2', { state: 'approved', round: 2 }, at(31)));
+    for (const id of ['AB1', 'AB3']) data = pure(data, (input) => addUpdate(input, id, { text: 'unchanged', round: 2 }, at(30)));
+    data = pure(data, (input) => setState(input, 'AB2', { state: 'approved', round: 2 }, at(31)));
 
     expect(data.intro.reviewed.items.map((item) => item.round)).toStrictEqual([1, 2]);
     expect(Object.keys(data.intro)).toStrictEqual(['reviewed']);
@@ -798,7 +816,7 @@ describe('a whole review', () => {
   it('writes LF line breaks through every operation, whatever the line breaks of the given texts', () => {
     let data = pure(open(), (input) => openRound(input, { revision: 'bbb2222', base: null, note: 'dirty tree:\r\nsrc/a.ts' }));
     data = raise(data, { ...FINDING, description: 'Line one.\r\n\r\n```ts\r\nx\r\n```', note: 'a\r\nb' }, at(1)).data;
-    data = pure(data, (input) => setState(input, 'F1', { state: 'fixed', revision: 'bbb2222', note: 'n\r\nm' }, at(2)));
+    data = pure(data, (input) => setState(input, 'AB1', { state: 'fixed', revision: 'bbb2222', note: 'n\r\nm' }, at(2)));
     const text = renderReport(data);
     expect(text).not.toContain('\r');
     expect(formatRoundItem(data.intro.reviewed.items[1]!)).toBe(
@@ -848,14 +866,14 @@ describe('hostile and invalid text', () => {
     ['addFinding title', (text) => addFinding(open(), { ...FINDING, title: text }, at()).data, 'title'],
     ['addFinding description', (text) => addFinding(open(), { ...FINDING, description: text }, at()).data, 'description'],
     ['addFinding note', (text) => addFinding(open(), { ...FINDING, note: text }, at()).data, 'note'],
-    ['setState revision', (text) => setState(base, 'F1', { state: 'fixed', revision: text }, at(5)), 'revision'],
-    ['setState note', (text) => setState(base, 'F1', { state: 'approved', note: text }, at(5)), 'note'],
-    ['setSeverity note', (text) => setSeverity(base, 'F1', { severity: 'low', note: text }, at(5)), 'note'],
-    ['setTitle title', (text) => setTitle(base, 'F1', { title: text }, at(5)), 'title'],
-    ['setTitle note', (text) => setTitle(base, 'F1', { title: 'New', note: text }, at(5)), 'note'],
-    ['setDescription description', (text) => setDescription(base, 'F1', { description: text }, at(5)), 'description'],
-    ['setDescription note', (text) => setDescription(base, 'F1', { description: 'New.', note: text }, at(5)), 'note'],
-    ['addUpdate text', (text) => addUpdate(base, 'F1', { text }, at(5)), 'update text'],
+    ['setState revision', (text) => setState(base, 'AB1', { state: 'fixed', revision: text }, at(5)), 'revision'],
+    ['setState note', (text) => setState(base, 'AB1', { state: 'approved', note: text }, at(5)), 'note'],
+    ['setSeverity note', (text) => setSeverity(base, 'AB1', { severity: 'low', note: text }, at(5)), 'note'],
+    ['setTitle title', (text) => setTitle(base, 'AB1', { title: text }, at(5)), 'title'],
+    ['setTitle note', (text) => setTitle(base, 'AB1', { title: 'New', note: text }, at(5)), 'note'],
+    ['setDescription description', (text) => setDescription(base, 'AB1', { description: text }, at(5)), 'description'],
+    ['setDescription note', (text) => setDescription(base, 'AB1', { description: 'New.', note: text }, at(5)), 'note'],
+    ['addUpdate text', (text) => addUpdate(base, 'AB1', { text }, at(5)), 'update text'],
     ['updateRound text', (text) => updateRound(open(), { text }), 'text'],
   ];
 
@@ -934,7 +952,7 @@ describe('random walks over every operation', () => {
   function step(data: ReviewData, random: Random, minute: number): { operation: number; run: (input: ReviewData) => ReviewData } {
     const now = at(minute);
     const note = random() < 0.6 ? text(random) : undefined;
-    const id = data.findings.length === 0 ? 'F1' : pick(random, data.findings).id;
+    const id = data.findings.length === 0 ? 'AB1' : pick(random, data.findings).id;
     const latest = Math.max(0, ...data.intro.reviewed.items.map((item) => item.round));
     const round = random() < 0.3 ? 1 + Math.floor(random() * (latest + 1)) : undefined;
     const revision = pick(random, REVISIONS);
@@ -959,7 +977,7 @@ describe('random walks over every operation', () => {
     let refused = 0;
     for (let seed = 1; seed <= 10; seed++) {
       const random = seeded(seed);
-      const start = newReview(`PR ${seed}`);
+      const start = newReview(`PR ${seed}`, 'AB');
       // Every other walk starts with a round open.
       let data = sound(seed % 2 === 0 ? openRound(start, { revision: 'abc1234', base: null }) : start);
       for (let index = 0; index < 20; index++) {

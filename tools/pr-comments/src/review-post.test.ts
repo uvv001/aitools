@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { commentRefFromUrl, digestBody } from './comment-ref.ts';
 import type { GraphQLClient } from './github.ts';
 import type { PullRequest, PullRequestData } from './model.ts';
@@ -17,6 +17,12 @@ import { postFinding } from './review-post.ts';
 import type { PostFindingDeps, PostFindingOptions } from './review-post.ts';
 import { renderReport } from './review-render.ts';
 import { removeScratch, scratchDir, snapshotOf } from './review-test-support.ts';
+
+const cryptoCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return { ...actual, randomInt: () => cryptoCalls.count++ % 2 };
+});
 
 const NOW = new Date(2026, 9, 8, 9, 5);
 // What `deps.now()` says when the comment is recorded.
@@ -40,7 +46,7 @@ interface Seed {
   approved: boolean;
 }
 
-// F1 has two anchors, F2 none, F3 is not approved, F4 has one anchor.
+// AB1 has two anchors, AB2 none, AB3 is not approved, AB4 has one anchor.
 const SEEDS: Seed[] = [
   {
     severity: 'high',
@@ -61,8 +67,8 @@ const SEEDS: Seed[] = [
   { severity: 'high', title: 'Another issue', approved: true, description: 'Another issue.\n\n`src/d.ts:4`' },
 ];
 
-const F1_TEXT = [
-  '🔴 **F1 — Crash on empty list**',
+const AB1_TEXT = [
+  '🔴 **AB1 — Crash on empty list**',
   '',
   'Crash when the list is empty; see the helper.',
   '',
@@ -192,7 +198,7 @@ describe('refusals before anything is published', () => {
     const before = await readFile(db);
     const fake = engine(created());
 
-    await expect(postFinding(db, 'F1', OPTIONS, fake.deps)).rejects.toThrow(
+    await expect(postFinding(db, 'AB1', OPTIONS, fake.deps)).rejects.toThrow(
       new Error(`this review is not connected to a pull request; connect it with "pr-comments pr connect --db ${db} <url>"`),
     );
     expect(fake.calls).toEqual([]);
@@ -203,13 +209,13 @@ describe('refusals before anything is published', () => {
     const db = await startReview();
     const fake = engine(created());
 
-    await expect(postFinding(db, 'F9', OPTIONS, fake.deps)).rejects.toThrow(
-      new Error('unknown finding "F9"; the report has F1, F2, F3, F4'),
+    await expect(postFinding(db, 'AB9', OPTIONS, fake.deps)).rejects.toThrow(
+      new Error('unknown finding "AB9"; the report has AB1, AB2, AB3, AB4'),
     );
-    await expect(postFinding(db, 'F1', { ...OPTIONS, anchor: 3 }, fake.deps)).rejects.toThrow(
-      new Error('--anchor 3 is out of range: F1 has 2 path:lines anchors'),
+    await expect(postFinding(db, 'AB1', { ...OPTIONS, anchor: 3 }, fake.deps)).rejects.toThrow(
+      new Error('--anchor 3 is out of range: AB1 has 2 path:lines anchors'),
     );
-    await expect(postFinding(db, 'F1', { ...OPTIONS, commit: 'xyz' }, fake.deps)).rejects.toThrow(
+    await expect(postFinding(db, 'AB1', { ...OPTIONS, commit: 'xyz' }, fake.deps)).rejects.toThrow(
       new Error('commit "xyz" must be 7-40 hex digits'),
     );
     expect(fake.calls).toEqual([]);
@@ -219,7 +225,7 @@ describe('refusals before anything is published', () => {
     const missing = join(dir, 'missing.sqlite');
     const fake = engine(created());
 
-    await expect(postFinding(missing, 'F1', { ...OPTIONS, dryRun }, fake.deps)).rejects.toThrow(`${missing} does not exist`);
+    await expect(postFinding(missing, 'AB1', { ...OPTIONS, dryRun }, fake.deps)).rejects.toThrow(`${missing} does not exist`);
     expect(existsSync(missing)).toBe(false);
     expect(fake.calls).toEqual([]);
   });
@@ -228,18 +234,18 @@ describe('refusals before anything is published', () => {
 describe('the comment handed to the engine', () => {
   it('is built from the database for a new finding: canonical id, place, title line, no comment ref', async () => {
     const db = await startReview();
-    await withOwn(db, 'F4', 'r4');
+    await withOwn(db, 'AB4', 'r4');
 
-    const { posted, calls } = await post(db, 'f1', created());
+    const { posted, calls } = await post(db, 'ab1', created());
 
     expect(calls).toHaveLength(1);
     const [call] = calls;
     expect(call!.ref).toEqual(PR_REF);
     expect(call!.options).toEqual({ byAgent: false, now: false, dryRun: false });
-    expect(call!.comment).toEqual({ path: 'src/app.ts', lines: { start: 10, end: 12 }, body: F1_TEXT });
+    expect(call!.comment).toEqual({ path: 'src/app.ts', lines: { start: 10, end: 12 }, body: AB1_TEXT });
     expect(call!.comment.commentRef).toBeUndefined();
     expect(call!.comment.commit).toBeUndefined();
-    expect(posted).toMatchObject({ finding: 'F1', warnings: [], unlinked: 1, body: F1_TEXT });
+    expect(posted).toMatchObject({ finding: 'AB1', warnings: [], unlinked: 1, body: AB1_TEXT });
     expect(posted.anchors.map(({ path, start, end }) => ({ path, start, end }))).toEqual([
       { path: 'src/app.ts', start: 10, end: 12 },
       { path: 'src/other.ts', start: 7, end: 7 },
@@ -249,19 +255,19 @@ describe('the comment handed to the engine', () => {
 
   it('updates the own comment of the finding: its ref is the comment ref, and the new body carries the id line', async () => {
     const db = await startReview();
-    await withOwn(db, 'F1', 'r1');
+    await withOwn(db, 'AB1', 'r1');
 
-    const { posted, calls } = await post(db, 'F1', (comment, options) => answer(comment, options, 'updated', 'r1'));
+    const { posted, calls } = await post(db, 'AB1', (comment, options) => answer(comment, options, 'updated', 'r1'));
 
-    expect(calls[0]!.comment).toEqual({ path: 'src/app.ts', lines: { start: 10, end: 12 }, commentRef: 'r1', body: F1_TEXT });
+    expect(calls[0]!.comment).toEqual({ path: 'src/app.ts', lines: { start: 10, end: 12 }, commentRef: 'r1', body: AB1_TEXT });
     expect(posted.result.action).toBe('updated');
-    expect(posted.body).toBe(F1_TEXT);
+    expect(posted.body).toBe(AB1_TEXT);
   });
 
   it('forwards anchor and lower-cased commit options to extraction', async () => {
     const db = await startReview();
 
-    const { posted, calls } = await post(db, 'F1', created(), { anchor: 2, commit: 'ABC1234' });
+    const { posted, calls } = await post(db, 'AB1', created(), { anchor: 2, commit: 'ABC1234' });
 
     expect(calls[0]!.comment).toMatchObject({ path: 'src/other.ts', lines: { start: 7, end: 7 }, commit: 'abc1234' });
     expect(posted.chosen).toBe(posted.anchors[1]);
@@ -271,26 +277,26 @@ describe('the comment handed to the engine', () => {
   it('leaves the disclaimer to the engine and shows it in the body that is posted', async () => {
     const db = await startReview();
 
-    const { posted, calls } = await post(db, 'F1', created(), { byAgent: true, now: true });
+    const { posted, calls } = await post(db, 'AB1', created(), { byAgent: true, now: true });
 
     expect(calls[0]!.options).toEqual({ byAgent: true, now: true, dryRun: false });
-    expect(calls[0]!.comment.body).toBe(F1_TEXT);
-    expect(posted.body).toBe(composeBody(F1_TEXT, true));
+    expect(calls[0]!.comment.body).toBe(AB1_TEXT);
+    expect(posted.body).toBe(composeBody(AB1_TEXT, true));
     expect(posted.body.startsWith(`${AGENT_DISCLAIMER}\n\n`)).toBe(true);
   });
 
   it('makes a finding without an anchor a general comment, with the warning', async () => {
     const db = await startReview();
 
-    const { posted, calls } = await post(db, 'F2', created(), { now: true });
+    const { posted, calls } = await post(db, 'AB2', created(), { now: true });
 
     expect(posted).toMatchObject({
-      finding: 'F2',
+      finding: 'AB2',
       anchors: [],
       chosen: undefined,
-      warnings: ['F2 has no path:lines anchor; it becomes a general comment (posting it needs --now)'],
+      warnings: ['AB2 has no path:lines anchor; it becomes a general comment (posting it needs --now)'],
       unlinked: 0,
-      body: '🟡 **F2 — Remark without a place**\n\nA remark that belongs to no line.',
+      body: '🟡 **AB2 — Remark without a place**\n\nA remark that belongs to no line.',
     });
     expect(calls[0]!.comment).toEqual({ body: posted.body });
   });
@@ -300,13 +306,13 @@ describe('the comment handed to the engine', () => {
     const report = reportPath();
     await rm(report, { force: true });
 
-    const { posted } = await post(db, 'F1', created());
-    expect(posted.body).toBe(F1_TEXT);
+    const { posted } = await post(db, 'AB1', created());
+    expect(posted.body).toBe(AB1_TEXT);
     expect(existsSync(report)).toBe(true);
 
     await writeFile(report, 'edited by hand, not a report', 'utf8');
-    const again = await post(db, 'F1', (comment, options) => answer(comment, options, 'updated', 'r2'));
-    expect(again.posted.body).toBe(F1_TEXT);
+    const again = await post(db, 'AB1', (comment, options) => answer(comment, options, 'updated', 'r2'));
+    expect(again.posted.body).toBe(AB1_TEXT);
     expect(await readFile(report, 'utf8')).toBe(renderReport((await loadReviewFile(db)).data));
   });
 });
@@ -315,12 +321,12 @@ describe('recording the link', () => {
   it('links a comment created in the pending review and records the posted update', async () => {
     const db = await startReview();
 
-    const { posted } = await post(db, 'F1', created('r2'));
+    const { posted } = await post(db, 'AB1', created('r2'));
 
     const state = await loadReviewFile(db);
-    expect(state.links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) }]);
+    expect(state.links).toEqual([{ ref: 'r2', role: 'own', finding: 'AB1', seenDigest: digestBody(AB1_TEXT) }]);
     expect(state.pullRequest).toBe(PR);
-    expect(await lastUpdateOf(db, 'F1')).toEqual({
+    expect(await lastUpdateOf(db, 'AB1')).toEqual({
       kind: 'posted',
       at: STAMP,
       ref: 'r2',
@@ -343,23 +349,23 @@ describe('recording the link', () => {
   it('posts a finding that is still awaiting triage', async () => {
     const db = await startReview();
 
-    const { posted, calls } = await post(db, 'F3', created('r2'));
+    const { posted, calls } = await post(db, 'AB3', created('r2'));
 
     expect(calls).toHaveLength(1);
     expect(posted.result).toMatchObject({ action: 'created', comment: 'r2', path: 'src/c.ts', lines: '3' });
     expect((await loadReviewFile(db)).links).toEqual([
-      { ref: 'r2', role: 'own', finding: 'F3', seenDigest: digestBody(posted.body) },
+      { ref: 'r2', role: 'own', finding: 'AB3', seenDigest: digestBody(posted.body) },
     ]);
     await expectSound(db);
   });
 
   it('logs an update of the own comment, adopts an identical comment, and writes nothing when an own comment is unchanged', async () => {
     const db = await startReview();
-    await withOwn(db, 'F1', 'r1');
+    await withOwn(db, 'AB1', 'r1');
 
-    const updated = await post(db, 'F1', (comment, options) => answer(comment, options, 'updated', 'r1'));
+    const updated = await post(db, 'AB1', (comment, options) => answer(comment, options, 'updated', 'r1'));
     expect(updated.posted.result.action).toBe('updated');
-    expect(await lastUpdateOf(db, 'F1')).toEqual({
+    expect(await lastUpdateOf(db, 'AB1')).toEqual({
       kind: 'posted',
       at: STAMP,
       ref: 'r1',
@@ -367,25 +373,25 @@ describe('recording the link', () => {
       pullRequest: PR,
     });
     expect((await loadReviewFile(db)).links).toEqual([
-      { ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) },
+      { ref: 'r1', role: 'own', finding: 'AB1', seenDigest: digestBody(AB1_TEXT) },
     ]);
 
     const before = await contentOf(db);
     const beforeBytes = await readFile(db);
-    const unchanged = await post(db, 'F1', (comment, options) => answer(comment, options, 'unchanged', 'r1'));
+    const unchanged = await post(db, 'AB1', (comment, options) => answer(comment, options, 'unchanged', 'r1'));
     expect(unchanged.posted.result).toMatchObject({ action: 'unchanged', comment: 'r1' });
     expect(await contentOf(db)).toStrictEqual(before);
     await sameBytes(db, beforeBytes);
 
-    const adopted = await post(db, 'F4', (comment, options) =>
+    const adopted = await post(db, 'AB4', (comment, options) =>
       answer(comment, options, 'unchanged', 'r7', { message: ADOPTED }),
     );
     expect(adopted.posted.result).toMatchObject({ action: 'unchanged', comment: 'r7', message: ADOPTED });
     expect((await loadReviewFile(db)).links).toEqual([
-      { ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) },
-      { ref: 'r7', role: 'own', finding: 'F4', seenDigest: digestBody(adopted.posted.body) },
+      { ref: 'r1', role: 'own', finding: 'AB1', seenDigest: digestBody(AB1_TEXT) },
+      { ref: 'r7', role: 'own', finding: 'AB4', seenDigest: digestBody(adopted.posted.body) },
     ]);
-    expect(await lastUpdateOf(db, 'F4')).toEqual({
+    expect(await lastUpdateOf(db, 'AB4')).toEqual({
       kind: 'posted',
       at: STAMP,
       ref: 'r7',
@@ -400,7 +406,7 @@ describe('recording the link', () => {
     const before = await readFile(db);
     const message = 'GitHub rejected the comment (is the anchor still part of the diff?)';
 
-    const { posted } = await post(db, 'F1', failed(message));
+    const { posted } = await post(db, 'AB1', failed(message));
 
     expect(posted.result).toEqual({ action: 'error', dryRun: false, message });
     await sameBytes(db, before);
@@ -411,7 +417,7 @@ describe('recording the link', () => {
     const before = await readFile(db);
     const message = 'created, but its id could not be read from the URL';
 
-    const { posted } = await post(db, 'F1', (comment, options) =>
+    const { posted } = await post(db, 'AB1', (comment, options) =>
       answer(comment, options, 'created', 'r2', { comment: undefined, message }),
     );
 
@@ -424,7 +430,7 @@ describe('recording the link', () => {
     const db = await startReview();
     const before = await readFile(db);
 
-    const { posted, calls } = await post(db, 'F1', created('r2'), { dryRun: true });
+    const { posted, calls } = await post(db, 'AB1', created('r2'), { dryRun: true });
 
     expect(calls[0]!.options).toEqual({ byAgent: false, now: false, dryRun: true });
     expect(posted.result.dryRun).toBe(true);
@@ -438,12 +444,12 @@ describe('recording the comment ref locally', () => {
     const db = await startReview();
     expect((await loadReviewFile(db)).known.has('r2')).toBe(false);
 
-    const { posted } = await post(db, 'F1', created('r2'));
+    const { posted } = await post(db, 'AB1', created('r2'));
 
     expect(posted.result).toMatchObject({ action: 'created', comment: 'r2' });
     const { known, links } = await loadReviewFile(db);
     expect([...known].sort()).toEqual(['r1', 'r2', 'r4', 'r8']);
-    expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) }]);
+    expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'AB1', seenDigest: digestBody(AB1_TEXT) }]);
     const stored = await loadSnapshot(db);
     expect(stored!.comments.map(({ url }) => commentRefFromUrl(url)).sort()).toEqual(['r1', 'r4', 'r8']);
   });
@@ -451,7 +457,7 @@ describe('recording the comment ref locally', () => {
   it('publishes outside the database transaction: a writer can change the review meanwhile, and the post keeps that change', async () => {
     const db = await startReview();
 
-    const { posted } = await post(db, 'F1', async (comment, options) => {
+    const { posted } = await post(db, 'AB1', async (comment, options) => {
       await mutateReviewFile(db, (data) => ({
         data: addFinding(data, { severity: 'low', title: 'Added meanwhile', description: 'Text.' }, NOW).data,
         result: undefined,
@@ -461,21 +467,21 @@ describe('recording the comment ref locally', () => {
 
     expect(posted.result).toMatchObject({ action: 'created', comment: 'r2' });
     const { data, links } = await loadReviewFile(db);
-    expect(data.findings.map((finding) => finding.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5']);
-    expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) }]);
+    expect(data.findings.map((finding) => finding.id)).toEqual(['AB1', 'AB2', 'AB3', 'AB4', 'AB5']);
+    expect(links).toEqual([{ ref: 'r2', role: 'own', finding: 'AB1', seenDigest: digestBody(AB1_TEXT) }]);
   });
 });
 
 describe('a comment that could not be recorded', () => {
   const LINK_OWN = (db: string, ref: string) =>
-    `run "pr-comments pr sync --db ${db}", then record it with "pr-comments link own --db ${db} F1 ${ref}"`;
+    `run "pr-comments pr sync --db ${db}", then record it with "pr-comments link own --db ${db} AB1 ${ref}"`;
 
   it('is an error that names the ref and how to record it, and nothing is saved', async () => {
     const db = await startReview();
-    await withOwn(db, 'F1', 'r1');
+    await withOwn(db, 'AB1', 'r1');
     const before = await readFile(db);
 
-    const { posted } = await post(db, 'F1', created('r2'));
+    const { posted } = await post(db, 'AB1', created('r2'));
 
     expect(posted.result).toEqual({
       action: 'error',
@@ -487,7 +493,7 @@ describe('a comment that could not be recorded', () => {
       lines: '10-12',
       message:
         'the comment was posted as r2, but it could not be recorded in the review ' +
-        '(a posted comment cannot move: F1 already has its own comment r1; remove that link first with ' +
+        '(a posted comment cannot move: AB1 already has its own comment r1; remove that link first with ' +
         `"pr-comments link remove --db ${db} r1"); ` +
         LINK_OWN(db, 'r2'),
     });
@@ -497,14 +503,14 @@ describe('a comment that could not be recorded', () => {
 
   it('says that a comment that was only updated or adopted exists, not that it was posted', async () => {
     const db = await startReview();
-    await withOwn(db, 'F4', 'r8');
+    await withOwn(db, 'AB4', 'r8');
 
-    const { posted } = await post(db, 'F1', (comment, options) => answer(comment, options, 'unchanged', 'r8', { message: ADOPTED }));
+    const { posted } = await post(db, 'AB1', (comment, options) => answer(comment, options, 'unchanged', 'r8', { message: ADOPTED }));
 
     expect(posted.result).toMatchObject({ action: 'error', comment: 'r8' });
     expect(posted.result.message).toMatch(/^the comment is r8 on GitHub, but it could not be recorded in the review \(r8 is already linked/);
     expect(posted.result.message).toMatch(
-      /; run "pr-comments pr sync --db .*", then record it with "pr-comments link own --db .* F1 r8"$/,
+      /; run "pr-comments pr sync --db .*", then record it with "pr-comments link own --db .* AB1 r8"$/,
     );
   });
 
@@ -513,8 +519,8 @@ describe('a comment that could not be recorded', () => {
     await syncRefs(db, ['r2']);
     let during: Buffer | undefined;
 
-    const { posted } = await post(db, 'F1', async (comment, options) => {
-      await withOwn(db, 'F4', 'r2');
+    const { posted } = await post(db, 'AB1', async (comment, options) => {
+      await withOwn(db, 'AB4', 'r2');
       during = await readFile(db);
       return answer(comment, options, 'created', 'r2');
     });
@@ -524,12 +530,12 @@ describe('a comment that could not be recorded', () => {
       comment: 'r2',
       message:
         'the comment was posted as r2, but it could not be recorded in the review ' +
-        `(r2 is already linked as the own comment of F4; remove that link first with "pr-comments link remove --db ${db} r2"); ` +
+        `(r2 is already linked as the own comment of AB4; remove that link first with "pr-comments link remove --db ${db} r2"); ` +
         LINK_OWN(db, 'r2'),
     });
     await sameBytes(db, during!);
     expect((await loadReviewFile(db)).links).toEqual([
-      { ref: 'r2', role: 'own', finding: 'F4', seenDigest: digestBody('Comment 3.') },
+      { ref: 'r2', role: 'own', finding: 'AB4', seenDigest: digestBody('Comment 3.') },
     ]);
   });
 
@@ -539,7 +545,7 @@ describe('a comment that could not be recorded', () => {
     const otherSnapshot = snapshot(['r9'], { number: 43, url: otherPr, title: 'Other PR' });
     let during: Buffer | undefined;
 
-    const { posted } = await post(db, 'F1', async (comment, options) => {
+    const { posted } = await post(db, 'AB1', async (comment, options) => {
       await changeReviewState(db, (state) => ({ state: connectPullRequest(state, otherPr), result: undefined }));
       await syncReviewFile(db, otherSnapshot);
       during = await readFile(db);
@@ -569,10 +575,10 @@ describe('a posted comment cannot move', () => {
     ['not-yours', ''],
   ] as const)('tells how to go on from the reason %s, not from the words of the engine', async (reason, stays) => {
     const db = await startReview();
-    await withOwn(db, 'F1', 'r1');
+    await withOwn(db, 'AB1', 'r1');
     const before = await readFile(db);
 
-    const { posted } = await post(db, 'F1', failed(`the engine refuses (${reason})`, reason), { now: true });
+    const { posted } = await post(db, 'AB1', failed(`the engine refuses (${reason})`, reason), { now: true });
 
     expect(posted.result).toEqual({
       action: 'error',
@@ -584,23 +590,23 @@ describe('a posted comment cannot move', () => {
 
   it('adds nothing to an engine refusal that is not about the link', async () => {
     const db = await startReview();
-    await withOwn(db, 'F1', 'r1');
+    await withOwn(db, 'AB1', 'r1');
 
-    const { posted } = await post(db, 'F1', failed(PENDING_CANNOT_BE_NOW), { now: true });
+    const { posted } = await post(db, 'AB1', failed(PENDING_CANNOT_BE_NOW), { now: true });
 
     expect(posted.result.message).toBe(PENDING_CANNOT_BE_NOW);
   });
 
   it('lets the user post again after removing the link: a new comment, a new own link', async () => {
     const db = await startReview();
-    await withOwn(db, 'F1', 'r1');
+    await withOwn(db, 'AB1', 'r1');
     await changeReviewState(db, (state) => ({ state: unlink(state, 'r1', NOW), result: undefined }));
 
-    const { calls } = await post(db, 'F1', created('r5'));
+    const { calls } = await post(db, 'AB1', created('r5'));
 
     expect(calls[0]!.comment.commentRef).toBeUndefined();
     expect((await loadReviewFile(db)).links).toEqual([
-      { ref: 'r5', role: 'own', finding: 'F1', seenDigest: digestBody(F1_TEXT) },
+      { ref: 'r5', role: 'own', finding: 'AB1', seenDigest: digestBody(AB1_TEXT) },
     ]);
     await expectSound(db);
   });
@@ -609,9 +615,9 @@ describe('a posted comment cannot move', () => {
     'keeps an updated own comment in sync before and after pr sync (byAgent: %s), and surfaces external edits on sync',
     async (byAgent) => {
       const db = await startReview();
-      await withOwn(db, 'F1', 'r1');
+      await withOwn(db, 'AB1', 'r1');
 
-      const first = await post(db, 'F1', (comment, options) => answer(comment, options, 'updated', 'r1'), { byAgent });
+      const first = await post(db, 'AB1', (comment, options) => answer(comment, options, 'updated', 'r1'), { byAgent });
       expect(first.posted.result.action).toBe('updated');
 
       // Before pr sync, local pr_comments.body and seenDigest both match the posted text, so r1 is not falsely edited.
@@ -620,10 +626,10 @@ describe('a posted comment cannot move', () => {
 
       // Revise the finding description and post again.
       await mutateReviewFile(db, (data) => ({
-        data: setDescription(data, 'F1', { description: 'Revised crash fix.\n\n`src/app.ts:10-12`' }, NOW),
+        data: setDescription(data, 'AB1', { description: 'Revised crash fix.\n\n`src/app.ts:10-12`' }, NOW),
         result: undefined,
       }));
-      const second = await post(db, 'F1', (comment, options) => answer(comment, options, 'updated', 'r1'), { byAgent });
+      const second = await post(db, 'AB1', (comment, options) => answer(comment, options, 'updated', 'r1'), { byAgent });
       expect(pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! }).map(({ ref }) => ref)).not.toContain('r1');
 
       // After pr sync returning the exact posted text, r1 still does not surface as edited.
@@ -644,15 +650,15 @@ describe('a posted comment cannot move', () => {
   );
 
   it.each([
-    ['own', (state: ReviewState) => linkOwn(state, 'F1', 'c3', NOW)],
-    ['duplicate', (state: ReviewState) => linkDuplicate(state, 'F4', 'c3', NOW)],
+    ['own', (state: ReviewState) => linkOwn(state, 'AB1', 'c3', NOW)],
+    ['duplicate', (state: ReviewState) => linkDuplicate(state, 'AB4', 'c3', NOW)],
     ['note', (state: ReviewState) => linkNote(state, 'c3', 'kept as context')],
   ] as const)(
     'preserves seenDigest when a newly posted comment is unlinked and relinked as %s before pr sync, surfacing remote edits on sync',
     async (_role, relink) => {
       const db = await startReview();
 
-      const { posted } = await post(db, 'F2', created('c3'), { now: true });
+      const { posted } = await post(db, 'AB2', created('c3'), { now: true });
       expect(posted.result).toMatchObject({ action: 'created', comment: 'c3' });
 
       await changeReviewState(db, (state) => ({ state: unlink(state, 'c3', NOW), result: undefined }));
@@ -680,7 +686,7 @@ describe('a posted comment cannot move', () => {
 
   it('adopts leading-blank-line comments with zero false edit on pr sync, and updates own comments indented with 4 leading spaces', async () => {
     const db = await startReview();
-    const f2Body = '🟡 **F2 — Remark without a place**\n\nA remark that belongs to no line.';
+    const f2Body = '🟡 **AB2 — Remark without a place**\n\nA remark that belongs to no line.';
     const githubBlankPadded = `\n  \n${f2Body}\n`;
 
     const makePublish = (prData: PullRequestData): PostFindingDeps['publish'] => {
@@ -702,7 +708,7 @@ describe('a posted comment cannot move', () => {
 
     const adopted = await postFinding(
       db,
-      'F2',
+      'AB2',
       { ...OPTIONS, now: true },
       { publish: makePublish(remoteBlankPadded), now: () => LATER },
     );
@@ -712,14 +718,14 @@ describe('a posted comment cannot move', () => {
     await syncReviewFile(db, remoteBlankPadded);
     expect(pendingItems({ links: (await loadReviewFile(db)).links, data: (await loadSnapshot(db))! }).map(({ ref }) => ref)).not.toContain('c9');
 
-    // If c9 on GitHub has 4 leading spaces on line 1, posting F2 updates c9 instead of treating it as unchanged.
+    // If c9 on GitHub has 4 leading spaces on line 1, posting AB2 updates c9 instead of treating it as unchanged.
     const remoteIndented = snapshot([...BASE, 'c9'], { fetchedAt: '2026-10-08T11:05:00Z' });
     remoteIndented.comments = remoteIndented.comments.map((c) =>
       c.id === 'id-c9' ? { ...c, author: 'viewer', body: `    ${f2Body}` } : c,
     );
     const updated = await postFinding(
       db,
-      'F2',
+      'AB2',
       { ...OPTIONS, now: true },
       { publish: makePublish(remoteIndented), now: () => LATER },
     );

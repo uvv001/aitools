@@ -762,7 +762,7 @@ describe('a conversation comment', () => {
 
 // The comment the text links to (r700 in TEXT): the engine refuses when the pull request has lost it.
 describe('a required comment', () => {
-  const MISSING = 'comment r700, the own comment of F1, no longer exists in this pull request';
+  const MISSING = 'comment r700, the own comment of AB1, no longer exists in this pull request';
   const requires = { ref: 'r700', missing: MISSING };
   const withOwn = (layout: Layout = {}) =>
     threadData({ ...layout, threads: [thread(700)], more: [reviewComment(700, { threadId: 'T_700' }), ...(layout.more ?? [])] });

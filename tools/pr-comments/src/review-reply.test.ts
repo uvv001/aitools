@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { commentRefFromUrl, commentUrl, digestBody } from './comment-ref.ts';
 import type { PullRequest, PullRequestData } from './model.ts';
 import type { PullRequestRef } from './pr-url.ts';
@@ -17,6 +17,12 @@ import type { ReplyDuplicateDeps, ReplyDuplicateOptions } from './review-reply.t
 import { renderReport } from './review-render.ts';
 import { removeScratch, scratchDir, snapshotOf } from './review-test-support.ts';
 
+const cryptoCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return { ...actual, randomInt: () => cryptoCalls.count++ % 2 };
+});
+
 const NOW = new Date(2026, 9, 8, 9, 5);
 // What `deps.now()` says when the reply is recorded.
 const LATER = new Date(2026, 9, 8, 10, 30);
@@ -29,16 +35,16 @@ const TITLES = ['Crash on empty list', 'Remark without a place', 'Not triaged ye
 // The comments that the pull request has before the tests reply to anything: the ones the links below point at.
 const BASE = ['r1', 'r2', 'c3', 'r4', 'r5', 'c6', 'r7'];
 
-// F1 has the own comment r1 and the duplicates r2 and c3; F2 has the duplicate r4 and no own comment; r5 is a note;
-// F3 has the conversation comment c6 as its own comment and the duplicate r7; F4 has nothing.
+// AB1 has the own comment r1 and the duplicates r2 and c3; AB2 has the duplicate r4 and no own comment; r5 is a note;
+// AB3 has the conversation comment c6 as its own comment and the duplicate r7; AB4 has nothing.
 const LINKS: ((state: ReviewState) => ReviewState)[] = [
-  (state) => linkOwn(state, 'F1', 'r1', NOW),
-  (state) => linkDuplicate(state, 'F1', 'r2', NOW),
-  (state) => linkDuplicate(state, 'F1', 'c3', NOW),
-  (state) => linkDuplicate(state, 'F2', 'r4', NOW),
+  (state) => linkOwn(state, 'AB1', 'r1', NOW),
+  (state) => linkDuplicate(state, 'AB1', 'r2', NOW),
+  (state) => linkDuplicate(state, 'AB1', 'c3', NOW),
+  (state) => linkDuplicate(state, 'AB2', 'r4', NOW),
   (state) => linkNote(state, 'r5', 'a question, not an issue'),
-  (state) => linkOwn(state, 'F3', 'c6', NOW),
-  (state) => linkDuplicate(state, 'F3', 'r7', NOW),
+  (state) => linkOwn(state, 'AB3', 'c6', NOW),
+  (state) => linkDuplicate(state, 'AB3', 'r7', NOW),
 ];
 
 let dir: string;
@@ -153,7 +159,7 @@ async function reply(db: string, ref: string, answer: Answer, options: Partial<R
   return { replied, calls: fake.calls };
 }
 
-const OWN_OF_F1 = `${PR}#discussion_r1`;
+const OWN_OF_AB1 = `${PR}#discussion_r1`;
 
 // What the engine is to say when the own comment is gone, with the real database path in the hints.
 const goneOwn = (db: string, own: string, finding: string, why = 'was your pending review discarded?') =>
@@ -176,13 +182,13 @@ describe('refusals before anything is sent', () => {
 
   it.each([
     ['a comment that is not linked', 'r9', (db: string) => `r9 is not linked in this review; link it first with "pr-comments link duplicate --db ${db} <finding> r9"`],
-    ['the own comment of a finding', 'r1', () => 'r1 is linked as the own comment of F1, not as a duplicate; only a duplicate is answered'],
-    ['the own conversation comment of a finding', 'c6', () => 'c6 is linked as the own comment of F3, not as a duplicate; only a duplicate is answered'],
+    ['the own comment of a finding', 'r1', () => 'r1 is linked as the own comment of AB1, not as a duplicate; only a duplicate is answered'],
+    ['the own conversation comment of a finding', 'c6', () => 'c6 is linked as the own comment of AB3, not as a duplicate; only a duplicate is answered'],
     ['a note', 'r5', () => 'r5 is recorded as a note, not as a duplicate of a finding'],
     [
       'a duplicate of a finding that has no own comment',
       'r4',
-      (db: string) => `F2 has no own comment yet; post it with "pr-comments finding post --db ${db} F2" or link its comment with "pr-comments link own --db ${db} F2 <ref>"`,
+      (db: string) => `AB2 has no own comment yet; post it with "pr-comments finding post --db ${db} AB2" or link its comment with "pr-comments link own --db ${db} AB2 <ref>"`,
     ],
   ])('refuses %s', async (_name, ref, message) => {
     const db = await startReview();
@@ -198,7 +204,7 @@ describe('refusals before anything is sent', () => {
     const db = await startReview();
     await syncReviewFile(db, snapshot([...BASE, 'a3f9c2d1e', 'v91204']));
     await changeReviewState(db, (current) => ({
-      state: linkDuplicate(linkDuplicate(current, 'F1', 'a3f9c2d1e', NOW), 'F1', 'v91204', NOW),
+      state: linkDuplicate(linkDuplicate(current, 'AB1', 'a3f9c2d1e', NOW), 'AB1', 'v91204', NOW),
       result: undefined,
     }));
     const before = await readFile(db);
@@ -233,11 +239,11 @@ describe('the request handed to the engine', () => {
     expect(calls).toEqual([
       {
         ref: PR_REF,
-        request: { commentRef: 'r2', body: `Duplicate of ${OWN_OF_F1}.`, requires: { ref: 'r1', missing: goneOwn(db, 'r1', 'F1') } },
+        request: { commentRef: 'r2', body: `Duplicate of ${OWN_OF_AB1}.`, requires: { ref: 'r1', missing: goneOwn(db, 'r1', 'AB1') } },
         options: { now: false, dryRun: false },
       },
     ]);
-    expect(replied).toMatchObject({ finding: 'F1', own: 'r1', link: OWN_OF_F1, text: `Duplicate of ${OWN_OF_F1}.` });
+    expect(replied).toMatchObject({ finding: 'AB1', own: 'r1', link: OWN_OF_AB1, text: `Duplicate of ${OWN_OF_AB1}.` });
   });
 
   it('points a duplicate to an own conversation comment without blaming a pending review', async () => {
@@ -248,21 +254,21 @@ describe('the request handed to the engine', () => {
     expect(calls[0]!.request).toEqual({
       commentRef: 'r7',
       body: `Duplicate of ${PR}#issuecomment-6.`,
-      requires: { ref: 'c6', missing: goneOwn(db, 'c6', 'F3', 'was it deleted?') },
+      requires: { ref: 'c6', missing: goneOwn(db, 'c6', 'AB3', 'was it deleted?') },
     });
     expect(calls[0]!.request.requires!.missing).not.toContain('pending review');
-    expect(replied).toMatchObject({ finding: 'F3', own: 'c6', link: `${PR}#issuecomment-6` });
+    expect(replied).toMatchObject({ finding: 'AB3', own: 'c6', link: `${PR}#issuecomment-6` });
   });
 
   it('puts the disclaimer first with byAgent, in the request and in the text that is reported', async () => {
     const db = await startReview();
-    const body = `${AGENT_DISCLAIMER}\n\nDuplicate of ${OWN_OF_F1}.`;
+    const body = `${AGENT_DISCLAIMER}\n\nDuplicate of ${OWN_OF_AB1}.`;
 
     const { replied, calls } = await reply(db, 'r2', created(), { byAgent: true });
 
     expect(calls[0]!.request.body).toBe(body);
     expect(replied.text).toBe(body);
-    expect(replied.link).toBe(OWN_OF_F1);
+    expect(replied.link).toBe(OWN_OF_AB1);
   });
 
   it('hands now and dryRun on, and answers a conversation comment', async () => {
@@ -275,7 +281,7 @@ describe('the request handed to the engine', () => {
     expect(replied.result).toMatchObject({ action: 'created', comment: 'c20', state: 'posted' });
     const dry = await reply(db, 'r2', created(), { dryRun: true });
     expect(dry.calls[0]!.options).toEqual({ now: false, dryRun: true });
-    expect(dry.replied.text).toBe(`Duplicate of ${OWN_OF_F1}.`);
+    expect(dry.replied.text).toBe(`Duplicate of ${OWN_OF_AB1}.`);
   });
 
   it('never reads the report file, and updates it from the database', async () => {
@@ -288,7 +294,7 @@ describe('the request handed to the engine', () => {
 
     await writeFile(report, 'edited by hand, not a report', 'utf8');
     const again = await reply(db, 'c3', created('c20'), { now: true });
-    expect(again.replied.text).toBe(`Duplicate of ${OWN_OF_F1}.`);
+    expect(again.replied.text).toBe(`Duplicate of ${OWN_OF_AB1}.`);
     expect(await readFile(report, 'utf8')).toBe(renderReport((await loadReviewFile(db)).data));
   });
 
@@ -313,7 +319,7 @@ describe('recording the reply', () => {
     const { replied } = await reply(db, 'r2', created('r10'));
 
     const after = await loadReviewFile(db);
-    expect(await lastUpdateOf(db, 'F1')).toEqual({
+    expect(await lastUpdateOf(db, 'AB1')).toEqual({
       kind: 'replied',
       at: STAMP,
       ref: 'r2',
@@ -341,7 +347,7 @@ describe('recording the reply', () => {
     const db = await startReview();
     await reply(db, 'r2', created('r10'));
     await changeReviewState(db, (state) => ({ state: unlink(state, 'r10', NOW), result: undefined }));
-    const updatesBefore = (await loadReviewFile(db)).data.findings.find((f) => f.id === 'F1')!.updates;
+    const updatesBefore = (await loadReviewFile(db)).data.findings.find((f) => f.id === 'AB1')!.updates;
 
     const { replied } = await reply(db, 'r2', unchanged('r10'), { byAgent: true });
 
@@ -353,7 +359,7 @@ describe('recording the reply', () => {
       note: 'duplicate reply to r2',
       seenDigest: digestBody(replied.text),
     });
-    expect(after.data.findings.find((f) => f.id === 'F1')!.updates).toStrictEqual(updatesBefore);
+    expect(after.data.findings.find((f) => f.id === 'AB1')!.updates).toStrictEqual(updatesBefore);
   });
 
   it('records an identical reply on the first run, and writes nothing on a second run or rerun', async () => {
@@ -362,7 +368,7 @@ describe('recording the reply', () => {
     const first = await reply(db, 'r2', unchanged('r10'));
 
     expect(first.replied.result).toMatchObject({ action: 'unchanged', comment: 'r10' });
-    expect(await lastUpdateOf(db, 'F1')).toEqual({
+    expect(await lastUpdateOf(db, 'AB1')).toEqual({
       kind: 'replied',
       at: STAMP,
       ref: 'r2',
@@ -419,7 +425,7 @@ describe('recording the reply', () => {
     const { replied } = await reply(db, 'r2', failed(message));
 
     expect(replied.result).toEqual({ action: 'error', dryRun: false, message });
-    expect(replied).toMatchObject({ finding: 'F1', own: 'r1', text: `Duplicate of ${OWN_OF_F1}.` });
+    expect(replied).toMatchObject({ finding: 'AB1', own: 'r1', text: `Duplicate of ${OWN_OF_AB1}.` });
     await sameBytes(db, before);
   });
 
@@ -471,12 +477,12 @@ describe('recording the reply ref locally', () => {
 
     // Unlinking r2 (which had seen_digest on comment_links and no posted_digest:r2 in meta) backfills meta and preserves seenDigest on relink.
     await changeReviewState(db, (state) => ({ state: unlink(state, 'r2', NOW), result: undefined }));
-    await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'F2', 'r2', NOW), result: undefined }));
+    await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'AB2', 'r2', NOW), result: undefined }));
     expect((await loadReviewFile(db)).links.find(({ ref }) => ref === 'r2')?.seenDigest).toBe(digestBody('Comment 1.'));
 
     // A known ref in linkable with neither pr_comments nor a baseline digest refuses linking until pr sync runs.
     await expect(
-      changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'F1', 'r11', NOW), result: undefined }), { knownRef: 'r11' }),
+      changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'AB1', 'r11', NOW), result: undefined }), { knownRef: 'r11' }),
     ).rejects.toThrow(`r11 is not in the synced pull request yet; run "pr-comments pr sync --db ${db}" first`);
 
     // Once pr sync brings r2 and an edited r10 in, r10 surfaces as edited while unchanged r2 stays clean.
@@ -501,7 +507,7 @@ describe('recording the reply ref locally', () => {
 
     expect(replied.result).toMatchObject({ action: 'created', comment: 'r10' });
     const { data } = await loadReviewFile(db);
-    expect(data.findings.map((finding) => finding.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5']);
+    expect(data.findings.map((finding) => finding.id)).toEqual(['AB1', 'AB2', 'AB3', 'AB4', 'AB5']);
   });
 });
 
@@ -533,7 +539,7 @@ describe('a reply that could not be recorded', () => {
         `(r2 is not linked in this review; link it first with "pr-comments link duplicate --db ${db} <finding> r2"); ` +
         'run the command again to record it',
     });
-    expect(replied).toMatchObject({ finding: 'F1', own: 'r1', link: OWN_OF_F1, text: `Duplicate of ${OWN_OF_F1}.` });
+    expect(replied).toMatchObject({ finding: 'AB1', own: 'r1', link: OWN_OF_AB1, text: `Duplicate of ${OWN_OF_AB1}.` });
     expect((await loadReviewFile(db)).known.has('r10')).toBe(false);
     await sameBytes(db, during.bytes!);
     await expectSound(db);
@@ -555,7 +561,7 @@ describe('a reply that could not be recorded', () => {
   it('is recorded by running the command again once the link is back: the reply is found as identical', async () => {
     const db = await startReview();
     await reply(db, 'r2', unlinkAndAnswer(db, 'created', {}));
-    await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'F1', 'r2', NOW), result: undefined }));
+    await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'AB1', 'r2', NOW), result: undefined }));
 
     const { replied } = await reply(db, 'r2', unchanged('r10'));
 

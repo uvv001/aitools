@@ -87,7 +87,7 @@ const DB_OPTION = reqOpt('db', '<file.sqlite>', 'the review database');
 
 const REVISIONS =
   'A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the short hash (at least 8 characters) of the commit.';
-const FINDING = arg('<finding>', 'the finding, such as F7 (any case)');
+const FINDING = arg('<finding>', 'the finding, such as AB7 (any case)');
 const COMMENT_ONLY_REF = arg('<ref>', 'the comment: r544830 or c623843');
 const COMMENT_OR_REVIEW_REF = arg('<ref>', 'the comment or review body: r544830, c623843 or v91204');
 const COMMENT_REF = arg('<ref>', 'the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e');
@@ -232,7 +232,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
     'finding show',
     'shows one finding with its updates',
     'Prints the finding, the comments linked to it (such as "Linked: own r544861, duplicate r544900"), the description and its Updates.',
-    { args: [FINDING], database: 'readonly', example: 'F7' },
+    { args: [FINDING], database: 'readonly', example: 'AB7' },
   ),
   spec(
     'finding set-state',
@@ -241,32 +241,32 @@ export const COMMAND_SPECS: CommandSpec[] = [
     {
       args: [FINDING, arg('<state>', 'awaiting, unverified, approved, fixed, discarded, deferred or improvement')],
       options: [opt('revision', '<rev>', 'the revision the change is about'), noteOption(), roundOption],
-      example: 'F7 fixed --revision HEAD',
+      example: 'AB7 fixed --revision HEAD',
     },
   ),
   spec(
     'finding set-severity',
     'changes the severity of a finding',
     `Changes the severity of the finding. ${LOGGED}`,
-    { args: [FINDING, arg('<severity>', 'high, medium or low')], options: [noteOption(), roundOption], example: 'F7 medium' },
+    { args: [FINDING, arg('<severity>', 'high, medium or low')], options: [noteOption(), roundOption], example: 'AB7 medium' },
   ),
   spec(
     'finding set-title',
     'changes the title of a finding',
     `Changes the title of the finding. ${LOGGED}`,
-    { args: [FINDING, arg('<title>', 'the new title, one line')], options: [noteOption(), roundOption], example: 'F7 "Missing retry timeout"' },
+    { args: [FINDING, arg('<title>', 'the new title, one line')], options: [noteOption(), roundOption], example: 'AB7 "Missing retry timeout"' },
   ),
   spec(
     'finding set-description',
     'replaces the description of a finding',
     `Replaces the description of the finding with the new text (the description always holds the latest version). ${LOGGED}`,
-    { args: [FINDING], options: [descriptionFileOption('the new description'), noteOption(), roundOption], example: 'F7 --description-file -' },
+    { args: [FINDING], options: [descriptionFileOption('the new description'), noteOption(), roundOption], example: 'AB7 --description-file -' },
   ),
   spec(
     'finding update',
     'adds an update to a finding',
     'Adds a free-form entry to the Updates of the finding: a question, a verdict, a note.',
-    { args: [FINDING, arg('<text>', 'the update')], options: [roundOption], example: 'F7 "Asked the author" --round 1' },
+    { args: [FINDING, arg('<text>', 'the update')], options: [roundOption], example: 'AB7 "Asked the author" --round 1' },
   ),
   spec(
     'finding post',
@@ -282,12 +282,12 @@ export const COMMAND_SPECS: CommandSpec[] = [
         ...postOptions,
       ],
       notes: [
-        'The comment is `<severity> **<id> — <title>**` and the description (e.g. `🔴 **F7 — Missing timeout**`). Only the description goes to GitHub, never the Updates; relative links pointing into the review are replaced by their text.',
+        'The comment is `<severity> **<id> — <title>**` and the description (e.g. `🔴 **AB7 — Missing timeout**`). Only the description goes to GitHub, never the Updates; relative links pointing into the review are replaced by their text.',
         'The place is the first `` `path:lines` `` anchor of the description (`--anchor <n>` picks another; a whole-file finding uses `path:1` when line 1 is in the diff).',
         '`--now` publishes at once (not possible while you have a pending review); `--commit <sha>` pins the comment when no pending review exists yet.',
         'The exit code is 1 when the result is an error.',
       ],
-      example: 'F7 --dry-run',
+      example: 'AB7 --dry-run',
     },
   ),
   spec(
@@ -306,7 +306,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
     'Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.\n' +
       'Re-run it on an edited own comment to update the seen version (with --note to log a reconciliation note on the finding), or\n' +
       'run "link remove <ref>" first to change its role or finding.',
-    { args: [FINDING, COMMENT_ONLY_REF], options: [noteOption()], example: 'F7 r544861' },
+    { args: [FINDING, COMMENT_ONLY_REF], options: [noteOption()], example: 'AB7 r544861' },
   ),
   spec(
     'link duplicate',
@@ -314,7 +314,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
     'Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have\n' +
       'several). Re-run it on an edited comment or review body to update the seen version (with --note to log a reconciliation note\n' +
       'on the finding), or run "link remove <ref>" first to change its role or finding.',
-    { args: [FINDING, COMMENT_REF], options: [noteOption()], example: 'F7 c623843' },
+    { args: [FINDING, COMMENT_REF], options: [noteOption()], example: 'AB7 c623843' },
   ),
   spec(
     'link note',

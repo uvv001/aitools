@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomInt } from 'node:crypto';
 import { existsSync, linkSync, readdirSync, symlinkSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
@@ -21,10 +22,16 @@ import {
 import type { CommentLink, ReviewState } from './review-links.ts';
 import { linkDuplicate, linkNote, linkOwn, unlink } from './review-links.ts';
 import type { ReviewData } from './review-model.ts';
-import { newReview } from './review-ops.ts';
+import { addFinding, newReview, openRound } from './review-ops.ts';
 import { formatUpdateItem, renderReport } from './review-render.ts';
 import { REVIEW_SCHEMA_VERSION, getMeta, openReviewDb, setMeta } from './review-store.ts';
 import { removeScratch, sampleReport, sampleReview as sampleReviewData, scratchDir, snapshotOf } from './review-test-support.ts';
+
+const cryptoCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return { ...actual, randomInt: vi.fn(() => cryptoCalls.count++ % 2) };
+});
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
@@ -376,6 +383,31 @@ const failure = (code: string): Error => Object.assign(new Error(`failed: ${code
 
 describe('initReviewFile', () => {
   const NEW_REVIEW = newReview('PR 42');
+
+  it('persists distinct random prefixes and uses them when allocating findings after reopening', async () => {
+    const start = vi.mocked(randomInt).mock.calls.length;
+    [0, 1, 2, 3].forEach((value) => vi.mocked(randomInt).mockImplementationOnce(() => value));
+    const first = join(dir, 'first.sqlite');
+    const second = join(dir, 'second.sqlite');
+
+    await initReviewFile('First', { db: first, now: NOW });
+    await initReviewFile('Second', { db: second, now: NOW });
+
+    const allocate = async (db: string): Promise<string> =>
+      (
+        await mutateReviewFile(db, (data) => {
+          const open = openRound(data, { revision: 'abc1234', base: null });
+          const added = addFinding(open, { severity: 'low', title: 'Title', description: 'Body.' }, NOW);
+          return { data: added.data, result: added.id };
+        })
+      ).result;
+
+    expect(await allocate(first)).toBe('AB1');
+    expect(await allocate(second)).toBe('CD1');
+    expect(vi.mocked(randomInt).mock.calls.slice(start)).toEqual([[26], [26], [26], [26]]);
+    expect((await loadReviewFile(first)).data.findingPrefix).toBe('AB');
+    expect((await loadReviewFile(second)).data.findingPrefix).toBe('CD');
+  });
 
   it('creates the database of a new review and renders the report next to it', async () => {
     const db = join(dir, 'r.sqlite');
@@ -757,8 +789,8 @@ describe('mutateReviewFile', () => {
   });
 
   it('hands the changed review and the result of the callback back', async () => {
-    const changed = await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'X' }, result: 'F7' }));
-    expect(changed.result).toBe('F7');
+    const changed = await mutateReviewFile(db, (data) => ({ data: { ...data, target: 'X' }, result: 'AB7' }));
+    expect(changed.result).toBe('AB7');
     expect(changed.data).toStrictEqual((await loadReviewFile(db)).data);
   });
 
@@ -767,7 +799,7 @@ describe('mutateReviewFile', () => {
 
     await expect(
       mutateReviewFile(db, (data) => ({ data: { ...data, target: 'Lost', findings: [finding('bad')] }, result: null })),
-    ).rejects.toThrow(/CHECK constraint failed/u);
+    ).rejects.toThrow('finding id "bad" does not start with finding prefix "AB"');
 
     expect((await bytes()).equals(before)).toBe(true);
     expect((await loadReviewFile(db)).data.target).toBe('PR 42');
@@ -854,7 +886,7 @@ describe('changeReviewState', () => {
   let db: string;
   const bytes = (): Promise<Buffer> => readFile(db);
 
-  // The review has the finding F1, and F1 has the own link r1; the stored pull request has the comments r0, r1, r2 and
+  // The review has the finding AB1, and AB1 has the own link r1; the stored pull request has the comments r0, r1, r2 and
   // c2 and the check annotation a00000001.
   beforeEach(async () => {
     report = join(dir, 'r.md');
@@ -862,7 +894,7 @@ describe('changeReviewState', () => {
     await changeReviewState(
       db,
       (state) => ({
-        state: { ...state, data: withFinding(state.data, 'F1'), links: [own('r1', 'F1')] },
+        state: { ...state, data: withFinding(state.data, 'AB1'), links: [own('r1', 'AB1')] },
         result: null,
       }),
       { snapshot: snapshotOf(REFS) },
@@ -871,7 +903,7 @@ describe('changeReviewState', () => {
 
   it('hands the stored state to the change: the review, the links in order, the pull request, the refs to link to', async () => {
     await changeReviewState(db, (state) => ({
-      state: { ...state, links: [...state.links, { ref: 'c2', role: 'note', note: 'why' }, { ref: 'r0', role: 'duplicate', finding: 'F1' }], pullRequest: PULL_REQUEST },
+      state: { ...state, links: [...state.links, { ref: 'c2', role: 'note', note: 'why' }, { ref: 'r0', role: 'duplicate', finding: 'AB1' }], pullRequest: PULL_REQUEST },
       result: null,
     }));
     let seen: ReviewState | undefined;
@@ -881,8 +913,8 @@ describe('changeReviewState', () => {
     });
     const loaded = await loadReviewFile(db);
     expect(seen).toStrictEqual({
-      data: withFinding(newReview('PR 42'), 'F1'),
-      links: [own('r1', 'F1'), { ref: 'c2', role: 'note', note: 'why' }, { ref: 'r0', role: 'duplicate', finding: 'F1' }],
+      data: withFinding(newReview('PR 42', 'AB'), 'AB1'),
+      links: [own('r1', 'AB1'), { ref: 'c2', role: 'note', note: 'why' }, { ref: 'r0', role: 'duplicate', finding: 'AB1' }],
       pullRequest: PULL_REQUEST,
       known: new Set(REFS),
       currentDigests: loaded.currentDigests,
@@ -891,13 +923,13 @@ describe('changeReviewState', () => {
 
   it('saves the review, the links and the pull request together, and hands the new state and the result back', async () => {
     const changed = await changeReviewState(db, (state) => ({
-      state: { ...state, data: withFinding(state.data, 'F2'), links: [...state.links, own('r2', 'F2')], pullRequest: PULL_REQUEST },
-      result: 'F2',
+      state: { ...state, data: withFinding(state.data, 'AB2'), links: [...state.links, own('r2', 'AB2')], pullRequest: PULL_REQUEST },
+      result: 'AB2',
     }));
-    expect(changed.result).toBe('F2');
+    expect(changed.result).toBe('AB2');
     const loaded = await loadReviewFile(db);
-    expect(loaded.links).toStrictEqual([own('r1', 'F1'), own('r2', 'F2')]);
-    expect(loaded.data.findings.map((each) => each.id)).toEqual(['F1', 'F2']);
+    expect(loaded.links).toStrictEqual([own('r1', 'AB1'), own('r2', 'AB2')]);
+    expect(loaded.data.findings.map((each) => each.id)).toEqual(['AB1', 'AB2']);
     expect(loaded.pullRequest).toBe(PULL_REQUEST);
     expect(changed.state).toStrictEqual({
       data: loaded.data,
@@ -914,7 +946,7 @@ describe('changeReviewState', () => {
       const before = await loadReviewFile(db);
       await changeReviewState(db, (state) => ({ state: { ...state, links: [...state.links, { ref: 'c2', role: 'note', note: 'why' }] }, result: null }));
       const after = await loadReviewFile(db);
-      expect(after.links).toStrictEqual([own('r1', 'F1'), { ref: 'c2', role: 'note', note: 'why' }]);
+      expect(after.links).toStrictEqual([own('r1', 'AB1'), { ref: 'c2', role: 'note', note: 'why' }]);
       expect([after.data, after.pullRequest]).toStrictEqual([before.data, before.pullRequest]);
     });
 
@@ -922,7 +954,7 @@ describe('changeReviewState', () => {
       await changeReviewState(db, (state) => ({ state: { ...state, data: { ...state.data, target: 'Changed' } }, result: null }));
       const after = await loadReviewFile(db);
       expect(after.data.target).toBe('Changed');
-      expect(after.links).toStrictEqual([own('r1', 'F1')]);
+      expect(after.links).toStrictEqual([own('r1', 'AB1')]);
       expect(after.pullRequest).toBeUndefined();
     });
 
@@ -970,7 +1002,7 @@ describe('changeReviewState', () => {
 
     await expect(
       changeReviewState(db, (state) => ({
-        state: { ...state, data: withFinding(state.data, 'F2'), links: [...state.links, own('a00000001', 'F2')], pullRequest: PULL_REQUEST },
+        state: { ...state, data: withFinding(state.data, 'AB2'), links: [...state.links, own('a00000001', 'AB2')], pullRequest: PULL_REQUEST },
         result: null,
       })),
     ).rejects.toThrow(/CHECK constraint failed/u);
@@ -985,25 +1017,25 @@ describe('changeReviewState', () => {
       const before = await bytes();
       await expect(changeReviewState(db, (state) => ({ state: change(state), result: null }))).rejects.toThrow(message);
       expect((await bytes()).equals(before)).toBe(true);
-      expect((await loadReviewFile(db)).links).toStrictEqual([own('r1', 'F1')]);
+      expect((await loadReviewFile(db)).links).toStrictEqual([own('r1', 'AB1')]);
     };
 
     it('a link to a finding that does not exist', () =>
-      refused((state) => ({ ...state, data: { ...state.data, target: 'Changed' }, links: [...state.links, own('r2', 'F9')] }), /FOREIGN KEY constraint failed/u));
+      refused((state) => ({ ...state, data: { ...state.data, target: 'Changed' }, links: [...state.links, own('r2', 'AB9')] }), /FOREIGN KEY constraint failed/u));
 
     it('a change that removes a finding that a link points at', () =>
       refused((state) => ({ ...state, data: { ...state.data, findings: [] } }), /FOREIGN KEY constraint failed/u));
 
-    it('a second own link for a finding', () => refused((state) => ({ ...state, links: [...state.links, own('r2', 'F1')] }), /constraint/iu));
+    it('a second own link for a finding', () => refused((state) => ({ ...state, links: [...state.links, own('r2', 'AB1')] }), /constraint/iu));
 
     it('a ref that is linked twice', () =>
-      refused((state) => ({ ...state, links: [...state.links, { ref: 'r1', role: 'duplicate', finding: 'F1' }] }), /constraint/iu));
+      refused((state) => ({ ...state, links: [...state.links, { ref: 'r1', role: 'duplicate', finding: 'AB1' }] }), /constraint/iu));
 
     it('a ref that no comment or check annotation of the stored pull request has', () =>
-      refused((state) => ({ ...state, links: [...state.links, { ref: 'r5555', role: 'duplicate', finding: 'F1' }] }), /FOREIGN KEY constraint failed/u));
+      refused((state) => ({ ...state, links: [...state.links, { ref: 'r5555', role: 'duplicate', finding: 'AB1' }] }), /FOREIGN KEY constraint failed/u));
 
     it('a check annotation as an own link', () =>
-      refused((state) => ({ ...state, links: [...state.links, own('a00000001', 'F1')] }), /CHECK constraint failed/u));
+      refused((state) => ({ ...state, links: [...state.links, own('a00000001', 'AB1')] }), /CHECK constraint failed/u));
   });
 
   it('commits a change that removes a finding together with its links', async () => {
@@ -1098,13 +1130,13 @@ describe('changeReviewState', () => {
         db,
         (state) => {
           known = state.known;
-          return { state: { ...state, data: withFinding(state.data, 'F2'), links: [...state.links, own('r5', 'F2'), { ref: 'a00000009', role: 'duplicate', finding: 'F2' }] }, result: 'F2' };
+          return { state: { ...state, data: withFinding(state.data, 'AB2'), links: [...state.links, own('r5', 'AB2'), { ref: 'a00000009', role: 'duplicate', finding: 'AB2' }] }, result: 'AB2' };
         },
         { snapshot: snapshotOf(NEW_REFS) },
       );
 
       expect(known).toEqual(new Set(NEW_REFS));
-      expect(changed.result).toBe('F2');
+      expect(changed.result).toBe('AB2');
       const loaded = await loadReviewFile(db);
       expect(loaded.known).toEqual(new Set(NEW_REFS));
       expect(loaded.links.map((link) => link.ref)).toEqual(['r1', 'r5', 'a00000009']);
@@ -1120,7 +1152,7 @@ describe('changeReviewState', () => {
         { ref: 'r5', gone: 0 },
       ]);
       const loaded = await loadReviewFile(db);
-      expect(loaded.links).toEqual([own('r1', 'F1')]);
+      expect(loaded.links).toEqual([own('r1', 'AB1')]);
       expect(loaded.known).toEqual(new Set(NEW_REFS));
     });
 
@@ -1153,7 +1185,7 @@ describe('changeReviewState', () => {
     it('rolls the snapshot back with a change that the links refuse', async () => {
       const before = await bytes();
       await expect(
-        changeReviewState(db, (state) => ({ state: { ...state, links: [...state.links, { ref: 'r9', role: 'duplicate', finding: 'F1' }] }, result: null }), { snapshot: snapshotOf(NEW_REFS) }),
+        changeReviewState(db, (state) => ({ state: { ...state, links: [...state.links, { ref: 'r9', role: 'duplicate', finding: 'AB1' }] }, result: null }), { snapshot: snapshotOf(NEW_REFS) }),
       ).rejects.toThrow(/FOREIGN KEY constraint failed/u);
       expect((await bytes()).equals(before)).toBe(true);
     });
@@ -1184,7 +1216,7 @@ describe('changeReviewState', () => {
       const changed = await changeReviewState(
         db,
         (state) => ({
-          state: { ...state, data: withFinding(state.data, 'F2'), links: [...state.links, own('r999', 'F2')] },
+          state: { ...state, data: withFinding(state.data, 'AB2'), links: [...state.links, own('r999', 'AB2')] },
           result: state.known.has('r999'),
         }),
         { knownRef: 'r999' },
@@ -1226,15 +1258,15 @@ describe('changeReviewState', () => {
       expect((await loadReviewFile(db)).known.has('r10')).toBe(true);
     });
 
-    it('preserves seenDigest when a pre-F39 unsynced comment_links row without posted_digest meta is unlinked and relinked', async () => {
+    it('preserves seenDigest when a pre-AB39 unsynced comment_links row without posted_digest meta is unlinked and relinked', async () => {
       const baseline = digestBody('Legacy posted before sync');
       await changeReviewState(
         db,
         (state) => ({
           state: {
             ...state,
-            data: withFinding(state.data, 'F2'),
-            links: [...state.links, { ref: 'c777', role: 'own', finding: 'F2', seenDigest: baseline }],
+            data: withFinding(state.data, 'AB2'),
+            links: [...state.links, { ref: 'c777', role: 'own', finding: 'AB2', seenDigest: baseline }],
             pullRequest: PULL_REQUEST,
           },
           result: null,
@@ -1246,17 +1278,17 @@ describe('changeReviewState', () => {
       await changeReviewState(db, (state) => ({ state: unlink(state, 'c777', NOW), result: null }));
       expect(meta(db, 'posted_digest:c777')).toBe(baseline);
 
-      await changeReviewState(db, (state) => ({ state: linkOwn(state, 'F2', 'c777', NOW), result: null }));
+      await changeReviewState(db, (state) => ({ state: linkOwn(state, 'AB2', 'c777', NOW), result: null }));
       expect((await loadReviewFile(db)).links.find(({ ref }) => ref === 'c777')?.seenDigest).toBe(baseline);
     });
   });
 
   it('is what mutateReviewFile is built on: the links and the pull request stay as they are', async () => {
     await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL_REQUEST }, result: null }));
-    const changed = await mutateReviewFile(db, (data) => ({ data: withFinding(data, 'F2'), result: 'F2' }));
-    expect(changed).toStrictEqual({ data: withFinding(withFinding(newReview('PR 42'), 'F1'), 'F2'), result: 'F2' });
+    const changed = await mutateReviewFile(db, (data) => ({ data: withFinding(data, 'AB2'), result: 'AB2' }));
+    expect(changed).toStrictEqual({ data: withFinding(withFinding(newReview('PR 42', 'AB'), 'AB1'), 'AB2'), result: 'AB2' });
     const loaded = await loadReviewFile(db);
-    expect([loaded.links, loaded.pullRequest]).toEqual([[own('r1', 'F1')], PULL_REQUEST]);
+    expect([loaded.links, loaded.pullRequest]).toEqual([[own('r1', 'AB1')], PULL_REQUEST]);
   });
 
   it('substitutes a database path containing $& literally into review-links hints', async () => {
@@ -1274,10 +1306,10 @@ describe('the report of a review connected to a pull request', () => {
 
   it('keeps the entries written without a URL as they are, whatever is added after them', async () => {
     const { db } = await initReviewFile('PR 157', { db: join(dir, 'r.sqlite'), now: NOW });
-    await changeReviewState(db, (state) => ({ state: { ...state, data: withFinding(state.data, 'F1') }, result: null }), { snapshot: snapshotOf(COMMENTS) });
-    await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'F1', 'r544861', NOW), result: null }));
+    await changeReviewState(db, (state) => ({ state: { ...state, data: withFinding(state.data, 'AB1') }, result: null }), { snapshot: snapshotOf(COMMENTS) });
+    await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'AB1', 'r544861', NOW), result: null }));
     await changeReviewState(db, (state) => ({ state: { ...state, pullRequest: PULL }, result: null }));
-    await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'F1', 'r544900', NOW), result: null }));
+    await changeReviewState(db, (state) => ({ state: linkDuplicate(state, 'AB1', 'r544900', NOW), result: null }));
 
     const updates = (await loadReviewFile(db)).data.findings[0]!.updates.map(formatUpdateItem);
 
@@ -1333,14 +1365,14 @@ describe('syncReviewFile', () => {
   it('replaces what the last sync stored, and keeps the links: what they point at stays, as gone', async () => {
     await changeReviewState(
       db,
-      (state) => ({ state: { ...state, data: withFinding(state.data, 'F1'), links: [own('r1', 'F1'), { ref: 'c2', role: 'note', note: 'why' }] }, result: null }),
+      (state) => ({ state: { ...state, data: withFinding(state.data, 'AB1'), links: [own('r1', 'AB1'), { ref: 'c2', role: 'note', note: 'why' }] }, result: null }),
       { snapshot: snapshotOf(['r1', 'c2', 'r3']) },
     );
 
     await syncReviewFile(db, snapshotOf(['r3', 'r4']));
 
     const loaded = await loadReviewFile(db);
-    expect(loaded.links).toEqual([own('r1', 'F1'), { ref: 'c2', role: 'note', note: 'why' }]);
+    expect(loaded.links).toEqual([own('r1', 'AB1'), { ref: 'c2', role: 'note', note: 'why' }]);
     expect(loaded.known).toEqual(new Set(['r3', 'r4']));
     expect(linkable(db)).toEqual([
       { ref: 'c2', gone: 1 },
@@ -1361,7 +1393,7 @@ describe('syncReviewFile', () => {
   it('writes the pull request and nothing of the review: the review, the links and the meta values stay', async () => {
     await changeReviewState(
       db,
-      (state) => ({ state: { ...state, data: withFinding(state.data, 'F1'), links: [own('r1', 'F1')] }, result: null }),
+      (state) => ({ state: { ...state, data: withFinding(state.data, 'AB1'), links: [own('r1', 'AB1')] }, result: null }),
       { snapshot: snapshotOf(['r1']) },
     );
     const before = await loadReviewFile(db);
@@ -1487,7 +1519,7 @@ describe('the functions that only read', () => {
     ({ db } = await initReviewFile('PR 42', { db: join(dir, 'r.sqlite'), now: NOW, pr: PULL_REQUEST }));
     await changeReviewState(
       db,
-      (state) => ({ state: { ...state, data: withFinding(state.data, 'F1'), links: [own('r1', 'F1')] }, result: null }),
+      (state) => ({ state: { ...state, data: withFinding(state.data, 'AB1'), links: [own('r1', 'AB1')] }, result: null }),
       { snapshot: snapshotOf(['r1', 'c2', 'a00000001']) },
     );
     await renderReportFile(db);
@@ -1522,7 +1554,7 @@ const STATE_WRITER = `
 const [moduleUrl, db, pause] = process.argv.slice(1);
 const { changeReviewState } = await import(moduleUrl);
 const { result } = await changeReviewState(db, (state) => {
-  const id = 'F' + (state.data.findings.length + 1);
+  const id = state.data.findingPrefix + (state.data.findings.length + 1);
   const link = { ref: 'r' + (100 + state.links.length), role: 'own', finding: id };
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(pause));
   const finding = { id, state: '⏳', severity: '🔴', title: 'Finding ' + id, description: 'Body.', updates: [] };

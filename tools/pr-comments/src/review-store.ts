@@ -14,7 +14,7 @@ import type {
 } from './review-model.ts';
 import { POSTED_DIGEST_PREFIX, PULL_REQUEST_SCHEMA } from './store.ts';
 
-export const REVIEW_SCHEMA_VERSION = 8;
+export const REVIEW_SCHEMA_VERSION = 9;
 
 // Every table of the review is STRICT (typed columns). Lists keep their order in `position`. Rounds and finding
 // updates are stored as structured columns (`intro_items` and `updates`), never as pre-rendered Markdown text.
@@ -28,7 +28,8 @@ export const REVIEW_SCHEMA_VERSION = 8;
 const SCHEMA = `
 CREATE TABLE review (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  target TEXT NOT NULL
+  target TEXT NOT NULL,
+  finding_prefix TEXT NOT NULL CHECK (length(finding_prefix) = 2 AND finding_prefix GLOB '[A-Z][A-Z]')
 ) STRICT;
 
 CREATE TABLE intro_items (
@@ -41,7 +42,11 @@ CREATE TABLE intro_items (
 
 CREATE TABLE findings (
   position INTEGER PRIMARY KEY CHECK (position >= 0),
-  id TEXT NOT NULL UNIQUE CHECK (id GLOB 'F[0-9]*' AND substr(id, 2) NOT GLOB '*[^0-9]*'),
+  id TEXT NOT NULL UNIQUE CHECK (
+    length(id) >= 3
+    AND id GLOB '[A-Z][A-Z][1-9]*'
+    AND substr(id, 3) NOT GLOB '*[^0-9]*'
+  ),
   state TEXT NOT NULL,
   severity TEXT NOT NULL,
   title TEXT NOT NULL,
@@ -276,8 +281,13 @@ export function inTransaction<T>(db: DatabaseSync, work: () => T, options: Trans
 // review: the links keep pointing at the findings by id, which the deferred foreign key checks at the commit.
 export function saveReview(db: DatabaseSync, data: ReviewData): void {
   inTransaction(db, () => {
+    for (const { id } of data.findings) {
+      if (!id.startsWith(data.findingPrefix)) {
+        throw new Error(`finding id "${id}" does not start with finding prefix "${data.findingPrefix}"`);
+      }
+    }
     db.exec('DELETE FROM findings; DELETE FROM intro_items; DELETE FROM review');
-    db.prepare('INSERT INTO review (id, target) VALUES (1, ?)').run(data.target);
+    db.prepare('INSERT INTO review (id, target, finding_prefix) VALUES (1, ?, ?)').run(data.target, data.findingPrefix);
     insertIntro(db, data.intro.reviewed);
     data.findings.forEach((finding, position) => insertFinding(db, finding, position));
   });
@@ -362,9 +372,14 @@ function loadFindings(db: DatabaseSync): Finding[] {
 // another process commits a change meanwhile.
 export function loadReview(db: DatabaseSync): ReviewData {
   return inTransaction(db, () => {
-    const row = db.prepare('SELECT target FROM review').get() as Row | undefined;
+    const row = db.prepare('SELECT target, finding_prefix FROM review').get() as Row | undefined;
     if (!row) throw new Error('the database holds no review yet');
-    return { target: row.target as string, intro: loadIntro(db), findings: loadFindings(db) };
+    return {
+      target: row.target as string,
+      findingPrefix: row.finding_prefix as string,
+      intro: loadIntro(db),
+      findings: loadFindings(db),
+    };
   });
 }
 
