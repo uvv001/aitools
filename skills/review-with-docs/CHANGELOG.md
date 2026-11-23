@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-23
+
+### Changed
+
+- The bundled `pr-comments.mjs` uses SQLite schema v9 and assigns a random two-letter uppercase finding ID prefix (`[A-Z]{2}`) per review to prevent ID collisions across follow-up PRs.
+
 ## 2026-11-12
 
 ### Added
