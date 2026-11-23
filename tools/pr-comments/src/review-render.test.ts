@@ -8,11 +8,11 @@ function entry(...items: ReviewedItem[]): IntroEntry<ReviewedItem> {
 
 function finding(number: number, state = '⏳', severity = '🔴', title = `Title ${number}`): Finding {
   return {
-    id: `F${number}`,
+    id: `AB${number}`,
     state,
     severity,
     title,
-    description: `Body of F${number}.`,
+    description: `Body of AB${number}.`,
     updates: [{ kind: 'raised', at: '2026-10-05 11:15', round: 1, state: '⏳' }],
   };
 }
@@ -20,6 +20,7 @@ function finding(number: number, state = '⏳', severity = '🔴', title = `Titl
 function data(changes: Partial<ReviewData> = {}): ReviewData {
   return {
     target: 'PR 42',
+    findingPrefix: 'AB',
     intro: {
       reviewed: entry({ round: 1, revision: 'abc1234', base: null, notes: ['tracked tree clean.'] }),
     },
@@ -79,12 +80,12 @@ describe('renderReport', () => {
       '',
       '### ⏳ 2 awaiting triage',
       '',
-      '  1. [F1](#--f1--title-1)',
-      '  2. [F3](#--f3--title-3)',
+      '  1. [AB1](#--ab1--title-1)',
+      '  2. [AB3](#--ab3--title-3)',
       '',
       '### ❓ 1 unverified',
       '',
-      '  1. [F4](#--f4--title-4)',
+      '  1. [AB4](#--ab4--title-4)',
       '',
       '### 🔧 1 fixed',
     ]);
@@ -123,21 +124,21 @@ describe('renderReport', () => {
       [
         '## Findings',
         '',
-        '### ⏳ 🔴 F1 — Title 1',
+        '### ⏳ 🔴 AB1 — Title 1',
         '',
         '#### Description',
         '',
-        'Body of F1.',
+        'Body of AB1.',
         '',
         '#### Updates',
         '',
         '- 2026-10-05 11:15 — Round 1: raised ⏳',
         '',
-        '### ⏳ 🔴 F2 — Title 2',
+        '### ⏳ 🔴 AB2 — Title 2',
         '',
         '#### Description',
         '',
-        'Body of F2.',
+        'Body of AB2.',
         '',
         '#### Updates',
         '',
@@ -151,7 +152,7 @@ describe('renderReport', () => {
     const empty: Finding = { ...finding(1), description: '', updates: [] };
     const rendered = renderReport(data({ findings: [empty] }));
     expect(rendered.slice(rendered.indexOf('## Findings'))).toBe(
-      '## Findings\n\n### ⏳ 🔴 F1 — Title 1\n\n#### Description\n\n#### Updates\n',
+      '## Findings\n\n### ⏳ 🔴 AB1 — Title 1\n\n#### Description\n\n#### Updates\n',
     );
   });
 
@@ -222,15 +223,15 @@ describe('renderReport', () => {
 
 describe('slug', () => {
   it('lowercases, strips emoji and punctuation, and turns each space into a hyphen', () => {
-    expect(slug('✅ 🔴 F4 — Icon-only settings button has no accessible name')).toBe(
-      '--f4--icon-only-settings-button-has-no-accessible-name',
+    expect(slug('✅ 🔴 AB4 — Icon-only settings button has no accessible name')).toBe(
+      '--ab4--icon-only-settings-button-has-no-accessible-name',
     );
-    expect(slug('⏳ 🟡 F10 — Fix `foo_bar()` (and "baz")')).toBe('--f10--fix-foo_bar-and-baz');
-    expect(slug('🔀 ⚪ F6 — two  spaces')).toBe('--f6--two--spaces');
+    expect(slug('⏳ 🟡 AB10 — Fix `foo_bar()` (and "baz")')).toBe('--ab10--fix-foo_bar-and-baz');
+    expect(slug('🔀 ⚪ AB6 — two  spaces')).toBe('--ab6--two--spaces');
   });
 
   it('keeps Unicode letters, marks, digits, underscores, and hyphens', () => {
-    expect(slug('❓ 🔴 F3 — Café Déjà Vu — 日本語 2² + 🎉')).toBe('--f3--café-déjà-vu--日本語-2--');
-    expect(slug('📌 🟡 F5 — ALL CAPS and snake_case-and-kebab')).toBe('--f5--all-caps-and-snake_case-and-kebab');
+    expect(slug('❓ 🔴 AB3 — Café Déjà Vu — 日本語 2² + 🎉')).toBe('--ab3--café-déjà-vu--日本語-2--');
+    expect(slug('📌 🟡 AB5 — ALL CAPS and snake_case-and-kebab')).toBe('--ab5--all-caps-and-snake_case-and-kebab');
   });
 });

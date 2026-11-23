@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { STATES } from './review-model.ts';
 import type {
   Finding,
@@ -132,12 +133,20 @@ function latestRound(data: ReviewData): number | undefined {
   return rounds.length === 0 ? undefined : Math.max(...rounds);
 }
 
+function randomFindingPrefix(): string {
+  const letter = (): string => String.fromCharCode('A'.charCodeAt(0) + randomInt(26));
+  return `${letter()}${letter()}`;
+}
+
 // A new review: title target, no rounds, no findings. **Reviewed** carries no items until the first openRound fills it.
-export function newReview(target: string): ReviewData {
+export function newReview(target: string, findingPrefix = randomFindingPrefix()): ReviewData {
   const name = trimmed('target', target);
   if (name === '') throw new Error('target is empty — name what is under review');
   if (LINE_SEPARATORS.test(name)) throw new Error('target must be one line, it contains a line break');
-  return { target: name, intro: { reviewed: { items: [] } }, findings: [] };
+  if (!/^[A-Z]{2}$/u.test(findingPrefix)) {
+    throw new Error(`finding prefix "${findingPrefix}" must be two uppercase ASCII letters`);
+  }
+  return { target: name, findingPrefix, intro: { reviewed: { items: [] } }, findings: [] };
 }
 
 export interface RoundInput {
@@ -218,13 +227,19 @@ function updateEntry(data: ReviewData, now: Date, input: ChangeInput, event: Upd
   return { ...base, ...event } as UpdateItem;
 }
 
-// The next free F<n>: the highest number there is, plus one, so an id is never reused.
+// The next free prefix-number: the highest number for this prefix, plus one, so an id is never reused.
 function nextId(data: ReviewData): string {
-  const numbers = data.findings.map(({ id }) => Number(/^F(\d+)$/u.exec(id)?.[1] ?? 0));
-  return `F${Math.max(0, ...numbers) + 1}`;
+  const pattern = new RegExp(`^${data.findingPrefix}(\\d+)$`, 'u');
+  const maximum = data.findings.reduce((largest, { id }) => {
+    const suffix = pattern.exec(id)?.[1];
+    if (suffix === undefined) return largest;
+    const number = BigInt(suffix);
+    return number > largest ? number : largest;
+  }, 0n);
+  return `${data.findingPrefix}${maximum + 1n}`;
 }
 
-// The next free F<n>; opens with `Round <latest>: raised <state>[ — note]`. Needs an open round.
+// The next free prefix-number; opens with `Round <latest>: raised <state>[ — note]`. Needs an open round.
 export function addFinding(data: ReviewData, input: AddFindingInput, now: Date): { data: ReviewData; id: string } {
   const round = latestRound(data);
   if (round === undefined) throw new Error('no round is open yet; open a round first, the finding is raised in it');

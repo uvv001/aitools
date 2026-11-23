@@ -20,7 +20,7 @@ export interface CommentLink {
   // or check annotation "a3f9c2d1e" ("a" and eight hex digits). An item is linked once: a ref appears in at most one link.
   ref: string;
   role: LinkRole;
-  // The finding id ("F7"): present for `own` and `duplicate`, absent for `note`.
+  // The finding id ("AB7"): present for `own` and `duplicate`, absent for `note`.
   finding?: string;
   // The one-line reason: present for `note`, absent for the other roles.
   note?: string;

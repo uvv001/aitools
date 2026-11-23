@@ -47,8 +47,8 @@ describe('openReviewDb', () => {
   it('creates the folders and a database at the current schema version', () => {
     const path = join(dir, 'a', 'b', 'r.sqlite');
     const db = openReviewDb(path, 'create');
-    expect(REVIEW_SCHEMA_VERSION).toBe(8);
-    expect(pragma(db, 'user_version')).toBe(8);
+    expect(REVIEW_SCHEMA_VERSION).toBe(9);
+    expect(pragma(db, 'user_version')).toBe(9);
     expect(pragma(db, 'journal_mode')).toBe('delete');
     expect(pragma(db, 'foreign_keys')).toBe(1);
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all();
@@ -168,7 +168,7 @@ describe('openReviewDb', () => {
       const db = openReviewDb(path, 'create');
       saveReview(db, sample());
       savePullRequest(db, snapshotOf(['r12', 'c7']));
-      saveLinks(db, [{ ref: 'r12', role: 'own', finding: 'F1' }]);
+      saveLinks(db, [{ ref: 'r12', role: 'own', finding: 'AB1' }]);
       setMeta(db, 'k', 'v');
       db.close();
       return path;
@@ -181,7 +181,7 @@ describe('openReviewDb', () => {
       const db = openReviewDb(path, 'readonly');
       expect(vi.mocked(DatabaseSync)).toHaveBeenCalledWith(toNamespacedPath(path), expect.objectContaining({ readOnly: true }));
       expect(loadReview(db)).toStrictEqual(sample());
-      expect(loadLinks(db)).toStrictEqual([{ ref: 'r12', role: 'own', finding: 'F1' }]);
+      expect(loadLinks(db)).toStrictEqual([{ ref: 'r12', role: 'own', finding: 'AB1' }]);
       expect(getMeta(db, 'k')).toBe('v');
       expect(pragma(db, 'user_version')).toBe(REVIEW_SCHEMA_VERSION);
       db.close();
@@ -345,6 +345,7 @@ function entry(...items: ReviewedItem[]): IntroEntry<ReviewedItem> {
 function review(changes: Partial<ReviewData> = {}): ReviewData {
   return {
     target: 'PR 42',
+    findingPrefix: 'AB',
     intro: {
       reviewed: entry({ round: 1, revision: 'abc1234', base: null }),
     },
@@ -377,7 +378,7 @@ describe('saveReview and loadReview', () => {
   it('keeps empty lists, empty strings, multi-line text and unusual characters', () => {
     const odd = ['', '\n', 'a\n\nb\n', ' leading and trailing ', "it's \"quoted\"; DROP TABLE findings; --", '🎉 日本語 é', 'x\0y', 'C:\\dev\\x\\n'];
     const findings: Finding[] = odd.map((text, at) => ({
-      id: `F${at + 1}`,
+      id: `AB${at + 1}`,
       state: '⏳',
       severity: '🔴',
       title: text.replaceAll('\n', ' '),
@@ -412,7 +413,7 @@ describe('saveReview and loadReview', () => {
   it('replaces everything that was stored before', () => {
     const db = openNew();
     saveReview(db, sample());
-    const small = review({ target: 'small', findings: [{ id: 'F1', state: '⏳', severity: '⚪', title: 't', description: '', updates: [] }] });
+    const small = review({ target: 'small', findings: [{ id: 'AB1', state: '⏳', severity: '⚪', title: 't', description: '', updates: [] }] });
     saveReview(db, small);
     expect(loadReview(db)).toStrictEqual(small);
     const counts = ['review', 'intro_items', 'findings', 'updates'].map(
@@ -428,6 +429,18 @@ describe('saveReview and loadReview', () => {
     saveReview(db, sample());
     saveReview(db, review());
     expect(getMeta(db, 'pull_request')).toBe('abc');
+    db.close();
+  });
+
+  it('rejects a finding id that does not start with the review prefix', () => {
+    const db = openNew();
+    saveReview(db, sample());
+    const changed = sample();
+    (changed.findings[0] as Finding).id = 'CD1';
+    expect(() => saveReview(db, changed)).toThrow(
+      new Error('finding id "CD1" does not start with finding prefix "AB"'),
+    );
+    expect(loadReview(db)).toStrictEqual(sample());
     db.close();
   });
 
@@ -657,6 +670,7 @@ function generated(seed: number): ReviewData {
   };
   return {
     target: text(),
+    findingPrefix: 'AB',
     intro: {
       reviewed: frame((): ReviewedItem => ({
         round: round(),
@@ -666,7 +680,7 @@ function generated(seed: number): ReviewData {
       })),
     },
     findings: list(4, (at) => ({
-      id: `F${at * 3 + 1 + count(2)}`,
+      id: `AB${at * 3 + 1 + count(2)}`,
       state: pick(['⏳', '✅', '🔧']),
       severity: pick(['🔴', '🟡', '⚪']),
       title: text(),
@@ -693,23 +707,33 @@ describe('generated reviews', () => {
 
 describe('the schema rejects invalid states', () => {
   const REJECTED: [string, string][] = [
-    ['a finding id that is not F<n>', "INSERT INTO findings VALUES (9, 'X1', 's', 'v', 't', 'd')"],
-    ['a finding id with letters after the number', "INSERT INTO findings VALUES (9, 'F1a', 's', 'v', 't', 'd')"],
-    ['a second finding with an existing id', "INSERT INTO findings VALUES (9, 'F1', 's', 'v', 't', 'd')"],
-    ['a second finding at an existing position', "INSERT INTO findings VALUES (0, 'F99', 's', 'v', 't', 'd')"],
-    ['a negative finding position', "INSERT INTO findings VALUES (-1, 'F99', 's', 'v', 't', 'd')"],
-    ['an update of a missing finding', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F99', 0, 'note', 't', 'x')"],
-    ['an update at an existing position', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F1', 0, 'note', 't', 'x')"],
-    ['a negative update position', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F1', -1, 'note', 't', 'x')"],
-    ['a non-positive update round', "INSERT INTO updates (finding, position, kind, at, round, note) VALUES ('F1', 9, 'note', 't', 0, 'x')"],
-    ['an unknown update kind', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F1', 9, 'other', 't', 'x')"],
-    ['a raised update without a state', "INSERT INTO updates (finding, position, kind, at, round) VALUES ('F1', 9, 'raised', 't', 1)"],
-    ['a note update without its note', "INSERT INTO updates (finding, position, kind, at) VALUES ('F1', 9, 'note', 't')"],
+    ['a finding id that is not <PREFIX><n>', "INSERT INTO findings VALUES (9, 'X1', 's', 'v', 't', 'd')"],
+    ['a finding id with the old prefix', "INSERT INTO findings VALUES (9, 'F1', 's', 'v', 't', 'd')"],
+    ['a finding id with lowercase letters', "INSERT INTO findings VALUES (9, 'ab1', 's', 'v', 't', 'd')"],
+    ['a finding id without a number', "INSERT INTO findings VALUES (9, 'AB', 's', 'v', 't', 'd')"],
+    ['a finding id with zero as its suffix', "INSERT INTO findings VALUES (9, 'AB0', 's', 'v', 't', 'd')"],
+    ['a finding id with a leading-zero suffix', "INSERT INTO findings VALUES (9, 'AB01', 's', 'v', 't', 'd')"],
+    ['a finding id with punctuation', "INSERT INTO findings VALUES (9, 'AB-1', 's', 'v', 't', 'd')"],
+    ['a finding id with letters after the number', "INSERT INTO findings VALUES (9, 'AB1a', 's', 'v', 't', 'd')"],
+    ['a second finding with an existing id', "INSERT INTO findings VALUES (9, 'AB1', 's', 'v', 't', 'd')"],
+    ['a second finding at an existing position', "INSERT INTO findings VALUES (0, 'AB99', 's', 'v', 't', 'd')"],
+    ['a negative finding position', "INSERT INTO findings VALUES (-1, 'AB99', 's', 'v', 't', 'd')"],
+    ['an update of a missing finding', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('AB99', 0, 'note', 't', 'x')"],
+    ['an update at an existing position', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('AB1', 0, 'note', 't', 'x')"],
+    ['a negative update position', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('AB1', -1, 'note', 't', 'x')"],
+    ['a non-positive update round', "INSERT INTO updates (finding, position, kind, at, round, note) VALUES ('AB1', 9, 'note', 't', 0, 'x')"],
+    ['an unknown update kind', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('AB1', 9, 'other', 't', 'x')"],
+    ['a raised update without a state', "INSERT INTO updates (finding, position, kind, at, round) VALUES ('AB1', 9, 'raised', 't', 1)"],
+    ['a note update without its note', "INSERT INTO updates (finding, position, kind, at) VALUES ('AB1', 9, 'note', 't')"],
     ['an item at an existing position', "INSERT INTO intro_items (position, round, revision) VALUES (0, 1, 'abc')"],
     ['a negative item position', "INSERT INTO intro_items (position, round, revision) VALUES (-1, 1, 'abc')"],
     ['a non-positive item round', "INSERT INTO intro_items (position, round, revision) VALUES (9, 0, 'abc')"],
-    ['a second review row', "INSERT INTO review VALUES (2, 't')"],
-    ['text in a number column', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('F1', 'x', 'note', 't', 'y')"],
+    ['a second review row', "INSERT INTO review VALUES (2, 't', 'AB')"],
+    ['a lowercase finding prefix', "UPDATE review SET finding_prefix = 'ab'"],
+    ['a one-letter finding prefix', "UPDATE review SET finding_prefix = 'A'"],
+    ['a three-letter finding prefix', "UPDATE review SET finding_prefix = 'ABC'"],
+    ['a non-letter finding prefix', "UPDATE review SET finding_prefix = 'A1'"],
+    ['text in a number column', "INSERT INTO updates (finding, position, kind, at, note) VALUES ('AB1', 'x', 'note', 't', 'y')"],
   ];
 
   it.each(REJECTED)('%s', (_name, sql) => {
@@ -722,15 +746,15 @@ describe('the schema rejects invalid states', () => {
   it('deletes the updates of a deleted finding', () => {
     const db = openNew();
     saveReview(db, sample());
-    db.exec("DELETE FROM findings WHERE id = 'F1'");
-    expect(db.prepare("SELECT count(*) AS n FROM updates WHERE finding = 'F1'").get()).toMatchObject({ n: 0 });
+    db.exec("DELETE FROM findings WHERE id = 'AB1'");
+    expect(db.prepare("SELECT count(*) AS n FROM updates WHERE finding = 'AB1'").get()).toMatchObject({ n: 0 });
     db.close();
   });
 
   it('keeps for the review and its intro only the structured columns', () => {
     const db = openNew();
     const columns = (table: string): unknown[] => db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
-    expect(columns('review')).toEqual(['id', 'target']);
+    expect(columns('review')).toEqual(['id', 'target', 'finding_prefix']);
     expect(columns('intro_items')).toEqual(['position', 'round', 'revision', 'base', 'notes']);
     db.close();
   });
@@ -759,22 +783,22 @@ describe('meta', () => {
   });
 });
 
-// The sample review has the findings F1, F2, F3 and F10.
+// The sample review has the findings AB1, AB2, AB3 and AB10.
 const LINKS: CommentLink[] = [
-  { ref: 'r544861', role: 'own', finding: 'F2' },
+  { ref: 'r544861', role: 'own', finding: 'AB2' },
   { ref: 'c623843', role: 'note', note: 'a question, not a finding' },
-  { ref: 'r544900', role: 'duplicate', finding: 'F2' },
-  { ref: 'r12', role: 'own', finding: 'F1' },
-  { ref: 'c7', role: 'duplicate', finding: 'F1' },
-  { ref: 'r8', role: 'duplicate', finding: 'F1' },
+  { ref: 'r544900', role: 'duplicate', finding: 'AB2' },
+  { ref: 'r12', role: 'own', finding: 'AB1' },
+  { ref: 'c7', role: 'duplicate', finding: 'AB1' },
+  { ref: 'r8', role: 'duplicate', finding: 'AB1' },
 ];
 
 // Check annotations between comments: a "a" and eight hex digits, only as duplicates.
 const WITH_ANNOTATIONS: CommentLink[] = [
-  { ref: 'r544861', role: 'own', finding: 'F2' },
-  { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F2' },
+  { ref: 'r544861', role: 'own', finding: 'AB2' },
+  { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'AB2' },
   { ref: 'c623843', role: 'note', note: 'a question, not a finding' },
-  { ref: 'a1b2c3d4e', role: 'duplicate', finding: 'F1' },
+  { ref: 'a1b2c3d4e', role: 'duplicate', finding: 'AB1' },
 ];
 
 // Everything the links of these tests name (and the refs that the tests insert directly) is a comment or check
@@ -854,9 +878,9 @@ describe('saveLinks and loadLinks', () => {
 
   it('rolls back a failing save and keeps the old links', () => {
     const db = openWithLinks();
-    const sameRef: CommentLink[] = [LINKS[0] as CommentLink, { ref: 'r544861', role: 'duplicate', finding: 'F1' }];
+    const sameRef: CommentLink[] = [LINKS[0] as CommentLink, { ref: 'r544861', role: 'duplicate', finding: 'AB1' }];
     expect(() => saveLinks(db, sameRef)).toThrow(/constraint/iu);
-    expect(() => saveLinks(db, [{ ref: 'r99', role: 'duplicate', finding: 'F99' }])).toThrow(/FOREIGN KEY constraint failed/u);
+    expect(() => saveLinks(db, [{ ref: 'r99', role: 'duplicate', finding: 'AB99' }])).toThrow(/FOREIGN KEY constraint failed/u);
     expect(() => saveLinks(db, [{ ref: 'r99', role: 'note' }])).toThrow(/constraint/iu);
     expect(db.isTransaction).toBe(false);
     expect(loadLinks(db)).toStrictEqual(LINKS);
@@ -877,23 +901,23 @@ describe('saveLinks and loadLinks', () => {
 describe('the schema of the links rejects invalid states', () => {
   const insert = (values: string): string => `INSERT INTO comment_links (position, ref, role, finding, note) VALUES (${values})`;
   const REJECTED: [string, string][] = [
-    ['a second own link for one finding', insert("9, 'r99', 'own', 'F2', NULL")],
-    ['a note with a finding', insert("9, 'r99', 'note', 'F2', 'why'")],
+    ['a second own link for one finding', insert("9, 'r99', 'own', 'AB2', NULL")],
+    ['a note with a finding', insert("9, 'r99', 'note', 'AB2', 'why'")],
     ['a duplicate link without a finding', insert("9, 'r99', 'duplicate', NULL, NULL")],
     ['an own link without a finding', insert("9, 'r99', 'own', NULL, NULL")],
     ['a note without its text', insert("9, 'r99', 'note', NULL, NULL")],
-    ['a text on a finding link', insert("9, 'r99', 'duplicate', 'F2', 'why'")],
-    ['a ref that is linked already', insert("9, 'r12', 'duplicate', 'F2', NULL")],
-    ['a second link at an existing position', insert("0, 'r99', 'duplicate', 'F2', NULL")],
-    ['a negative position', insert("-1, 'r99', 'duplicate', 'F2', NULL")],
-    ['a role outside the three', insert("9, 'r99', 'other', 'F2', NULL")],
-    ['a check annotation as an own link', insert("9, 'a00000000', 'own', 'F2', NULL")],
+    ['a text on a finding link', insert("9, 'r99', 'duplicate', 'AB2', 'why'")],
+    ['a ref that is linked already', insert("9, 'r12', 'duplicate', 'AB2', NULL")],
+    ['a second link at an existing position', insert("0, 'r99', 'duplicate', 'AB2', NULL")],
+    ['a negative position', insert("-1, 'r99', 'duplicate', 'AB2', NULL")],
+    ['a role outside the three', insert("9, 'r99', 'other', 'AB2', NULL")],
+    ['a check annotation as an own link', insert("9, 'a00000000', 'own', 'AB2', NULL")],
     ['a check annotation as a note', insert("9, 'a00000000', 'note', NULL, 'why'")],
-    ['a check annotation with a seen_digest', "INSERT INTO comment_links VALUES (9, 'a00000000', 'duplicate', 'F2', NULL, 'deadbeef')"],
-    ['a pull request review body as an own link', insert("9, 'v91204', 'own', 'F2', NULL")],
-    ['a ref that no comment or check annotation of the pull request has', insert("9, 'r5555', 'duplicate', 'F2', NULL")],
-    ['a link to a finding that does not exist', insert("9, 'r99', 'duplicate', 'F99', NULL")],
-    ['deleting a finding that is linked', "DELETE FROM findings WHERE id = 'F2'"],
+    ['a check annotation with a seen_digest', "INSERT INTO comment_links VALUES (9, 'a00000000', 'duplicate', 'AB2', NULL, 'deadbeef')"],
+    ['a pull request review body as an own link', insert("9, 'v91204', 'own', 'AB2', NULL")],
+    ['a ref that no comment or check annotation of the pull request has', insert("9, 'r5555', 'duplicate', 'AB2', NULL")],
+    ['a link to a finding that does not exist', insert("9, 'r99', 'duplicate', 'AB99', NULL")],
+    ['deleting a finding that is linked', "DELETE FROM findings WHERE id = 'AB2'"],
     ['deleting a comment that is linked', "DELETE FROM linkable WHERE ref = 'r12'"],
   ];
 
@@ -906,10 +930,10 @@ describe('the schema of the links rejects invalid states', () => {
 
   it('allows several duplicates and one own link for a finding, and any number of notes', () => {
     const db = openWithLinks();
-    db.exec(insert("9, 'r99', 'duplicate', 'F1', NULL"));
+    db.exec(insert("9, 'r99', 'duplicate', 'AB1', NULL"));
     db.exec(insert("10, 'r100', 'note', NULL, 'one'"));
     db.exec(insert("11, 'r101', 'note', NULL, 'one'"));
-    db.exec(insert("12, 'r102', 'own', 'F3', NULL"));
+    db.exec(insert("12, 'r102', 'own', 'AB3', NULL"));
     expect(loadLinks(db)).toHaveLength(LINKS.length + 4);
     db.close();
   });
@@ -917,37 +941,37 @@ describe('the schema of the links rejects invalid states', () => {
   it('accepts a check annotation ref: "a" and eight lower-case hex digits', () => {
     const db = openWithLinks();
     const refs = ['a3f9c2d1e', 'a00000000', 'aabcdef01', 'a12345678'];
-    refs.forEach((ref, at) => db.exec(insert(`${9 + at}, '${ref}', 'duplicate', 'F1', NULL`)));
+    refs.forEach((ref, at) => db.exec(insert(`${9 + at}, '${ref}', 'duplicate', 'AB1', NULL`)));
     expect(loadLinks(db).map((link) => link.ref)).toEqual([...LINKS.map((link) => link.ref), ...refs]);
     db.close();
   });
 
   it('keeps one own link per finding and the finding and note rules for an annotation ref', () => {
     const db = openWithLinks();
-    expect(() => db.exec(insert("9, 'a3f9c2d1e', 'own', 'F2', NULL"))).toThrow(/constraint/iu);
+    expect(() => db.exec(insert("9, 'a3f9c2d1e', 'own', 'AB2', NULL"))).toThrow(/constraint/iu);
     expect(() => db.exec(insert("9, 'a3f9c2d1e', 'duplicate', NULL, NULL"))).toThrow(/constraint/iu);
-    expect(() => db.exec(insert("9, 'a3f9c2d1e', 'duplicate', 'F99', NULL"))).toThrow(/constraint/iu);
-    db.exec(insert("9, 'a3f9c2d1e', 'duplicate', 'F2', NULL"));
-    expect(() => db.exec(insert("10, 'a3f9c2d1e', 'duplicate', 'F1', NULL"))).toThrow(/constraint/iu);
+    expect(() => db.exec(insert("9, 'a3f9c2d1e', 'duplicate', 'AB99', NULL"))).toThrow(/constraint/iu);
+    db.exec(insert("9, 'a3f9c2d1e', 'duplicate', 'AB2', NULL"));
+    expect(() => db.exec(insert("10, 'a3f9c2d1e', 'duplicate', 'AB1', NULL"))).toThrow(/constraint/iu);
     db.close();
   });
 
   it('refuses an annotation that is not a duplicate and a review body that is own, while allowing review bodies as duplicate or note', () => {
     const db = openWithLinks();
-    expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'own', finding: 'F1' }])).toThrow(/CHECK constraint failed/u);
+    expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'own', finding: 'AB1' }])).toThrow(/CHECK constraint failed/u);
     expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'note', note: 'why' }])).toThrow(/CHECK constraint failed/u);
-    expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1', seenDigest: 'abc' }])).toThrow(
+    expect(() => saveLinks(db, [{ ref: 'a3f9c2d1e', role: 'duplicate', finding: 'AB1', seenDigest: 'abc' }])).toThrow(
       /CHECK constraint failed/u,
     );
-    expect(() => saveLinks(db, [{ ref: 'v91204', role: 'own', finding: 'F1' }])).toThrow(/CHECK constraint failed/u);
+    expect(() => saveLinks(db, [{ ref: 'v91204', role: 'own', finding: 'AB1' }])).toThrow(/CHECK constraint failed/u);
     saveLinks(db, [
-      { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' },
-      { ref: 'v91204', role: 'duplicate', finding: 'F1', seenDigest: 'd1' },
+      { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'AB1' },
+      { ref: 'v91204', role: 'duplicate', finding: 'AB1', seenDigest: 'd1' },
       { ref: 'v5', role: 'note', note: 'summary verdict', seenDigest: 'd2' },
     ]);
     expect(loadLinks(db)).toStrictEqual([
-      { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'F1' },
-      { ref: 'v91204', role: 'duplicate', finding: 'F1', seenDigest: 'd1' },
+      { ref: 'a3f9c2d1e', role: 'duplicate', finding: 'AB1' },
+      { ref: 'v91204', role: 'duplicate', finding: 'AB1', seenDigest: 'd1' },
       { ref: 'v5', role: 'note', note: 'summary verdict', seenDigest: 'd2' },
     ]);
     db.close();
@@ -957,8 +981,8 @@ describe('the schema of the links rejects invalid states', () => {
 describe('the foreign key of a link to linkable', () => {
   it('refuses a link to a ref that is not in the database, and keeps the old links', () => {
     const db = openWithLinks();
-    expect(() => saveLinks(db, [...LINKS, { ref: 'r5555', role: 'duplicate', finding: 'F1' }])).toThrow(/FOREIGN KEY constraint failed/u);
-    expect(() => saveLinks(db, [{ ref: 'a0badf00d', role: 'duplicate', finding: 'F1' }])).toThrow(/FOREIGN KEY constraint failed/u);
+    expect(() => saveLinks(db, [...LINKS, { ref: 'r5555', role: 'duplicate', finding: 'AB1' }])).toThrow(/FOREIGN KEY constraint failed/u);
+    expect(() => saveLinks(db, [{ ref: 'a0badf00d', role: 'duplicate', finding: 'AB1' }])).toThrow(/FOREIGN KEY constraint failed/u);
     expect(db.isTransaction).toBe(false);
     expect(loadLinks(db)).toStrictEqual(LINKS);
     db.close();
@@ -1003,7 +1027,7 @@ describe('the foreign key of a link to linkable', () => {
   it('allows a link to a row that is gone', () => {
     const db = openWithLinks();
     db.exec("UPDATE linkable SET gone = 1 WHERE ref IN ('r99', 'r544861')");
-    saveLinks(db, [...LINKS, { ref: 'r99', role: 'duplicate', finding: 'F1' }]);
+    saveLinks(db, [...LINKS, { ref: 'r99', role: 'duplicate', finding: 'AB1' }]);
     expect(loadLinks(db)).toHaveLength(LINKS.length + 1);
     db.close();
   });
@@ -1082,7 +1106,7 @@ describe('the finding of a link is checked when the transaction commits', () => 
 
   it('fails a save that removes a linked finding, at the commit, and rolls it all back', () => {
     const db = openWithLinks();
-    expect(() => saveReview(db, { ...without('F2'), target: 'changed' })).toThrow(/FOREIGN KEY constraint failed/u);
+    expect(() => saveReview(db, { ...without('AB2'), target: 'changed' })).toThrow(/FOREIGN KEY constraint failed/u);
     expect(db.isTransaction).toBe(false);
     expect(loadReview(db)).toStrictEqual(sample());
     expect(loadLinks(db)).toStrictEqual(LINKS);
@@ -1092,10 +1116,10 @@ describe('the finding of a link is checked when the transaction commits', () => 
   it('commits the same change when the links that point at the finding are replaced in the same transaction', () => {
     const db = openWithLinks();
     inTransaction(db, () => {
-      saveReview(db, without('F2'));
-      saveLinks(db, LINKS.filter((link) => link.finding !== 'F2'));
+      saveReview(db, without('AB2'));
+      saveLinks(db, LINKS.filter((link) => link.finding !== 'AB2'));
     });
-    expect(loadReview(db)).toStrictEqual(without('F2'));
+    expect(loadReview(db)).toStrictEqual(without('AB2'));
     expect(loadLinks(db).map((link) => link.ref)).toEqual(['c623843', 'r12', 'c7', 'r8']);
     db.close();
   });

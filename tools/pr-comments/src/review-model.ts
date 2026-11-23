@@ -132,7 +132,7 @@ export type UpdateItem =
   | RepliedUpdate;
 
 export interface Finding {
-  // `F<n>`.
+  // Two uppercase ASCII letters followed by one or more digits.
   id: string;
   // A state marker of `STATES`.
   state: string;
@@ -147,6 +147,8 @@ export interface Finding {
 export interface ReviewData {
   // The title text after `# Review — `.
   target: string;
+  // The two-letter prefix shared by findings that this review allocates.
+  findingPrefix: string;
   intro: Intro;
   findings: Finding[];
 }

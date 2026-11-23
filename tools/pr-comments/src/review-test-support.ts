@@ -103,13 +103,13 @@ const FENCED = [
   '```ts',
   'const a = 1;',
   '#### Updates',
-  '### ✅ 🔴 F9 — quoted header',
+  '### ✅ 🔴 AB9 — quoted header',
   '```',
   '',
   "SQL-looking text: '); DROP TABLE findings; -- \"quoted\" back\\slash C:\\dev\\x",
   '',
   '| not | structure |',
-  'finding F7 | ✅ | 🔴 | not a finding of the dump',
+  'finding AB7 | ✅ | 🔴 | not a finding of the dump',
 ];
 
 // A sample review that uses every part of the model: both states of `base`, markdown that looks like structure,
@@ -117,6 +117,7 @@ const FENCED = [
 export function sampleReview(): ReviewData {
   return {
     target: 'PR 42 — tenant registry 🚀',
+    findingPrefix: 'AB',
     intro: {
       reviewed: {
         items: [
@@ -142,7 +143,7 @@ export function sampleReview(): ReviewData {
     },
     findings: [
       {
-        id: 'F1',
+        id: 'AB1',
         state: '✅',
         severity: '🔴',
         title: 'Unguarded `resource.value()` crashes UsersPage',
@@ -179,7 +180,7 @@ export function sampleReview(): ReviewData {
         ],
       },
       {
-        id: 'F2',
+        id: 'AB2',
         state: '🔧',
         severity: '🟡',
         title: 'Café “smart quotes” & <tags> 日本語 🎉',
@@ -187,7 +188,7 @@ export function sampleReview(): ReviewData {
         updates: [{ kind: 'note', at: '2026-10-07 10:00', round: 3, note: 'unchanged.' }],
       },
       {
-        id: 'F3',
+        id: 'AB3',
         state: '⏳',
         severity: '⚪',
         title: 'Empty body',
@@ -195,7 +196,7 @@ export function sampleReview(): ReviewData {
         updates: [],
       },
       {
-        id: 'F10',
+        id: 'AB10',
         state: '📌',
         severity: '🔴',
         title: 'Ids rise, they need not be dense',

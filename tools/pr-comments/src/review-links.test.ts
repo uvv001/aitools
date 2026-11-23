@@ -83,9 +83,9 @@ const own = (ref: string, finding: string): CommentLink => ({ ref, role: 'own', 
 const duplicate = (ref: string, finding: string): CommentLink => ({ ref, role: 'duplicate', finding });
 const note = (ref: string, text = 'a question, not an issue'): CommentLink => ({ ref, role: 'note', note: text });
 
-// An open review with F1..F<count>, each raised in Round 1.
+// An open review with AB1..<PREFIX><count>, each raised in Round 1.
 function reviewWith(count: number): ReviewData {
-  let data = openRound(newReview('PR 42 — tenant registry'), { revision: 'abc1234', base: 'def5678' });
+  let data = openRound(newReview('PR 42 — tenant registry', 'AB'), { revision: 'abc1234', base: 'def5678' });
   for (let number = 1; number <= count; number++) {
     data = addFinding(data, { severity: 'high', title: `Title ${number}`, description: 'Body.' }, at()).data;
   }
@@ -131,80 +131,80 @@ function withoutUpdates(data: ReviewData): ReviewData {
 describe('linkOwn', () => {
   it('links the comment as the own comment of the finding and logs it under the finding only', () => {
     const input = stateWith();
-    const result = changes(input, (state) => linkOwn(state, 'F2', 'r544861', at(5)));
-    expect(result.links).toStrictEqual([own('r544861', 'F2')]);
-    expect(updatesOf(result, 'F2')).toStrictEqual([`${START} — Round 1: raised ⏳`, '2026-10-08 09:10 — PR comment r544861 linked as its own']);
-    expect(updatesOf(result, 'F1')).toStrictEqual(updatesOf(input, 'F1'));
-    expect(updatesOf(result, 'F3')).toStrictEqual(updatesOf(input, 'F3'));
+    const result = changes(input, (state) => linkOwn(state, 'AB2', 'r544861', at(5)));
+    expect(result.links).toStrictEqual([own('r544861', 'AB2')]);
+    expect(updatesOf(result, 'AB2')).toStrictEqual([`${START} — Round 1: raised ⏳`, '2026-10-08 09:10 — PR comment r544861 linked as its own']);
+    expect(updatesOf(result, 'AB1')).toStrictEqual(updatesOf(input, 'AB1'));
+    expect(updatesOf(result, 'AB3')).toStrictEqual(updatesOf(input, 'AB3'));
     expect(withoutUpdates(result.data)).toStrictEqual(withoutUpdates(input.data));
   });
 
   it('appends the note to the entry, cleaned as the other operations clean theirs', () => {
     const input = stateWith();
-    const plain = changes(input, (state) => linkOwn(state, 'F1', 'r1', at(5), '  the same words as the finding  '));
-    expect(updatesOf(plain, 'F1').at(-1)).toBe(`${stamp(5)} — PR comment r1 linked as its own — the same words as the finding`);
-    const lines = changes(input, (state) => linkOwn(state, 'F1', 'r1', at(5), 'first\n\n  second `code`\nthird'));
-    expect(updatesOf(lines, 'F1').at(-1)).toBe(`${stamp(5)} — PR comment r1 linked as its own — first\n\n    second \`code\`\n  third`);
-    const blank = changes(input, (state) => linkOwn(state, 'F1', 'r1', at(5), ' \t '));
-    expect(updatesOf(blank, 'F1').at(-1)).toBe(`${stamp(5)} — PR comment r1 linked as its own`);
+    const plain = changes(input, (state) => linkOwn(state, 'AB1', 'r1', at(5), '  the same words as the finding  '));
+    expect(updatesOf(plain, 'AB1').at(-1)).toBe(`${stamp(5)} — PR comment r1 linked as its own — the same words as the finding`);
+    const lines = changes(input, (state) => linkOwn(state, 'AB1', 'r1', at(5), 'first\n\n  second `code`\nthird'));
+    expect(updatesOf(lines, 'AB1').at(-1)).toBe(`${stamp(5)} — PR comment r1 linked as its own — first\n\n    second \`code\`\n  third`);
+    const blank = changes(input, (state) => linkOwn(state, 'AB1', 'r1', at(5), ' \t '));
+    expect(updatesOf(blank, 'AB1').at(-1)).toBe(`${stamp(5)} — PR comment r1 linked as its own`);
   });
 
   it('refuses a note with a control character or lone carriage return, and links nothing', () => {
     const input = stateWith([note('r9')]);
-    refuses(input, (state) => linkOwn(state, 'F1', 'r1', at(5), 'a\u0007b'), 'note contains a control character (U+0007) at line 1');
-    refuses(input, (state) => linkOwn(state, 'F1', 'r1', at(5), 'a\rb'), 'note contains a carriage return or line separator that is not a line break');
+    refuses(input, (state) => linkOwn(state, 'AB1', 'r1', at(5), 'a\u0007b'), 'note contains a control character (U+0007) at line 1');
+    refuses(input, (state) => linkOwn(state, 'AB1', 'r1', at(5), 'a\rb'), 'note contains a carriage return or line separator that is not a line break');
   });
 
   it('takes the finding id in any case and stores the canonical one', () => {
     const input = stateWith();
-    expect(changes(input, (state) => linkOwn(state, 'f2', 'r1', at(5))).links).toStrictEqual([own('r1', 'F2')]);
-    const padded = changes(input, (state) => linkOwn(state, ' F3 ', 'r1', at(5)));
-    expect(padded.links).toStrictEqual([own('r1', 'F3')]);
-    expect(updatesOf(padded, 'F3').at(-1)).toBe(`${stamp(5)} — PR comment r1 linked as its own`);
+    expect(changes(input, (state) => linkOwn(state, 'ab2', 'r1', at(5))).links).toStrictEqual([own('r1', 'AB2')]);
+    const padded = changes(input, (state) => linkOwn(state, ' AB3 ', 'r1', at(5)));
+    expect(padded.links).toStrictEqual([own('r1', 'AB3')]);
+    expect(updatesOf(padded, 'AB3').at(-1)).toBe(`${stamp(5)} — PR comment r1 linked as its own`);
   });
 
   it('refuses a finding that does not exist, naming the ones there are', () => {
-    refuses(stateWith(), (state) => linkOwn(state, 'F9', 'r1', at(5)), 'unknown finding "F9"; the report has F1, F2, F3');
-    refuses(stateWith([], 0), (state) => linkOwn(state, 'F1', 'r1', at(5)), 'unknown finding "F1"; the report has no findings');
+    refuses(stateWith(), (state) => linkOwn(state, 'AB9', 'r1', at(5)), 'unknown finding "AB9"; the report has AB1, AB2, AB3');
+    refuses(stateWith([], 0), (state) => linkOwn(state, 'AB1', 'r1', at(5)), 'unknown finding "AB1"; the report has no findings');
   });
 
   it.each(['', 'x1', 'R544861', '544861', 'r', 'r12a', ' r1', 'r1 ', 'r-1', 'cc1', 'issuecomment-1'])('refuses %j, which is no comment ref', (ref) => {
-    refuses(stateWith(), (state) => linkOwn(state, 'F1', ref, at(5)), `"${ref}" is not a PR comment ref; ${FORMS}`);
+    refuses(stateWith(), (state) => linkOwn(state, 'AB1', ref, at(5)), `"${ref}" is not a PR comment ref; ${FORMS}`);
   });
 
   it('gives a finding one own comment only, and says which and how to remove it', () => {
-    const input = stateWith([own('r1', 'F1')]);
-    refuses(input, (state) => linkOwn(state, 'F1', 'r2', at(5)), `F1 already has its own comment r1; remove that link first with "${REMOVE} r1"`);
-    refuses(input, (state) => linkOwn(state, 'f1', 'c2', at(5), 'a note'), `F1 already has its own comment r1; remove that link first with "${REMOVE} r1"`);
+    const input = stateWith([own('r1', 'AB1')]);
+    refuses(input, (state) => linkOwn(state, 'AB1', 'r2', at(5)), `AB1 already has its own comment r1; remove that link first with "${REMOVE} r1"`);
+    refuses(input, (state) => linkOwn(state, 'ab1', 'c2', at(5), 'a note'), `AB1 already has its own comment r1; remove that link first with "${REMOVE} r1"`);
     // Another finding is free to take its own.
-    expect(changes(input, (state) => linkOwn(state, 'F2', 'r2', at(5))).links).toStrictEqual([own('r1', 'F1'), own('r2', 'F2')]);
+    expect(changes(input, (state) => linkOwn(state, 'AB2', 'r2', at(5))).links).toStrictEqual([own('r1', 'AB1'), own('r2', 'AB2')]);
   });
 
   it('links a comment once, whatever it is linked as', () => {
-    const input = stateWith([own('r1', 'F1'), duplicate('r2', 'F1'), note('c3', 'a question')]);
-    refuses(input, (state) => linkOwn(state, 'F2', 'r1', at(5)), `r1 is already linked as the own comment of F1; remove that link first with "${REMOVE} r1"`);
-    refuses(input, (state) => linkOwn(state, 'F1', 'r1', at(5)), `r1 is already linked as the own comment of F1; remove that link first with "${REMOVE} r1"`);
-    refuses(input, (state) => linkOwn(state, 'F2', 'r2', at(5)), `r2 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2"`);
-    refuses(input, (state) => linkOwn(state, 'F2', 'c3', at(5)), `c3 is already linked as a note (a question); remove that link first with "${REMOVE} c3"`);
+    const input = stateWith([own('r1', 'AB1'), duplicate('r2', 'AB1'), note('c3', 'a question')]);
+    refuses(input, (state) => linkOwn(state, 'AB2', 'r1', at(5)), `r1 is already linked as the own comment of AB1; remove that link first with "${REMOVE} r1"`);
+    refuses(input, (state) => linkOwn(state, 'AB1', 'r1', at(5)), `r1 is already linked as the own comment of AB1; remove that link first with "${REMOVE} r1"`);
+    refuses(input, (state) => linkOwn(state, 'AB2', 'r2', at(5)), `r2 is already linked as a duplicate of AB1; remove that link first with "${REMOVE} r2"`);
+    refuses(input, (state) => linkOwn(state, 'AB2', 'c3', at(5)), `c3 is already linked as a note (a question); remove that link first with "${REMOVE} c3"`);
   });
 
   it('refuses a ref that is not in the database, after the finding and the ref syntax and before the link rules', () => {
-    const input = stateWith([own('r1', 'F1')]);
-    refuses(input, (state) => linkOwn(state, 'F2', 'r999', at(5)), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
-    refuses(input, (state) => linkOwn(state, 'f2', 'c999', at(5), 'a note'), unknownRef('c999'));
+    const input = stateWith([own('r1', 'AB1')]);
+    refuses(input, (state) => linkOwn(state, 'AB2', 'r999', at(5)), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
+    refuses(input, (state) => linkOwn(state, 'ab2', 'c999', at(5), 'a note'), unknownRef('c999'));
     // The finding and the syntax come first.
-    refuses(input, (state) => linkOwn(state, 'F9', 'r999', at(5)), 'unknown finding "F9"; the report has F1, F2, F3');
-    refuses(input, (state) => linkOwn(state, 'F2', 'x999', at(5)), `"x999" is not a PR comment ref; ${FORMS}`);
+    refuses(input, (state) => linkOwn(state, 'AB9', 'r999', at(5)), 'unknown finding "AB9"; the report has AB1, AB2, AB3');
+    refuses(input, (state) => linkOwn(state, 'AB2', 'x999', at(5)), `"x999" is not a PR comment ref; ${FORMS}`);
     // A finding that has its own comment already, and a ref that is linked already: the database is asked first.
-    refuses(input, (state) => linkOwn(state, 'F1', 'r999', at(5)), unknownRef('r999'));
-    refuses(without(input, 'r1'), (state) => linkOwn(state, 'F2', 'r1', at(5)), unknownRef('r1'));
+    refuses(input, (state) => linkOwn(state, 'AB1', 'r999', at(5)), unknownRef('r999'));
+    refuses(without(input, 'r1'), (state) => linkOwn(state, 'AB2', 'r1', at(5)), unknownRef('r1'));
   });
 
   it('keeps the pull request and appends after the Updates there are', () => {
-    const input = { ...stateWith(), data: addUpdate(reviewWith(1), 'F1', { text: 'asked the author' }, at(2)), pullRequest: PR };
-    const result = changes(input, (state) => linkOwn(state, 'F1', 'r1', at(5)));
+    const input = { ...stateWith(), data: addUpdate(reviewWith(1), 'AB1', { text: 'asked the author' }, at(2)), pullRequest: PR };
+    const result = changes(input, (state) => linkOwn(state, 'AB1', 'r1', at(5)));
     expect(result.pullRequest).toBe(PR);
-    expect(updatesOf(result, 'F1')).toStrictEqual([
+    expect(updatesOf(result, 'AB1')).toStrictEqual([
       `${START} — Round 1: raised ⏳`,
       `${stamp(2)} — asked the author`,
       `${stamp(5)} — PR comment [r1](https://github.com/acme/widgets/pull/42#discussion_r1) linked as its own`,
@@ -215,67 +215,67 @@ describe('linkOwn', () => {
 describe('linkDuplicate', () => {
   it('links the comment as a duplicate of the finding and logs it under the finding', () => {
     const input = stateWith();
-    const result = changes(input, (state) => linkDuplicate(state, 'F2', 'r544900', at(5)));
-    expect(result.links).toStrictEqual([duplicate('r544900', 'F2')]);
-    expect(updatesOf(result, 'F2').at(-1)).toBe('2026-10-08 09:10 — PR comment r544900 linked as a duplicate');
+    const result = changes(input, (state) => linkDuplicate(state, 'AB2', 'r544900', at(5)));
+    expect(result.links).toStrictEqual([duplicate('r544900', 'AB2')]);
+    expect(updatesOf(result, 'AB2').at(-1)).toBe('2026-10-08 09:10 — PR comment r544900 linked as a duplicate');
     expect(withoutUpdates(result.data)).toStrictEqual(withoutUpdates(input.data));
   });
 
   it('appends the cleaned note', () => {
-    const result = changes(stateWith(), (state) => linkDuplicate(state, 'F1', 'c623843', at(5), 'same crash,\nreported by the author'));
-    expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — PR comment c623843 linked as a duplicate — same crash,\n  reported by the author`);
+    const result = changes(stateWith(), (state) => linkDuplicate(state, 'AB1', 'c623843', at(5), 'same crash,\nreported by the author'));
+    expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — PR comment c623843 linked as a duplicate — same crash,\n  reported by the author`);
   });
 
   it('lets a finding have many duplicates, with or without an own comment, in the order they were linked', () => {
     let result = stateWith();
     for (const [index, ref] of ['r3', 'c1', 'r2'].entries()) {
-      result = changes(result, (state) => linkDuplicate(state, 'F1', ref, at(5 + index)));
+      result = changes(result, (state) => linkDuplicate(state, 'AB1', ref, at(5 + index)));
     }
-    expect(result.links).toStrictEqual([duplicate('r3', 'F1'), duplicate('c1', 'F1'), duplicate('r2', 'F1')]);
-    expect(updatesOf(result, 'F1').slice(1)).toStrictEqual([
+    expect(result.links).toStrictEqual([duplicate('r3', 'AB1'), duplicate('c1', 'AB1'), duplicate('r2', 'AB1')]);
+    expect(updatesOf(result, 'AB1').slice(1)).toStrictEqual([
       `${stamp(5)} — PR comment r3 linked as a duplicate`,
       `${stamp(6)} — PR comment c1 linked as a duplicate`,
       `${stamp(7)} — PR comment r2 linked as a duplicate`,
     ]);
-    const withOwn = changes({ ...result, links: [...result.links, own('r9', 'F1')] }, (state) => linkDuplicate(state, 'F1', 'r10', at(9)));
-    expect(withOwn.links.at(-1)).toStrictEqual(duplicate('r10', 'F1'));
+    const withOwn = changes({ ...result, links: [...result.links, own('r9', 'AB1')] }, (state) => linkDuplicate(state, 'AB1', 'r10', at(9)));
+    expect(withOwn.links.at(-1)).toStrictEqual(duplicate('r10', 'AB1'));
   });
 
   it('takes the finding id in any case', () => {
-    expect(changes(stateWith(), (state) => linkDuplicate(state, 'f3', 'r1', at(5))).links).toStrictEqual([duplicate('r1', 'F3')]);
+    expect(changes(stateWith(), (state) => linkDuplicate(state, 'ab3', 'r1', at(5))).links).toStrictEqual([duplicate('r1', 'AB3')]);
   });
 
   it('refuses an unknown finding, a bad ref and a bad note', () => {
-    refuses(stateWith(), (state) => linkDuplicate(state, 'F7', 'r1', at(5)), 'unknown finding "F7"; the report has F1, F2, F3');
-    refuses(stateWith(), (state) => linkDuplicate(state, 'F1', 'x1', at(5)), `"x1" is not a PR comment ref; ${FORMS}`);
-    refuses(stateWith(), (state) => linkDuplicate(state, 'F1', 'r1', at(5), 'a\u0000b'), 'note contains a control character (U+0000) at line 1');
+    refuses(stateWith(), (state) => linkDuplicate(state, 'AB7', 'r1', at(5)), 'unknown finding "AB7"; the report has AB1, AB2, AB3');
+    refuses(stateWith(), (state) => linkDuplicate(state, 'AB1', 'x1', at(5)), `"x1" is not a PR comment ref; ${FORMS}`);
+    refuses(stateWith(), (state) => linkDuplicate(state, 'AB1', 'r1', at(5), 'a\u0000b'), 'note contains a control character (U+0000) at line 1');
   });
 
   it('refuses a ref that is not in the database, after the finding and the ref syntax and before the link rules', () => {
-    const input = stateWith([own('r1', 'F1'), note('c3', 'a question')]);
-    refuses(input, (state) => linkDuplicate(state, 'F2', 'r999', at(5)), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
-    refuses(input, (state) => linkDuplicate(state, 'f2', 'c999', at(5), 'same crash'), unknownRef('c999'));
-    refuses(input, (state) => linkDuplicate(state, 'F9', 'r999', at(5)), 'unknown finding "F9"; the report has F1, F2, F3');
-    refuses(input, (state) => linkDuplicate(state, 'F2', 'x999', at(5)), `"x999" is not a PR comment ref; ${FORMS}`);
+    const input = stateWith([own('r1', 'AB1'), note('c3', 'a question')]);
+    refuses(input, (state) => linkDuplicate(state, 'AB2', 'r999', at(5)), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
+    refuses(input, (state) => linkDuplicate(state, 'ab2', 'c999', at(5), 'same crash'), unknownRef('c999'));
+    refuses(input, (state) => linkDuplicate(state, 'AB9', 'r999', at(5)), 'unknown finding "AB9"; the report has AB1, AB2, AB3');
+    refuses(input, (state) => linkDuplicate(state, 'AB2', 'x999', at(5)), `"x999" is not a PR comment ref; ${FORMS}`);
     // A ref that is linked but gone from the database reads as unknown, not as linked.
-    refuses(without(input, 'c3'), (state) => linkDuplicate(state, 'F2', 'c3', at(5)), unknownRef('c3'));
-    refuses(input, (state) => linkDuplicate(state, 'F2', 'a00000000', at(5)), unknownRef('a00000000'));
+    refuses(without(input, 'c3'), (state) => linkDuplicate(state, 'AB2', 'c3', at(5)), unknownRef('c3'));
+    refuses(input, (state) => linkDuplicate(state, 'AB2', 'a00000000', at(5)), unknownRef('a00000000'));
   });
 
   it('links a comment once, whatever it is linked as', () => {
-    const input = stateWith([own('r1', 'F1'), duplicate('r2', 'F2'), note('c3', 'a question')]);
-    refuses(input, (state) => linkDuplicate(state, 'F1', 'r1', at(5)), `r1 is already linked as the own comment of F1; remove that link first with "${REMOVE} r1"`);
-    refuses(input, (state) => linkDuplicate(state, 'F1', 'r2', at(5)), `r2 is already linked as a duplicate of F2; remove that link first with "${REMOVE} r2"`);
-    refuses(input, (state) => linkDuplicate(state, 'F2', 'r2', at(5)), `r2 is already linked as a duplicate of F2; remove that link first with "${REMOVE} r2"`);
-    refuses(input, (state) => linkDuplicate(state, 'F1', 'c3', at(5)), `c3 is already linked as a note (a question); remove that link first with "${REMOVE} c3"`);
+    const input = stateWith([own('r1', 'AB1'), duplicate('r2', 'AB2'), note('c3', 'a question')]);
+    refuses(input, (state) => linkDuplicate(state, 'AB1', 'r1', at(5)), `r1 is already linked as the own comment of AB1; remove that link first with "${REMOVE} r1"`);
+    refuses(input, (state) => linkDuplicate(state, 'AB1', 'r2', at(5)), `r2 is already linked as a duplicate of AB2; remove that link first with "${REMOVE} r2"`);
+    refuses(input, (state) => linkDuplicate(state, 'AB2', 'r2', at(5)), `r2 is already linked as a duplicate of AB2; remove that link first with "${REMOVE} r2"`);
+    refuses(input, (state) => linkDuplicate(state, 'AB1', 'c3', at(5)), `c3 is already linked as a note (a question); remove that link first with "${REMOVE} c3"`);
   });
 });
 
 describe('linkNote', () => {
   it('records why the comment is no finding, and changes nothing else', () => {
-    const input = { ...stateWith([own('r1', 'F1')]), pullRequest: PR };
+    const input = { ...stateWith([own('r1', 'AB1')]), pullRequest: PR };
     const result = changes(input, (state) => linkNote(state, 'c623843', '  thanks, no action needed  '));
-    expect(result.links).toStrictEqual([own('r1', 'F1'), note('c623843', 'thanks, no action needed')]);
+    expect(result.links).toStrictEqual([own('r1', 'AB1'), note('c623843', 'thanks, no action needed')]);
     reuses(input, (state) => linkNote(state, 'c623843', 'x'), 'data');
     expect(result.pullRequest).toBe(PR);
   });
@@ -305,7 +305,7 @@ describe('linkNote', () => {
     ['\u000Bwas a vertical tab', 'note contains a control character (U+000B) at line 1'],
     ['\u007Fdel', 'note contains a control character (U+007F) at line 1'],
   ])('refuses the text %j', (text, message) => {
-    refuses(stateWith([own('r9', 'F1')]), (state) => linkNote(state, 'r1', text), message);
+    refuses(stateWith([own('r9', 'AB1')]), (state) => linkNote(state, 'r1', text), message);
   });
 
   it.each(['', 'x1', 'R1', '544861', 'r', ' r1'])('refuses %j, which is no comment ref', (ref) => {
@@ -313,9 +313,9 @@ describe('linkNote', () => {
   });
 
   it('links a comment once, whatever it is linked as', () => {
-    const input = stateWith([own('r1', 'F1'), duplicate('r2', 'F1'), note('c3', 'a question')]);
-    refuses(input, (state) => linkNote(state, 'r1', 'why'), `r1 is already linked as the own comment of F1; remove that link first with "${REMOVE} r1"`);
-    refuses(input, (state) => linkNote(state, 'r2', 'why'), `r2 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2"`);
+    const input = stateWith([own('r1', 'AB1'), duplicate('r2', 'AB1'), note('c3', 'a question')]);
+    refuses(input, (state) => linkNote(state, 'r1', 'why'), `r1 is already linked as the own comment of AB1; remove that link first with "${REMOVE} r1"`);
+    refuses(input, (state) => linkNote(state, 'r2', 'why'), `r2 is already linked as a duplicate of AB1; remove that link first with "${REMOVE} r2"`);
     refuses(input, (state) => linkNote(state, 'c3', 'a question'), `c3 is already linked as a note (a question); remove that link first with "${REMOVE} c3"`);
   });
 
@@ -328,34 +328,34 @@ describe('linkNote', () => {
 
 describe('unlink', () => {
   const linked = (): ReviewState => ({
-    ...stateWith([own('r1', 'F1'), duplicate('r2', 'F1'), note('c3', 'a question'), duplicate('r4', 'F2'), own('r5', 'F2')]),
+    ...stateWith([own('r1', 'AB1'), duplicate('r2', 'AB1'), note('c3', 'a question'), duplicate('r4', 'AB2'), own('r5', 'AB2')]),
     pullRequest: PR,
   });
 
   it('removes an own comment, keeps the order of the others, and logs it under the finding', () => {
     const result = changes(linked(), (state) => unlink(state, 'r1', at(5)));
-    expect(result.links).toStrictEqual([duplicate('r2', 'F1'), note('c3', 'a question'), duplicate('r4', 'F2'), own('r5', 'F2')]);
-    expect(updatesOf(result, 'F1')).toStrictEqual([
+    expect(result.links).toStrictEqual([duplicate('r2', 'AB1'), note('c3', 'a question'), duplicate('r4', 'AB2'), own('r5', 'AB2')]);
+    expect(updatesOf(result, 'AB1')).toStrictEqual([
       `${START} — Round 1: raised ⏳`,
       '2026-10-08 09:10 — PR comment [r1](https://github.com/acme/widgets/pull/42#discussion_r1) unlinked (was its own)',
     ]);
-    expect(updatesOf(result, 'F2')).toStrictEqual([`${START} — Round 1: raised ⏳`]);
+    expect(updatesOf(result, 'AB2')).toStrictEqual([`${START} — Round 1: raised ⏳`]);
     expect(result.pullRequest).toBe(PR);
   });
 
   it('removes a duplicate and logs it, with the cleaned note', () => {
     const result = changes(linked(), (state) => unlink(state, 'r4', at(5), 'not the same issue after all'));
-    expect(result.links).toStrictEqual([own('r1', 'F1'), duplicate('r2', 'F1'), note('c3', 'a question'), own('r5', 'F2')]);
-    expect(updatesOf(result, 'F2').at(-1)).toBe(
+    expect(result.links).toStrictEqual([own('r1', 'AB1'), duplicate('r2', 'AB1'), note('c3', 'a question'), own('r5', 'AB2')]);
+    expect(updatesOf(result, 'AB2').at(-1)).toBe(
       `${stamp(5)} — PR comment [r4](https://github.com/acme/widgets/pull/42#discussion_r4) unlinked (was a duplicate) — not the same issue after all`,
     );
-    expect(updatesOf(result, 'F1')).toStrictEqual(updatesOf(linked(), 'F1'));
+    expect(updatesOf(result, 'AB1')).toStrictEqual(updatesOf(linked(), 'AB1'));
   });
 
   it('removes a note and leaves no trace in the review', () => {
     const input = linked();
     const result = changes(input, (state) => unlink(state, 'c3', at(5)));
-    expect(result.links).toStrictEqual([own('r1', 'F1'), duplicate('r2', 'F1'), duplicate('r4', 'F2'), own('r5', 'F2')]);
+    expect(result.links).toStrictEqual([own('r1', 'AB1'), duplicate('r2', 'AB1'), duplicate('r4', 'AB2'), own('r5', 'AB2')]);
     reuses(input, (state) => unlink(state, 'c3', at(5)), 'data');
   });
 
@@ -364,7 +364,7 @@ describe('unlink', () => {
     refuses(linked(), (state) => unlink(state, 'c3', at(5), 'ignored'), message);
     refuses(linked(), (state) => unlink(state, 'c3', at(5), ''), message);
     // The text is for the finding of an own or a duplicate link.
-    expect(updatesOf(changes(linked(), (state) => unlink(state, 'r2', at(5), 'why')), 'F1').at(-1)).toBe(
+    expect(updatesOf(changes(linked(), (state) => unlink(state, 'r2', at(5), 'why')), 'AB1').at(-1)).toBe(
       `${stamp(5)} — PR comment [r2](https://github.com/acme/widgets/pull/42#discussion_r2) unlinked (was a duplicate) — why`,
     );
   });
@@ -384,7 +384,7 @@ describe('unlink', () => {
     const input = without(linked(), 'r1', 'c3');
     const result = changes(input, (state) => unlink(state, 'r1', at(5)));
     expect(result.links.map((link) => link.ref)).toStrictEqual(['r2', 'c3', 'r4', 'r5']);
-    expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — PR comment [r1](https://github.com/acme/widgets/pull/42#discussion_r1) unlinked (was its own)`);
+    expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — PR comment [r1](https://github.com/acme/widgets/pull/42#discussion_r1) unlinked (was its own)`);
     expect(changes(input, (state) => unlink(state, 'c3', at(5))).links.map((link) => link.ref)).toStrictEqual(['r1', 'r2', 'r4', 'r5']);
   });
 
@@ -394,11 +394,11 @@ describe('unlink', () => {
 
   it('frees the finding and the comment: they can be linked again', () => {
     const first = changes(linked(), (state) => unlink(state, 'r1', at(5)));
-    const second = changes(first, (state) => linkOwn(state, 'F1', 'r7', at(6)));
-    expect(second.links.at(-1)).toStrictEqual(own('r7', 'F1'));
-    const third = changes(second, (state) => linkDuplicate(state, 'F2', 'r1', at(7)));
-    expect(third.links.at(-1)).toStrictEqual(duplicate('r1', 'F2'));
-    expect(updatesOf(third, 'F1').slice(1)).toStrictEqual([
+    const second = changes(first, (state) => linkOwn(state, 'AB1', 'r7', at(6)));
+    expect(second.links.at(-1)).toStrictEqual(own('r7', 'AB1'));
+    const third = changes(second, (state) => linkDuplicate(state, 'AB2', 'r1', at(7)));
+    expect(third.links.at(-1)).toStrictEqual(duplicate('r1', 'AB2'));
+    expect(updatesOf(third, 'AB1').slice(1)).toStrictEqual([
       `${stamp(5)} — PR comment [r1](https://github.com/acme/widgets/pull/42#discussion_r1) unlinked (was its own)`,
       `${stamp(6)} — PR comment [r7](https://github.com/acme/widgets/pull/42#discussion_r7) linked as its own`,
     ]);
@@ -406,7 +406,7 @@ describe('unlink', () => {
 
   it('takes a note link back as a finding link', () => {
     const first = changes(linked(), (state) => unlink(state, 'c3', at(5)));
-    expect(changes(first, (state) => linkDuplicate(state, 'F3', 'c3', at(6))).links.at(-1)).toStrictEqual(duplicate('c3', 'F3'));
+    expect(changes(first, (state) => linkDuplicate(state, 'AB3', 'c3', at(6))).links.at(-1)).toStrictEqual(duplicate('c3', 'AB3'));
   });
 });
 
@@ -414,8 +414,8 @@ describe('recordPosted', () => {
   const WHERE = ['pending', 'posted', undefined] as const;
   const ACTIONS: PostedAction[] = ['created', 'updated', 'unchanged'];
 
-  // The links of a review where F1 has the own comment r1 and a duplicate, and F2 has a duplicate and a note.
-  const others = (): CommentLink[] => [duplicate('r2', 'F1'), duplicate('r3', 'F2'), note('c4', 'a question')];
+  // The links of a review where AB1 has the own comment r1 and a duplicate, and AB2 has a duplicate and a note.
+  const others = (): CommentLink[] => [duplicate('r2', 'AB1'), duplicate('r3', 'AB2'), note('c4', 'a question')];
 
   describe('a finding with no own comment', () => {
     it.each([
@@ -424,54 +424,54 @@ describe('recordPosted', () => {
       [undefined, 'posted PR comment r9'],
     ] as const)('created (%s) links it and logs "%s"', (where, text) => {
       const input = stateWith(others());
-      const result = changes(input, (state) => recordPosted(state, 'F1', 'r9', 'created', where, at(5)));
-      expect(result.links).toStrictEqual([...others(), own('r9', 'F1')]);
-      expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — ${text}`);
+      const result = changes(input, (state) => recordPosted(state, 'AB1', 'r9', 'created', where, at(5)));
+      expect(result.links).toStrictEqual([...others(), own('r9', 'AB1')]);
+      expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — ${text}`);
       expect(withoutUpdates(result.data)).toStrictEqual(withoutUpdates(input.data));
     });
 
     it.each(WHERE)('updated (%s) links it and logs "updated PR comment r9"', (where) => {
-      const result = changes(stateWith(others()), (state) => recordPosted(state, 'F1', 'r9', 'updated', where, at(5)));
-      expect(result.links).toStrictEqual([...others(), own('r9', 'F1')]);
-      expect(updatesOf(result, 'F1').at(-1)).toBe('2026-10-08 09:10 — updated PR comment r9');
+      const result = changes(stateWith(others()), (state) => recordPosted(state, 'AB1', 'r9', 'updated', where, at(5)));
+      expect(result.links).toStrictEqual([...others(), own('r9', 'AB1')]);
+      expect(updatesOf(result, 'AB1').at(-1)).toBe('2026-10-08 09:10 — updated PR comment r9');
     });
 
     it.each(WHERE)('unchanged (%s) adopts the identical comment as its own', (where) => {
-      const result = changes(stateWith(others()), (state) => recordPosted(state, 'F1', 'r9', 'unchanged', where, at(5)));
-      expect(result.links).toStrictEqual([...others(), own('r9', 'F1')]);
-      expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — adopted PR comment r9 (identical)`);
+      const result = changes(stateWith(others()), (state) => recordPosted(state, 'AB1', 'r9', 'unchanged', where, at(5)));
+      expect(result.links).toStrictEqual([...others(), own('r9', 'AB1')]);
+      expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — adopted PR comment r9 (identical)`);
     });
   });
 
   describe('a finding whose own comment is the ref', () => {
-    const input = (): ReviewState => stateWith([duplicate('r2', 'F1'), own('r1', 'F1'), note('c4', 'a question')]);
+    const input = (): ReviewState => stateWith([duplicate('r2', 'AB1'), own('r1', 'AB1'), note('c4', 'a question')]);
 
     it.each([
       ['pending', 'posted PR comment r1 to the pending review'],
       ['posted', 'posted PR comment r1'],
       [undefined, 'posted PR comment r1'],
     ] as const)('created (%s) keeps the link and logs "%s"', (where, text) => {
-      const result = changes(input(), (state) => recordPosted(state, 'F1', 'r1', 'created', where, at(5)));
+      const result = changes(input(), (state) => recordPosted(state, 'AB1', 'r1', 'created', where, at(5)));
       expect(result.links).toStrictEqual(input().links);
-      expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — ${text}`);
+      expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — ${text}`);
     });
 
     it.each(WHERE)('updated (%s) keeps the link and logs "updated PR comment r1"', (where) => {
-      const result = changes(input(), (state) => recordPosted(state, 'F1', 'r1', 'updated', where, at(5)));
+      const result = changes(input(), (state) => recordPosted(state, 'AB1', 'r1', 'updated', where, at(5)));
       expect(result.links).toStrictEqual(input().links);
-      expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — updated PR comment r1`);
+      expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — updated PR comment r1`);
     });
 
     it.each(WHERE)('unchanged (%s) changes nothing and returns the same state', (where) => {
-      stays(input(), (state) => recordPosted(state, 'F1', 'r1', 'unchanged', where, at(5)));
+      stays(input(), (state) => recordPosted(state, 'AB1', 'r1', 'unchanged', where, at(5)));
     });
 
     it('logs every post, in the order they happen', () => {
       let result = input();
-      result = changes(result, (state) => recordPosted(state, 'F1', 'r1', 'created', 'pending', at(5)));
-      result = changes(result, (state) => recordPosted(state, 'F1', 'r1', 'updated', 'posted', at(6)));
-      stays(result, (state) => recordPosted(state, 'F1', 'r1', 'unchanged', 'posted', at(7)));
-      expect(updatesOf(result, 'F1').slice(1)).toStrictEqual([
+      result = changes(result, (state) => recordPosted(state, 'AB1', 'r1', 'created', 'pending', at(5)));
+      result = changes(result, (state) => recordPosted(state, 'AB1', 'r1', 'updated', 'posted', at(6)));
+      stays(result, (state) => recordPosted(state, 'AB1', 'r1', 'unchanged', 'posted', at(7)));
+      expect(updatesOf(result, 'AB1').slice(1)).toStrictEqual([
         `${stamp(5)} — posted PR comment r1 to the pending review`,
         `${stamp(6)} — updated PR comment r1`,
       ]);
@@ -479,68 +479,68 @@ describe('recordPosted', () => {
   });
 
   describe('a finding whose own comment is another ref', () => {
-    const input = (): ReviewState => stateWith([...others(), own('r1', 'F1')]);
+    const input = (): ReviewState => stateWith([...others(), own('r1', 'AB1')]);
 
     it.each(ACTIONS.flatMap((action) => WHERE.map((where) => [action, where] as const)))('%s (%s) is refused: a posted comment cannot move', (action, where) => {
       refuses(
         input(),
-        (state) => recordPosted(state, 'F1', 'r9', action, where, at(5)),
-        `a posted comment cannot move: F1 already has its own comment r1; remove that link first with "${REMOVE} r1"`,
+        (state) => recordPosted(state, 'AB1', 'r9', action, where, at(5)),
+        `a posted comment cannot move: AB1 already has its own comment r1; remove that link first with "${REMOVE} r1"`,
       );
     });
 
     it('adopts an unchanged comment again once the other own link is removed', () => {
       const removed = changes(input(), (state) => unlink(state, 'r1', at(5)));
-      const adopted = changes(removed, (state) => recordPosted(state, 'F1', 'r9', 'unchanged', 'posted', at(6)));
-      expect(adopted.links.at(-1)).toStrictEqual(own('r9', 'F1'));
+      const adopted = changes(removed, (state) => recordPosted(state, 'AB1', 'r9', 'unchanged', 'posted', at(6)));
+      expect(adopted.links.at(-1)).toStrictEqual(own('r9', 'AB1'));
     });
   });
 
   describe('a ref that is linked to something else', () => {
-    const input = (): ReviewState => stateWith([own('r1', 'F1'), duplicate('r2', 'F1'), duplicate('r3', 'F2'), own('r4', 'F2'), note('c5', 'a question')]);
+    const input = (): ReviewState => stateWith([own('r1', 'AB1'), duplicate('r2', 'AB1'), duplicate('r3', 'AB2'), own('r4', 'AB2'), note('c5', 'a question')]);
 
     it.each(ACTIONS)('%s is refused, naming what the ref is linked as', (action) => {
       const run = (id: string, ref: string) => (state: ReviewState) => recordPosted(state, id, ref, action, 'posted', at(5));
-      refuses(input(), run('F3', 'r1'), `r1 is already linked as the own comment of F1; remove that link first with "${REMOVE} r1"`);
-      refuses(input(), run('F3', 'r2'), `r2 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2"`);
-      refuses(input(), run('F1', 'r2'), `r2 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2"`);
-      refuses(input(), run('F1', 'r3'), `r3 is already linked as a duplicate of F2; remove that link first with "${REMOVE} r3"`);
-      refuses(input(), run('F1', 'r4'), `r4 is already linked as the own comment of F2; remove that link first with "${REMOVE} r4"`);
-      refuses(input(), run('F3', 'c5'), `c5 is already linked as a note (a question); remove that link first with "${REMOVE} c5"`);
+      refuses(input(), run('AB3', 'r1'), `r1 is already linked as the own comment of AB1; remove that link first with "${REMOVE} r1"`);
+      refuses(input(), run('AB3', 'r2'), `r2 is already linked as a duplicate of AB1; remove that link first with "${REMOVE} r2"`);
+      refuses(input(), run('AB1', 'r2'), `r2 is already linked as a duplicate of AB1; remove that link first with "${REMOVE} r2"`);
+      refuses(input(), run('AB1', 'r3'), `r3 is already linked as a duplicate of AB2; remove that link first with "${REMOVE} r3"`);
+      refuses(input(), run('AB1', 'r4'), `r4 is already linked as the own comment of AB2; remove that link first with "${REMOVE} r4"`);
+      refuses(input(), run('AB3', 'c5'), `c5 is already linked as a note (a question); remove that link first with "${REMOVE} c5"`);
     });
   });
 
   it('takes the finding id in any case', () => {
-    const result = changes(stateWith(), (state) => recordPosted(state, 'f2', 'r9', 'created', 'posted', at(5)));
-    expect(result.links).toStrictEqual([own('r9', 'F2')]);
-    stays(result, (state) => recordPosted(state, ' F2 ', 'r9', 'unchanged', undefined, at(6)));
+    const result = changes(stateWith(), (state) => recordPosted(state, 'ab2', 'r9', 'created', 'posted', at(5)));
+    expect(result.links).toStrictEqual([own('r9', 'AB2')]);
+    stays(result, (state) => recordPosted(state, ' AB2 ', 'r9', 'unchanged', undefined, at(6)));
   });
 
   it('refuses an unknown finding and a bad ref', () => {
-    refuses(stateWith(), (state) => recordPosted(state, 'F9', 'r9', 'created', 'posted', at(5)), 'unknown finding "F9"; the report has F1, F2, F3');
-    refuses(stateWith(), (state) => recordPosted(state, 'F1', '9', 'created', 'posted', at(5)), `"9" is not a PR comment ref; ${FORMS}`);
+    refuses(stateWith(), (state) => recordPosted(state, 'AB9', 'r9', 'created', 'posted', at(5)), 'unknown finding "AB9"; the report has AB1, AB2, AB3');
+    refuses(stateWith(), (state) => recordPosted(state, 'AB1', '9', 'created', 'posted', at(5)), `"9" is not a PR comment ref; ${FORMS}`);
   });
 
   it('refuses a ref that is not in the database, whatever the action, after the finding and the ref syntax', () => {
-    const input = stateWith([...others(), own('r1', 'F1')]);
+    const input = stateWith([...others(), own('r1', 'AB1')]);
     for (const action of ACTIONS) {
       for (const where of WHERE) {
-        refuses(input, (state) => recordPosted(state, 'F2', 'r999', action, where, at(5)), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
-        // The own comment of F1 is not the one asked for: the database is asked before the link rules.
-        refuses(input, (state) => recordPosted(state, 'F1', 'r999', action, where, at(5)), unknownRef('r999'));
-        refuses(without(input, 'r1'), (state) => recordPosted(state, 'F1', 'r1', action, where, at(5)), unknownRef('r1'));
+        refuses(input, (state) => recordPosted(state, 'AB2', 'r999', action, where, at(5)), 'r999 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
+        // The own comment of AB1 is not the one asked for: the database is asked before the link rules.
+        refuses(input, (state) => recordPosted(state, 'AB1', 'r999', action, where, at(5)), unknownRef('r999'));
+        refuses(without(input, 'r1'), (state) => recordPosted(state, 'AB1', 'r1', action, where, at(5)), unknownRef('r1'));
       }
     }
-    refuses(input, (state) => recordPosted(state, 'F9', 'r999', 'created', 'posted', at(5)), 'unknown finding "F9"; the report has F1, F2, F3');
-    refuses(input, (state) => recordPosted(state, 'F2', '999', 'created', 'posted', at(5)), `"999" is not a PR comment ref; ${FORMS}`);
+    refuses(input, (state) => recordPosted(state, 'AB9', 'r999', 'created', 'posted', at(5)), 'unknown finding "AB9"; the report has AB1, AB2, AB3');
+    refuses(input, (state) => recordPosted(state, 'AB2', '999', 'created', 'posted', at(5)), `"999" is not a PR comment ref; ${FORMS}`);
   });
 });
 
 describe('recordReplied', () => {
   const WHERE = ['pending', 'posted', undefined] as const;
 
-  // F1 has the own comment r1 and the duplicates r2 and c3; F2 has the duplicate r4 and no own comment; c5 is a note.
-  const links = (): CommentLink[] => [own('r1', 'F1'), duplicate('r2', 'F1'), duplicate('c3', 'F1'), duplicate('r4', 'F2'), note('c5', 'a question')];
+  // AB1 has the own comment r1 and the duplicates r2 and c3; AB2 has the duplicate r4 and no own comment; c5 is a note.
+  const links = (): CommentLink[] => [own('r1', 'AB1'), duplicate('r2', 'AB1'), duplicate('c3', 'AB1'), duplicate('r4', 'AB2'), note('c5', 'a question')];
   const input = (): ReviewState => stateWith(links());
   const reply = (ref: string, replyRef: string, where: 'pending' | 'posted' | undefined, minutes = 5) => (state: ReviewState) =>
     recordReplied(state, ref, replyRef, where, at(minutes));
@@ -552,20 +552,20 @@ describe('recordReplied', () => {
   ] as const)('(%s) logs "%s" under the finding of the duplicate and auto-links the reply as a note', (where, text) => {
     const before = input();
     const result = changes(before, reply('r2', 'r10', where));
-    expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — ${text}`);
-    expect(updatesOf(result, 'F1')).toHaveLength(updatesOf(before, 'F1').length + 1);
-    expect(updatesOf(result, 'F2')).toStrictEqual(updatesOf(before, 'F2'));
-    expect(updatesOf(result, 'F3')).toStrictEqual(updatesOf(before, 'F3'));
+    expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — ${text}`);
+    expect(updatesOf(result, 'AB1')).toHaveLength(updatesOf(before, 'AB1').length + 1);
+    expect(updatesOf(result, 'AB2')).toStrictEqual(updatesOf(before, 'AB2'));
+    expect(updatesOf(result, 'AB3')).toStrictEqual(updatesOf(before, 'AB3'));
     expect(withoutUpdates(result.data)).toStrictEqual(withoutUpdates(before.data));
     expect(result.links).toStrictEqual([...links(), note('r10', 'duplicate reply to r2')]);
   });
 
   it('logs the finding of the duplicate, for a conversation comment and a finding without an own comment too', () => {
     const result = changes(input(), reply('r4', 'c11', 'posted'));
-    expect(updatesOf(result, 'F2').at(-1)).toBe(`${stamp(5)} — replied to duplicate r4 with c11`);
+    expect(updatesOf(result, 'AB2').at(-1)).toBe(`${stamp(5)} — replied to duplicate r4 with c11`);
     expect(result.links.at(-1)).toStrictEqual(note('c11', 'duplicate reply to r4'));
     const conversation = changes(input(), reply('c3', 'c12', 'posted'));
-    expect(updatesOf(conversation, 'F1').at(-1)).toBe(`${stamp(5)} — replied to duplicate c3 with c12`);
+    expect(updatesOf(conversation, 'AB1').at(-1)).toBe(`${stamp(5)} — replied to duplicate c3 with c12`);
     expect(conversation.links.at(-1)).toStrictEqual(note('c12', 'duplicate reply to c3'));
   });
 
@@ -577,7 +577,7 @@ describe('recordReplied', () => {
 
   it('writes no Round prefix and the time it is given', () => {
     const result = changes(input(), reply('r2', 'r10', 'pending', 47));
-    expect(updatesOf(result, 'F1').at(-1)).toBe('2026-10-08 09:52 — replied to duplicate r2 with r10 in the pending review');
+    expect(updatesOf(result, 'AB1').at(-1)).toBe('2026-10-08 09:52 — replied to duplicate r2 with r10 in the pending review');
   });
 
   it.each(WHERE.flatMap((first) => WHERE.map((second) => [first, second] as const)))(
@@ -591,7 +591,7 @@ describe('recordReplied', () => {
   it('auto-links replyRef on an idempotent rerun when the replied update exists without a link on replyRef', () => {
     const base = input();
     const findings = base.data.findings.map((finding) =>
-      finding.id === 'F1'
+      finding.id === 'AB1'
         ? {
             ...finding,
             updates: [...finding.updates, { kind: 'replied' as const, at: stamp(2), ref: 'r2', replyRef: 'r10', note: 'by hand' }],
@@ -608,38 +608,38 @@ describe('recordReplied', () => {
   it('adds another entry for another reply, another duplicate, or the same words under another finding', () => {
     const recorded = changes(input(), reply('r2', 'r10', 'pending'));
     const again = changes(recorded, reply('r2', 'r11', 'pending', 6));
-    expect(updatesOf(again, 'F1').slice(-2)).toStrictEqual([
+    expect(updatesOf(again, 'AB1').slice(-2)).toStrictEqual([
       `${stamp(5)} — replied to duplicate r2 with r10 in the pending review`,
       `${stamp(6)} — replied to duplicate r2 with r11 in the pending review`,
     ]);
     const other = changes(recorded, reply('c3', 'r10', 'pending', 7));
-    expect(updatesOf(other, 'F1').at(-1)).toBe(`${stamp(7)} — replied to duplicate c3 with r10 in the pending review`);
+    expect(updatesOf(other, 'AB1').at(-1)).toBe(`${stamp(7)} — replied to duplicate c3 with r10 in the pending review`);
     const elsewhere = changes(recorded, reply('r4', 'r10', 'pending', 8));
-    expect(updatesOf(elsewhere, 'F2').at(-1)).toBe(`${stamp(8)} — replied to duplicate r4 with r10 in the pending review`);
-    expect(updatesOf(elsewhere, 'F1')).toStrictEqual(updatesOf(recorded, 'F1'));
+    expect(updatesOf(elsewhere, 'AB2').at(-1)).toBe(`${stamp(8)} — replied to duplicate r4 with r10 in the pending review`);
+    expect(updatesOf(elsewhere, 'AB1')).toStrictEqual(updatesOf(recorded, 'AB1'));
   });
 
   it('does not take the start of a longer ref for the same ref', () => {
     const recorded = changes(input(), reply('r2', 'r20', 'posted'));
     const shorter = changes(recorded, reply('r2', 'r2', 'posted', 6));
-    expect(updatesOf(shorter, 'F1').slice(-2)).toStrictEqual([
+    expect(updatesOf(shorter, 'AB1').slice(-2)).toStrictEqual([
       `${stamp(5)} — replied to duplicate r2 with r20`,
       `${stamp(6)} — replied to duplicate r2 with r2`,
     ]);
     stays(shorter, reply('r2', 'r20', 'posted', 7));
     stays(shorter, reply('r2', 'r2', 'posted', 7));
     const longer = changes(changes(input(), reply('r2', 'r2', 'posted')), reply('r2', 'r20', 'posted', 6));
-    expect(updatesOf(longer, 'F1').at(-1)).toBe(`${stamp(6)} — replied to duplicate r2 with r20`);
+    expect(updatesOf(longer, 'AB1').at(-1)).toBe(`${stamp(6)} — replied to duplicate r2 with r20`);
   });
 
   it('still finds its entry after the link was removed and made again', () => {
     const recorded = changes(input(), reply('r2', 'r10', 'pending'));
-    const relinked = changes(changes(recorded, (state) => unlink(state, 'r2', at(6))), (state) => linkDuplicate(state, 'F1', 'r2', at(7)));
+    const relinked = changes(changes(recorded, (state) => unlink(state, 'r2', at(6))), (state) => linkDuplicate(state, 'AB1', 'r2', at(7)));
     stays(relinked, reply('r2', 'r10', 'pending', 8));
   });
 
   it('refuses a link that is not a duplicate, saying what it is', () => {
-    refuses(input(), reply('r1', 'r10', 'pending'), 'r1 is linked as the own comment of F1, not as a duplicate; only a duplicate is answered');
+    refuses(input(), reply('r1', 'r10', 'pending'), 'r1 is linked as the own comment of AB1, not as a duplicate; only a duplicate is answered');
     refuses(input(), reply('c5', 'r10', 'pending'), 'c5 is recorded as a note, not as a duplicate of a finding');
   });
 
@@ -662,7 +662,7 @@ describe('recordReplied', () => {
     refuses(input(), reply('r2', 'r999', 'pending'), unknownRef('r999'));
     const alreadyLinkedGone = without(stateWith([...links(), note('r999', 'existing')]), 'r999');
     const result = changes(alreadyLinkedGone, reply('r2', 'r999', 'pending'));
-    expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — replied to duplicate r2 with r999 in the pending review`);
+    expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — replied to duplicate r2 with r999 in the pending review`);
   });
 
   it('refuses a ref that is no comment ref, and a reply that is none (including review bodies and annotations)', () => {
@@ -691,27 +691,27 @@ describe('connectPullRequest', () => {
   });
 
   it('changes only the pull request of the state', () => {
-    const input = stateWith([own('r1', 'F1'), note('c2', 'why')]);
+    const input = stateWith([own('r1', 'AB1'), note('c2', 'why')]);
     const result = changes(input, (state) => connectPullRequest(state, PR));
     expect(result).toStrictEqual({ ...input, pullRequest: PR });
     reuses(input, (state) => connectPullRequest(state, PR), 'data', 'links');
   });
 
   it('allows the first connection of a review that has links already', () => {
-    const result = changes(stateWith([own('r1', 'F1')]), (state) => connectPullRequest(state, PR));
+    const result = changes(stateWith([own('r1', 'AB1')]), (state) => connectPullRequest(state, PR));
     expect(result.pullRequest).toBe(PR);
-    expect(result.links).toStrictEqual([own('r1', 'F1')]);
+    expect(result.links).toStrictEqual([own('r1', 'AB1')]);
   });
 
   it('changes nothing for the same pull request, however the URL is spelled', () => {
-    const input = { ...stateWith([own('r1', 'F1')]), pullRequest: PR };
+    const input = { ...stateWith([own('r1', 'AB1')]), pullRequest: PR };
     stays(input, (state) => connectPullRequest(state, PR));
     stays(input, (state) => connectPullRequest(state, `${PR}/`));
     stays(input, (state) => connectPullRequest(state, `${PR}#issuecomment-1`));
   });
 
   it('compares host, owner and repo without regard to case, returning the same state and keeping the first spelling', () => {
-    const input = { ...stateWith([own('r1', 'F1')]), pullRequest: 'https://github.com/Acme/Widgets/pull/42' };
+    const input = { ...stateWith([own('r1', 'AB1')]), pullRequest: 'https://github.com/Acme/Widgets/pull/42' };
     stays(input, (state) => connectPullRequest(state, PR));
     stays(input, (state) => connectPullRequest(state, 'https://GITHUB.com/ACME/WIDGETS/pull/42'));
     stays(input, (state) => connectPullRequest(state, 'https://github.com/acme/WIDGETS/pull/42/#top'));
@@ -728,7 +728,7 @@ describe('connectPullRequest', () => {
   });
 
   it('refuses another pull request once the review has links, naming both', () => {
-    const input = { ...stateWith([own('r1', 'F1'), note('c2', 'why')]), pullRequest: PR };
+    const input = { ...stateWith([own('r1', 'AB1'), note('c2', 'why')]), pullRequest: PR };
     refuses(
       input,
       (state) => connectPullRequest(state, 'https://github.com/acme/widgets/pull/43'),
@@ -742,7 +742,7 @@ describe('connectPullRequest', () => {
   });
 
   it('refuses another number of the same pull request in another case, the number being compared exactly', () => {
-    const input = { ...stateWith([own('r1', 'F1')]), pullRequest: PR };
+    const input = { ...stateWith([own('r1', 'AB1')]), pullRequest: PR };
     refuses(
       input,
       (state) => connectPullRequest(state, 'https://GitHub.com/ACME/Widgets/pull/43'),
@@ -771,47 +771,47 @@ describe('connectPullRequest', () => {
 });
 
 describe('linksOf', () => {
-  const links = [own('r1', 'F1'), duplicate('r2', 'F2'), note('c3'), duplicate('r4', 'F1'), duplicate('c5', 'F10'), duplicate('r6', 'F1')];
+  const links = [own('r1', 'AB1'), duplicate('r2', 'AB2'), note('c3'), duplicate('r4', 'AB1'), duplicate('c5', 'AB10'), duplicate('r6', 'AB1')];
 
   it('lists the links of the finding in link order', () => {
-    expect(linksOf(links, 'F1')).toStrictEqual([own('r1', 'F1'), duplicate('r4', 'F1'), duplicate('r6', 'F1')]);
-    expect(linksOf(links, 'F2')).toStrictEqual([duplicate('r2', 'F2')]);
-    expect(linksOf(links, 'F10')).toStrictEqual([duplicate('c5', 'F10')]);
+    expect(linksOf(links, 'AB1')).toStrictEqual([own('r1', 'AB1'), duplicate('r4', 'AB1'), duplicate('r6', 'AB1')]);
+    expect(linksOf(links, 'AB2')).toStrictEqual([duplicate('r2', 'AB2')]);
+    expect(linksOf(links, 'AB10')).toStrictEqual([duplicate('c5', 'AB10')]);
   });
 
   it('is empty for a finding without links, and never lists a note', () => {
-    expect(linksOf(links, 'F3')).toStrictEqual([]);
-    expect(linksOf([], 'F1')).toStrictEqual([]);
-    expect(linksOf([note('c3')], 'F1')).toStrictEqual([]);
+    expect(linksOf(links, 'AB3')).toStrictEqual([]);
+    expect(linksOf([], 'AB1')).toStrictEqual([]);
+    expect(linksOf([note('c3')], 'AB1')).toStrictEqual([]);
   });
 
   it('reads the id in any case and gives a new list', () => {
-    expect(linksOf(links, 'f1')).toStrictEqual(linksOf(links, 'F1'));
+    expect(linksOf(links, 'ab1')).toStrictEqual(linksOf(links, 'AB1'));
     const frozen = deepFreeze(structuredClone(links));
-    expect(linksOf(frozen, 'F1')).not.toBe(frozen);
+    expect(linksOf(frozen, 'AB1')).not.toBe(frozen);
     expect(frozen).toStrictEqual(links);
   });
 });
 
 describe('check annotations', () => {
   const OTHER = 'a1b2c3d4e';
-  const PLACED = (): CommentLink[] => [own('r1', 'F1'), duplicate('r2', 'F1'), note('c3', 'a question')];
+  const PLACED = (): CommentLink[] => [own('r1', 'AB1'), duplicate('r2', 'AB1'), note('c3', 'a question')];
 
   it('links an annotation as a duplicate and logs it as a check annotation, not a PR comment', () => {
     const input = stateWith(PLACED());
-    const result = changes(input, (state) => linkDuplicate(state, 'f2', ANNOTATION, at(5)));
-    expect(result.links).toStrictEqual([...PLACED(), duplicate(ANNOTATION, 'F2')]);
-    expect(updatesOf(result, 'F2')).toStrictEqual([`${START} — Round 1: raised ⏳`, `${stamp(5)} — check annotation ${ANNOTATION} linked as a duplicate`]);
-    expect(updatesOf(result, 'F1')).toStrictEqual(updatesOf(input, 'F1'));
+    const result = changes(input, (state) => linkDuplicate(state, 'ab2', ANNOTATION, at(5)));
+    expect(result.links).toStrictEqual([...PLACED(), duplicate(ANNOTATION, 'AB2')]);
+    expect(updatesOf(result, 'AB2')).toStrictEqual([`${START} — Round 1: raised ⏳`, `${stamp(5)} — check annotation ${ANNOTATION} linked as a duplicate`]);
+    expect(updatesOf(result, 'AB1')).toStrictEqual(updatesOf(input, 'AB1'));
     expect(withoutUpdates(result.data)).toStrictEqual(withoutUpdates(input.data));
   });
 
   it('appends the cleaned note and keeps comments and annotations in the order they were linked', () => {
-    let result = changes(stateWith(), (state) => linkDuplicate(state, 'F1', 'r5', at(5)));
-    result = changes(result, (state) => linkDuplicate(state, 'F1', ANNOTATION, at(6), ' same cognitive\ncomplexity '));
-    result = changes(result, (state) => linkDuplicate(state, 'F1', OTHER, at(7)));
-    expect(result.links).toStrictEqual([duplicate('r5', 'F1'), duplicate(ANNOTATION, 'F1'), duplicate(OTHER, 'F1')]);
-    expect(updatesOf(result, 'F1').slice(1)).toStrictEqual([
+    let result = changes(stateWith(), (state) => linkDuplicate(state, 'AB1', 'r5', at(5)));
+    result = changes(result, (state) => linkDuplicate(state, 'AB1', ANNOTATION, at(6), ' same cognitive\ncomplexity '));
+    result = changes(result, (state) => linkDuplicate(state, 'AB1', OTHER, at(7)));
+    expect(result.links).toStrictEqual([duplicate('r5', 'AB1'), duplicate(ANNOTATION, 'AB1'), duplicate(OTHER, 'AB1')]);
+    expect(updatesOf(result, 'AB1').slice(1)).toStrictEqual([
       `${stamp(5)} — PR comment r5 linked as a duplicate`,
       `${stamp(6)} — check annotation ${ANNOTATION} linked as a duplicate — same cognitive\n  complexity`,
       `${stamp(7)} — check annotation ${OTHER} linked as a duplicate`,
@@ -819,71 +819,71 @@ describe('check annotations', () => {
   });
 
   it('links it once, whatever it is linked as, naming what it is linked as', () => {
-    const input = stateWith([duplicate(ANNOTATION, 'F1')]);
-    const message = `${ANNOTATION} is already linked as a duplicate of F1; remove that link first with "${REMOVE} ${ANNOTATION}"`;
-    refuses(input, (state) => linkDuplicate(state, 'F1', ANNOTATION, at(5)), message);
-    refuses(input, (state) => linkDuplicate(state, 'F2', ANNOTATION, at(5)), message);
+    const input = stateWith([duplicate(ANNOTATION, 'AB1')]);
+    const message = `${ANNOTATION} is already linked as a duplicate of AB1; remove that link first with "${REMOVE} ${ANNOTATION}"`;
+    refuses(input, (state) => linkDuplicate(state, 'AB1', ANNOTATION, at(5)), message);
+    refuses(input, (state) => linkDuplicate(state, 'AB2', ANNOTATION, at(5)), message);
   });
 
   it('refuses an unknown finding and a bad note, like a comment', () => {
-    refuses(stateWith(), (state) => linkDuplicate(state, 'F9', ANNOTATION, at(5)), 'unknown finding "F9"; the report has F1, F2, F3');
-    refuses(stateWith(), (state) => linkDuplicate(state, 'F1', ANNOTATION, at(5), 'a\u0000b'), 'note contains a control character (U+0000) at line 1');
+    refuses(stateWith(), (state) => linkDuplicate(state, 'AB9', ANNOTATION, at(5)), 'unknown finding "AB9"; the report has AB1, AB2, AB3');
+    refuses(stateWith(), (state) => linkDuplicate(state, 'AB1', ANNOTATION, at(5), 'a\u0000b'), 'note contains a control character (U+0000) at line 1');
   });
 
   it('refuses an annotation that is not in the database, as a comment', () => {
-    refuses(stateWith(), (state) => linkDuplicate(state, 'F1', 'a00000000', at(5)), 'a00000000 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
-    refuses(without(stateWith(), ANNOTATION), (state) => linkDuplicate(state, 'F1', ANNOTATION, at(5)), unknownRef(ANNOTATION));
+    refuses(stateWith(), (state) => linkDuplicate(state, 'AB1', 'a00000000', at(5)), 'a00000000 is not in the database; run "pr-comments pr sync --db <file.sqlite>" first, or check the id');
+    refuses(without(stateWith(), ANNOTATION), (state) => linkDuplicate(state, 'AB1', ANNOTATION, at(5)), unknownRef(ANNOTATION));
   });
 
   it.each(['a', 'a3f9c2d', 'a3f9c2d1', 'a3f9c2d1e0', 'A3f9c2d1e', 'a3F9c2d1e', 'a3f9c2d1g', ' a3f9c2d1e', 'b3f9c2d1e', 'a3f9c2d1e '])('refuses %j, which is no ref of either kind', (ref) => {
     const message = `"${ref}" is not a PR comment ref; ${FORMS}`;
-    refuses(stateWith(), (state) => linkDuplicate(state, 'F1', ref, at(5)), message);
+    refuses(stateWith(), (state) => linkDuplicate(state, 'AB1', ref, at(5)), message);
     refuses(stateWith(), (state) => linkNote(state, ref, 'why'), message);
-    refuses(stateWith([duplicate(ANNOTATION, 'F1')]), (state) => unlink(state, ref, at(5)), message);
+    refuses(stateWith([duplicate(ANNOTATION, 'AB1')]), (state) => unlink(state, ref, at(5)), message);
   });
 
   it('is refused as the own comment of a finding, before anything else is looked at', () => {
-    refuses(stateWith(), (state) => linkOwn(state, 'F1', ANNOTATION, at(5)), ONLY_DUPLICATE);
-    refuses(stateWith(), (state) => linkOwn(state, 'F1', ANNOTATION, at(5), 'a\u0007b'), ONLY_DUPLICATE);
-    refuses(stateWith(), (state) => linkOwn(state, 'F9', ANNOTATION, at(5)), ONLY_DUPLICATE);
-    refuses(without(stateWith(), ANNOTATION), (state) => linkOwn(state, 'F1', ANNOTATION, at(5)), ONLY_DUPLICATE);
-    refuses(stateWith([duplicate(ANNOTATION, 'F2')]), (state) => linkOwn(state, 'F1', ANNOTATION, at(5)), ONLY_DUPLICATE);
+    refuses(stateWith(), (state) => linkOwn(state, 'AB1', ANNOTATION, at(5)), ONLY_DUPLICATE);
+    refuses(stateWith(), (state) => linkOwn(state, 'AB1', ANNOTATION, at(5), 'a\u0007b'), ONLY_DUPLICATE);
+    refuses(stateWith(), (state) => linkOwn(state, 'AB9', ANNOTATION, at(5)), ONLY_DUPLICATE);
+    refuses(without(stateWith(), ANNOTATION), (state) => linkOwn(state, 'AB1', ANNOTATION, at(5)), ONLY_DUPLICATE);
+    refuses(stateWith([duplicate(ANNOTATION, 'AB2')]), (state) => linkOwn(state, 'AB1', ANNOTATION, at(5)), ONLY_DUPLICATE);
   });
 
   it('is refused as a note, before anything else is looked at', () => {
     refuses(stateWith(), (state) => linkNote(state, ANNOTATION, 'why'), NOT_A_NOTE);
     refuses(stateWith(), (state) => linkNote(state, ANNOTATION, ''), NOT_A_NOTE);
     refuses(without(stateWith(), ANNOTATION), (state) => linkNote(state, ANNOTATION, 'why'), NOT_A_NOTE);
-    refuses(stateWith([duplicate(ANNOTATION, 'F1')]), (state) => linkNote(state, ANNOTATION, 'why'), NOT_A_NOTE);
+    refuses(stateWith([duplicate(ANNOTATION, 'AB1')]), (state) => linkNote(state, ANNOTATION, 'why'), NOT_A_NOTE);
   });
 
   it('is refused by recordPosted, whatever the action', () => {
     for (const action of ['created', 'updated', 'unchanged'] as const) {
-      refuses(stateWith(), (state) => recordPosted(state, 'F1', ANNOTATION, action, 'posted', at(5)), ONLY_DUPLICATE);
-      refuses(without(stateWith(), ANNOTATION), (state) => recordPosted(state, 'F1', ANNOTATION, action, 'pending', at(5)), ONLY_DUPLICATE);
+      refuses(stateWith(), (state) => recordPosted(state, 'AB1', ANNOTATION, action, 'posted', at(5)), ONLY_DUPLICATE);
+      refuses(without(stateWith(), ANNOTATION), (state) => recordPosted(state, 'AB1', ANNOTATION, action, 'pending', at(5)), ONLY_DUPLICATE);
     }
   });
 
   it('is refused by recordReplied, even as a linked duplicate', () => {
-    const input = stateWith([own('r1', 'F1'), duplicate(ANNOTATION, 'F1')]);
+    const input = stateWith([own('r1', 'AB1'), duplicate(ANNOTATION, 'AB1')]);
     refuses(input, (state) => recordReplied(state, ANNOTATION, 'r10', 'pending', at(5)), NO_REPLY);
     refuses(without(input, ANNOTATION), (state) => recordReplied(state, ANNOTATION, 'r10', 'pending', at(5)), NO_REPLY);
     refuses(stateWith(), (state) => recordReplied(state, ANNOTATION, 'r10', 'posted', at(5)), NO_REPLY);
   });
 
   describe('unlink', () => {
-    const linked = (): ReviewState => stateWith([own('r1', 'F1'), duplicate(ANNOTATION, 'F1'), duplicate('r2', 'F2'), duplicate(OTHER, 'F2')]);
+    const linked = (): ReviewState => stateWith([own('r1', 'AB1'), duplicate(ANNOTATION, 'AB1'), duplicate('r2', 'AB2'), duplicate(OTHER, 'AB2')]);
 
     it('removes it, keeps the order of the others, and logs it under its finding', () => {
       const result = changes(linked(), (state) => unlink(state, ANNOTATION, at(5)));
-      expect(result.links).toStrictEqual([own('r1', 'F1'), duplicate('r2', 'F2'), duplicate(OTHER, 'F2')]);
-      expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — check annotation ${ANNOTATION} unlinked (was a duplicate)`);
-      expect(updatesOf(result, 'F2')).toStrictEqual(updatesOf(linked(), 'F2'));
+      expect(result.links).toStrictEqual([own('r1', 'AB1'), duplicate('r2', 'AB2'), duplicate(OTHER, 'AB2')]);
+      expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — check annotation ${ANNOTATION} unlinked (was a duplicate)`);
+      expect(updatesOf(result, 'AB2')).toStrictEqual(updatesOf(linked(), 'AB2'));
     });
 
     it('appends the cleaned note', () => {
       const result = changes(linked(), (state) => unlink(state, OTHER, at(5), 'the analysis moved it'));
-      expect(updatesOf(result, 'F2').at(-1)).toBe(`${stamp(5)} — check annotation ${OTHER} unlinked (was a duplicate) — the analysis moved it`);
+      expect(updatesOf(result, 'AB2').at(-1)).toBe(`${stamp(5)} — check annotation ${OTHER} unlinked (was a duplicate) — the analysis moved it`);
     });
 
     it('removes a link to an annotation that is gone from the database', () => {
@@ -898,16 +898,16 @@ describe('check annotations', () => {
 
     it('frees it to be linked again, to the same finding or another', () => {
       const first = changes(linked(), (state) => unlink(state, ANNOTATION, at(5)));
-      const second = changes(first, (state) => linkDuplicate(state, 'F3', ANNOTATION, at(6)));
-      expect(second.links.at(-1)).toStrictEqual(duplicate(ANNOTATION, 'F3'));
-      expect(updatesOf(second, 'F3').at(-1)).toBe(`${stamp(6)} — check annotation ${ANNOTATION} linked as a duplicate`);
+      const second = changes(first, (state) => linkDuplicate(state, 'AB3', ANNOTATION, at(6)));
+      expect(second.links.at(-1)).toStrictEqual(duplicate(ANNOTATION, 'AB3'));
+      expect(updatesOf(second, 'AB3').at(-1)).toBe(`${stamp(6)} — check annotation ${ANNOTATION} linked as a duplicate`);
     });
   });
 
   it('keeps a comment as it was: the wording of its entries does not change', () => {
-    const result = changes(stateWith(), (state) => linkDuplicate(state, 'F1', 'r5', at(5)));
-    expect(updatesOf(result, 'F1').at(-1)).toBe(`${stamp(5)} — PR comment r5 linked as a duplicate`);
-    expect(updatesOf(changes(result, (state) => unlink(state, 'r5', at(6))), 'F1').at(-1)).toBe(`${stamp(6)} — PR comment r5 unlinked (was a duplicate)`);
+    const result = changes(stateWith(), (state) => linkDuplicate(state, 'AB1', 'r5', at(5)));
+    expect(updatesOf(result, 'AB1').at(-1)).toBe(`${stamp(5)} — PR comment r5 linked as a duplicate`);
+    expect(updatesOf(changes(result, (state) => unlink(state, 'r5', at(6))), 'AB1').at(-1)).toBe(`${stamp(6)} — PR comment r5 unlinked (was a duplicate)`);
   });
 });
 
@@ -923,38 +923,38 @@ describe('comment links in the Updates', () => {
   const WHERE = ['pending', 'posted', undefined] as const;
 
   const connected = (links: CommentLink[] = []): ReviewState => ({ ...stateWith(links), pullRequest: PULL });
-  const last = (state: ReviewState, id = 'F1'): string | undefined => updatesOf(state, id).at(-1);
+  const last = (state: ReviewState, id = 'AB1'): string | undefined => updatesOf(state, id).at(-1);
 
   it('writes the link of the comment when it is linked as its own, whatever kind of comment it is', () => {
-    const result = changes(connected(), (state) => linkOwn(state, 'F1', 'r544861', at(5)));
+    const result = changes(connected(), (state) => linkOwn(state, 'AB1', 'r544861', at(5)));
     expect(last(result)).toBe(
       '2026-10-08 09:10 — PR comment [r544861](https://ghe.example.com/acme/widgets/pull/157#discussion_r544861) linked as its own',
     );
-    const conversation = changes(connected(), (state) => linkOwn(state, 'F1', 'c623843', at(5), 'same words'));
+    const conversation = changes(connected(), (state) => linkOwn(state, 'AB1', 'c623843', at(5), 'same words'));
     expect(last(conversation)).toBe(`${stamp(5)} — PR comment ${CONVERSATION} linked as its own — same words`);
   });
 
   it('writes the link of the comment when it is linked as a duplicate', () => {
-    const result = changes(connected(), (state) => linkDuplicate(state, 'F2', 'r544900', at(5)));
-    expect(last(result, 'F2')).toBe(`${stamp(5)} — PR comment ${OTHER_REVIEW} linked as a duplicate`);
-    const conversation = changes(result, (state) => linkDuplicate(state, 'F2', 'c623843', at(6), 'same crash'));
-    expect(last(conversation, 'F2')).toBe(`${stamp(6)} — PR comment ${CONVERSATION} linked as a duplicate — same crash`);
+    const result = changes(connected(), (state) => linkDuplicate(state, 'AB2', 'r544900', at(5)));
+    expect(last(result, 'AB2')).toBe(`${stamp(5)} — PR comment ${OTHER_REVIEW} linked as a duplicate`);
+    const conversation = changes(result, (state) => linkDuplicate(state, 'AB2', 'c623843', at(6), 'same crash'));
+    expect(last(conversation, 'AB2')).toBe(`${stamp(6)} — PR comment ${CONVERSATION} linked as a duplicate — same crash`);
   });
 
   it('writes the link of the comment when its link is removed, as its own or as a duplicate', () => {
-    const input = connected([own('r544861', 'F1'), duplicate('r544900', 'F1'), duplicate('c623843', 'F2'), note('r1')]);
+    const input = connected([own('r544861', 'AB1'), duplicate('r544900', 'AB1'), duplicate('c623843', 'AB2'), note('r1')]);
     expect(last(changes(input, (state) => unlink(state, 'r544861', at(5))))).toBe(`${stamp(5)} — PR comment ${REVIEW} unlinked (was its own)`);
     expect(last(changes(input, (state) => unlink(state, 'r544900', at(5), 'why')))).toBe(
       `${stamp(5)} — PR comment ${OTHER_REVIEW} unlinked (was a duplicate) — why`,
     );
-    expect(last(changes(input, (state) => unlink(state, 'c623843', at(5))), 'F2')).toBe(
+    expect(last(changes(input, (state) => unlink(state, 'c623843', at(5))), 'AB2')).toBe(
       `${stamp(5)} — PR comment ${CONVERSATION} unlinked (was a duplicate)`,
     );
   });
 
   it('writes the link of the comment that was posted, updated or adopted, with the pending review where it was posted to it', () => {
     const run = (action: PostedAction, where: (typeof WHERE)[number]): string | undefined =>
-      last(changes(connected(), (state) => recordPosted(state, 'F1', 'r544861', action, where, at(5))));
+      last(changes(connected(), (state) => recordPosted(state, 'AB1', 'r544861', action, where, at(5))));
     expect(run('created', 'pending')).toBe(`${stamp(5)} — posted PR comment ${REVIEW} to the pending review`);
     expect(run('created', 'posted')).toBe(`${stamp(5)} — posted PR comment ${REVIEW}`);
     expect(run('created', undefined)).toBe(`${stamp(5)} — posted PR comment ${REVIEW}`);
@@ -962,22 +962,22 @@ describe('comment links in the Updates', () => {
       expect(run('updated', where)).toBe(`${stamp(5)} — updated PR comment ${REVIEW}`);
       expect(run('unchanged', where)).toBe(`${stamp(5)} — adopted PR comment ${REVIEW} (identical)`);
     }
-    const conversation = changes(connected(), (state) => recordPosted(state, 'F1', 'c623843', 'created', 'posted', at(5)));
+    const conversation = changes(connected(), (state) => recordPosted(state, 'AB1', 'c623843', 'created', 'posted', at(5)));
     expect(last(conversation)).toBe(`${stamp(5)} — posted PR comment ${CONVERSATION}`);
   });
 
   it('writes the link of the own comment that is posted or updated again', () => {
-    const input = connected([own('r544861', 'F1')]);
-    expect(last(changes(input, (state) => recordPosted(state, 'F1', 'r544861', 'created', 'pending', at(5))))).toBe(
+    const input = connected([own('r544861', 'AB1')]);
+    expect(last(changes(input, (state) => recordPosted(state, 'AB1', 'r544861', 'created', 'pending', at(5))))).toBe(
       `${stamp(5)} — posted PR comment ${REVIEW} to the pending review`,
     );
-    expect(last(changes(input, (state) => recordPosted(state, 'F1', 'r544861', 'updated', 'posted', at(5))))).toBe(
+    expect(last(changes(input, (state) => recordPosted(state, 'AB1', 'r544861', 'updated', 'posted', at(5))))).toBe(
       `${stamp(5)} — updated PR comment ${REVIEW}`,
     );
   });
 
   it('writes the links of the duplicate and of the reply when a reply is recorded, with the pending review where it was posted to it', () => {
-    const input = connected([own('r544861', 'F1'), duplicate('r544900', 'F1'), duplicate('c623843', 'F2')]);
+    const input = connected([own('r544861', 'AB1'), duplicate('r544900', 'AB1'), duplicate('c623843', 'AB2')]);
     const reply = (ref: string, replyRef: string, where: (typeof WHERE)[number]) =>
       changes(input, (state) => recordReplied(state, ref, replyRef, where, at(5)));
     expect(last(reply('r544900', 'r546201', 'pending'))).toBe(
@@ -986,26 +986,26 @@ describe('comment links in the Updates', () => {
     );
     expect(last(reply('r544900', 'r546201', 'posted'))).toBe(`${stamp(5)} — replied to duplicate ${OTHER_REVIEW} with ${REPLY}`);
     expect(last(reply('r544900', 'r546201', undefined))).toBe(`${stamp(5)} — replied to duplicate ${OTHER_REVIEW} with ${REPLY}`);
-    expect(last(reply('c623843', 'c623900', 'posted'), 'F2')).toBe(`${stamp(5)} — replied to duplicate ${CONVERSATION} with ${CONVERSATION_REPLY}`);
+    expect(last(reply('c623843', 'c623900', 'posted'), 'AB2')).toBe(`${stamp(5)} — replied to duplicate ${CONVERSATION} with ${CONVERSATION_REPLY}`);
   });
 
   it('leaves a check annotation as the bare ref, which has no URL, even in a review connected to a pull request', () => {
-    const linked = changes(connected(), (state) => linkDuplicate(state, 'F1', ANNOTATION, at(5)));
+    const linked = changes(connected(), (state) => linkDuplicate(state, 'AB1', ANNOTATION, at(5)));
     expect(last(linked)).toBe(`${stamp(5)} — check annotation ${ANNOTATION} linked as a duplicate`);
     expect(last(changes(linked, (state) => unlink(state, ANNOTATION, at(6))))).toBe(`${stamp(6)} — check annotation ${ANNOTATION} unlinked (was a duplicate)`);
   });
 
   it('writes the bare ref when the review is not connected to a pull request', () => {
-    const input = stateWith([own('r544861', 'F1'), duplicate('r544900', 'F1')]);
+    const input = stateWith([own('r544861', 'AB1'), duplicate('r544900', 'AB1')]);
     expect(input.pullRequest).toBeUndefined();
-    expect(last(changes(stateWith(), (state) => linkOwn(state, 'F1', 'r544861', at(5))))).toBe(`${stamp(5)} — PR comment r544861 linked as its own`);
-    expect(last(changes(stateWith(), (state) => linkDuplicate(state, 'F1', 'c623843', at(5))))).toBe(`${stamp(5)} — PR comment c623843 linked as a duplicate`);
+    expect(last(changes(stateWith(), (state) => linkOwn(state, 'AB1', 'r544861', at(5))))).toBe(`${stamp(5)} — PR comment r544861 linked as its own`);
+    expect(last(changes(stateWith(), (state) => linkDuplicate(state, 'AB1', 'c623843', at(5))))).toBe(`${stamp(5)} — PR comment c623843 linked as a duplicate`);
     expect(last(changes(input, (state) => unlink(state, 'r544900', at(5))))).toBe(`${stamp(5)} — PR comment r544900 unlinked (was a duplicate)`);
-    expect(last(changes(stateWith(), (state) => recordPosted(state, 'F1', 'r544861', 'created', 'pending', at(5))))).toBe(
+    expect(last(changes(stateWith(), (state) => recordPosted(state, 'AB1', 'r544861', 'created', 'pending', at(5))))).toBe(
       `${stamp(5)} — posted PR comment r544861 to the pending review`,
     );
-    expect(last(changes(stateWith(), (state) => recordPosted(state, 'F1', 'r544861', 'updated', 'posted', at(5))))).toBe(`${stamp(5)} — updated PR comment r544861`);
-    expect(last(changes(stateWith(), (state) => recordPosted(state, 'F1', 'r544861', 'unchanged', 'posted', at(5))))).toBe(
+    expect(last(changes(stateWith(), (state) => recordPosted(state, 'AB1', 'r544861', 'updated', 'posted', at(5))))).toBe(`${stamp(5)} — updated PR comment r544861`);
+    expect(last(changes(stateWith(), (state) => recordPosted(state, 'AB1', 'r544861', 'unchanged', 'posted', at(5))))).toBe(
       `${stamp(5)} — adopted PR comment r544861 (identical)`,
     );
     expect(last(changes(input, (state) => recordReplied(state, 'r544900', 'r546201', 'pending', at(5))))).toBe(
@@ -1014,7 +1014,7 @@ describe('comment links in the Updates', () => {
   });
 
   describe('a reply recorded in the link form', () => {
-    const input = (): ReviewState => connected([own('r544861', 'F1'), duplicate('r544900', 'F1')]);
+    const input = (): ReviewState => connected([own('r544861', 'AB1'), duplicate('r544900', 'AB1')]);
     const reply = (ref: string, replyRef: string, where: (typeof WHERE)[number], minutes = 5) => (state: ReviewState) =>
       recordReplied(state, ref, replyRef, where, at(minutes));
 
@@ -1029,7 +1029,7 @@ describe('comment links in the Updates', () => {
     it('is found when the entry carries a remark on its structured record', () => {
       const base = input();
       const findings = base.data.findings.map((finding) =>
-        finding.id === 'F1'
+        finding.id === 'AB1'
           ? {
               ...finding,
               updates: [
@@ -1047,14 +1047,14 @@ describe('comment links in the Updates', () => {
       const recorded = changes(input(), reply('r544900', 'r546201', 'posted'));
       const again = changes(recorded, reply('r544900', 'c623900', 'posted', 6));
       expect(last(again)).toBe(`${stamp(6)} — replied to duplicate ${OTHER_REVIEW} with ${CONVERSATION_REPLY}`);
-      expect(updatesOf(again, 'F1')).toHaveLength(updatesOf(recorded, 'F1').length + 1);
+      expect(updatesOf(again, 'AB1')).toHaveLength(updatesOf(recorded, 'AB1').length + 1);
     });
 
     it('does not take a link to a longer ref for the link to the same ref', () => {
-      const both = connected([own('r1', 'F1'), duplicate('r2', 'F1'), duplicate('r20', 'F1')]);
+      const both = connected([own('r1', 'AB1'), duplicate('r2', 'AB1'), duplicate('r20', 'AB1')]);
       const first = changes(both, reply('r2', 'r5', 'posted'));
       const second = changes(first, reply('r20', 'r5', 'posted', 6));
-      expect(updatesOf(second, 'F1').slice(-2)).toStrictEqual([
+      expect(updatesOf(second, 'AB1').slice(-2)).toStrictEqual([
         `${stamp(5)} — replied to duplicate [r2](${PULL}#discussion_r2) with [r5](${PULL}#discussion_r5)`,
         `${stamp(6)} — replied to duplicate [r20](${PULL}#discussion_r20) with [r5](${PULL}#discussion_r5)`,
       ]);
@@ -1063,9 +1063,9 @@ describe('comment links in the Updates', () => {
     });
 
     it('does not take a link to a longer reply for the link to the same reply', () => {
-      const recorded = changes(connected([own('r1', 'F1'), duplicate('r2', 'F1')]), reply('r2', 'r20', 'posted'));
+      const recorded = changes(connected([own('r1', 'AB1'), duplicate('r2', 'AB1')]), reply('r2', 'r20', 'posted'));
       const shorter = changes(recorded, reply('r2', 'r2', 'posted', 6));
-      expect(updatesOf(shorter, 'F1').slice(-2)).toStrictEqual([
+      expect(updatesOf(shorter, 'AB1').slice(-2)).toStrictEqual([
         `${stamp(5)} — replied to duplicate [r2](${PULL}#discussion_r2) with [r20](${PULL}#discussion_r20)`,
         `${stamp(6)} — replied to duplicate [r2](${PULL}#discussion_r2) with [r2](${PULL}#discussion_r2)`,
       ]);
@@ -1080,26 +1080,26 @@ describe('pull request review bodies', () => {
   const LINKED_REVIEW = '[v91204](https://ghe.example.com/acme/widgets/pull/157#pullrequestreview-91204)';
 
   it('refuses a review body as own in linkOwn and recordPosted', () => {
-    refuses(stateWith(), (state) => linkOwn(state, 'F1', REVIEW_BODY, at(5)), REVIEW_NOT_OWN);
-    refuses(stateWith(), (state) => linkOwn(state, 'F9', REVIEW_BODY, at(5)), REVIEW_NOT_OWN);
-    refuses(without(stateWith(), REVIEW_BODY), (state) => linkOwn(state, 'F1', REVIEW_BODY, at(5)), REVIEW_NOT_OWN);
+    refuses(stateWith(), (state) => linkOwn(state, 'AB1', REVIEW_BODY, at(5)), REVIEW_NOT_OWN);
+    refuses(stateWith(), (state) => linkOwn(state, 'AB9', REVIEW_BODY, at(5)), REVIEW_NOT_OWN);
+    refuses(without(stateWith(), REVIEW_BODY), (state) => linkOwn(state, 'AB1', REVIEW_BODY, at(5)), REVIEW_NOT_OWN);
     for (const action of ['created', 'updated', 'unchanged'] as const) {
-      refuses(stateWith(), (state) => recordPosted(state, 'F1', REVIEW_BODY, action, 'posted', at(5)), REVIEW_NOT_OWN);
+      refuses(stateWith(), (state) => recordPosted(state, 'AB1', REVIEW_BODY, action, 'posted', at(5)), REVIEW_NOT_OWN);
     }
   });
 
   it('links and unlinks a review body as duplicate or note, formatting PR review links in Updates', () => {
     const connected = { ...stateWith(), pullRequest: PULL };
-    const dup = changes(connected, (state) => linkDuplicate(state, 'F1', REVIEW_BODY, at(5), 'review summary'));
-    expect(dup.links).toStrictEqual([duplicate(REVIEW_BODY, 'F1')]);
-    expect(updatesOf(dup, 'F1').at(-1)).toBe(`${stamp(5)} — PR review ${LINKED_REVIEW} linked as a duplicate — review summary`);
+    const dup = changes(connected, (state) => linkDuplicate(state, 'AB1', REVIEW_BODY, at(5), 'review summary'));
+    expect(dup.links).toStrictEqual([duplicate(REVIEW_BODY, 'AB1')]);
+    expect(updatesOf(dup, 'AB1').at(-1)).toBe(`${stamp(5)} — PR review ${LINKED_REVIEW} linked as a duplicate — review summary`);
 
     const unlinked = changes(dup, (state) => unlink(state, REVIEW_BODY, at(6)));
     expect(unlinked.links).toEqual([]);
-    expect(updatesOf(unlinked, 'F1').at(-1)).toBe(`${stamp(6)} — PR review ${LINKED_REVIEW} unlinked (was a duplicate)`);
+    expect(updatesOf(unlinked, 'AB1').at(-1)).toBe(`${stamp(6)} — PR review ${LINKED_REVIEW} unlinked (was a duplicate)`);
 
-    const bareDup = changes(stateWith(), (state) => linkDuplicate(state, 'F1', REVIEW_BODY, at(5)));
-    expect(updatesOf(bareDup, 'F1').at(-1)).toBe(`${stamp(5)} — PR review ${REVIEW_BODY} linked as a duplicate`);
+    const bareDup = changes(stateWith(), (state) => linkDuplicate(state, 'AB1', REVIEW_BODY, at(5)));
+    expect(updatesOf(bareDup, 'AB1').at(-1)).toBe(`${stamp(5)} — PR review ${REVIEW_BODY} linked as a duplicate`);
 
     const noted = changes(connected, (state) => linkNote(state, REVIEW_BODY, 'overall LGTM'));
     expect(noted.links).toStrictEqual([note(REVIEW_BODY, 'overall LGTM')]);
@@ -1116,27 +1116,27 @@ describe('seenDigest and re-confirming edited links', () => {
 
   it('records seenDigest on new comment and review-body links, and omits seenDigest on check annotations', () => {
     let state = withDigests({ r1: 'Own body', c2: 'Note body', v1: 'Review body' });
-    state = changes(state, (current) => linkOwn(current, 'F1', 'r1', at(1)));
+    state = changes(state, (current) => linkOwn(current, 'AB1', 'r1', at(1)));
     state = changes(state, (current) => linkNote(current, 'c2', 'ack'));
-    state = changes(state, (current) => linkDuplicate(current, 'F1', 'v1', at(2)));
-    state = changes(state, (current) => linkDuplicate(current, 'F1', ANNOTATION, at(3)));
+    state = changes(state, (current) => linkDuplicate(current, 'AB1', 'v1', at(2)));
+    state = changes(state, (current) => linkDuplicate(current, 'AB1', ANNOTATION, at(3)));
     expect(state.links).toStrictEqual([
-      { ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody('Own body') },
+      { ref: 'r1', role: 'own', finding: 'AB1', seenDigest: digestBody('Own body') },
       { ref: 'c2', role: 'note', note: 'ack', seenDigest: digestBody('Note body') },
-      { ref: 'v1', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Review body') },
-      { ref: ANNOTATION, role: 'duplicate', finding: 'F1' },
+      { ref: 'v1', role: 'duplicate', finding: 'AB1', seenDigest: digestBody('Review body') },
+      { ref: ANNOTATION, role: 'duplicate', finding: 'AB1' },
     ]);
   });
 
   it('allows re-running linkOwn, linkDuplicate and linkNote on edited items in place, while refusing unedited double-links or role/finding changes', () => {
     let state = withDigests({ r1: 'Own v1', r2: 'Dup v1', c3: 'Note v1' });
-    state = linkOwn(state, 'F1', 'r1', at(1));
-    state = linkDuplicate(state, 'F1', 'r2', at(2));
+    state = linkOwn(state, 'AB1', 'r1', at(1));
+    state = linkDuplicate(state, 'AB1', 'r2', at(2));
     state = linkNote(state, 'c3', 'just praise');
 
     // Unedited items with the same role/finding/note still fail with alreadyLinked.
-    refuses(state, (current) => linkOwn(current, 'F1', 'r1', at(3)), `r1 is already linked as the own comment of F1; remove that link first with "${REMOVE} r1"`);
-    refuses(state, (current) => linkDuplicate(current, 'F1', 'r2', at(3)), `r2 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2"`);
+    refuses(state, (current) => linkOwn(current, 'AB1', 'r1', at(3)), `r1 is already linked as the own comment of AB1; remove that link first with "${REMOVE} r1"`);
+    refuses(state, (current) => linkDuplicate(current, 'AB1', 'r2', at(3)), `r2 is already linked as a duplicate of AB1; remove that link first with "${REMOVE} r2"`);
     refuses(state, (current) => linkNote(current, 'c3', 'just praise'), `c3 is already linked as a note (just praise); remove that link first with "${REMOVE} c3"`);
 
     // Updating the note text on an unedited note link is allowed in place.
@@ -1154,20 +1154,20 @@ describe('seenDigest and re-confirming edited links', () => {
     };
 
     // Changing role or finding on an edited link still requires unlink first.
-    refuses(edited, (current) => linkDuplicate(current, 'F2', 'r2', at(4)), `r2 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2"`);
-    refuses(edited, (current) => linkDuplicate(current, 'F1', 'c3', at(4)), `c3 is already linked as a note (just praise); remove that link first with "${REMOVE} c3"`);
+    refuses(edited, (current) => linkDuplicate(current, 'AB2', 'r2', at(4)), `r2 is already linked as a duplicate of AB1; remove that link first with "${REMOVE} r2"`);
+    refuses(edited, (current) => linkDuplicate(current, 'AB1', 'c3', at(4)), `c3 is already linked as a note (just praise); remove that link first with "${REMOVE} c3"`);
 
     // Re-confirming without --note refreshes seenDigest in place without duplicating the linked update.
-    const f1UpdatesBefore = updatesOf(edited, 'F1');
-    const refreshedOwn = changes(edited, (current) => linkOwn(current, 'F1', 'r1', at(5)));
+    const f1UpdatesBefore = updatesOf(edited, 'AB1');
+    const refreshedOwn = changes(edited, (current) => linkOwn(current, 'AB1', 'r1', at(5)));
     expect(refreshedOwn.links.map(({ ref }) => ref)).toEqual(['r1', 'r2', 'c3']);
-    expect(refreshedOwn.links[0]).toStrictEqual({ ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody('Own v2') });
-    expect(updatesOf(refreshedOwn, 'F1')).toStrictEqual(f1UpdatesBefore);
+    expect(refreshedOwn.links[0]).toStrictEqual({ ref: 'r1', role: 'own', finding: 'AB1', seenDigest: digestBody('Own v2') });
+    expect(updatesOf(refreshedOwn, 'AB1')).toStrictEqual(f1UpdatesBefore);
 
     // Re-confirming with --note records a note update on the finding without duplicating the linked update.
-    const refreshedDup = changes(refreshedOwn, (current) => linkDuplicate(current, 'F1', 'r2', at(6), 'still same issue after edit'));
-    expect(refreshedDup.links[1]).toStrictEqual({ ref: 'r2', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Dup v2') });
-    expect(updatesOf(refreshedDup, 'F1')).toStrictEqual([...f1UpdatesBefore, `${stamp(6)} — still same issue after edit`]);
+    const refreshedDup = changes(refreshedOwn, (current) => linkDuplicate(current, 'AB1', 'r2', at(6), 'still same issue after edit'));
+    expect(refreshedDup.links[1]).toStrictEqual({ ref: 'r2', role: 'duplicate', finding: 'AB1', seenDigest: digestBody('Dup v2') });
+    expect(updatesOf(refreshedDup, 'AB1')).toStrictEqual([...f1UpdatesBefore, `${stamp(6)} — still same issue after edit`]);
 
     // Re-confirming an edited note refreshes seenDigest (even when keeping the same reason).
     const refreshedNote = changes(refreshedDup, (current) => linkNote(current, 'c3', 'just praise'));
@@ -1176,14 +1176,14 @@ describe('seenDigest and re-confirming edited links', () => {
 
   it('allows re-confirming an already-linked review body edited to empty text (gone from known, present in currentDigests)', () => {
     const initial = withDigests({ v91204: 'Please fix retry cap.' });
-    const linked = linkDuplicate(initial, 'F1', 'v91204', at(1));
+    const linked = linkDuplicate(initial, 'AB1', 'v91204', at(1));
     const cleared: ReviewState = {
       ...without(linked, 'v91204'),
       currentDigests: new Map([['v91204', digestBody('')]]),
     };
-    const confirmed = changes(cleared, (current) => linkDuplicate(current, 'F1', 'v91204', at(2), 'review text cleared'));
-    expect(confirmed.links).toStrictEqual([{ ref: 'v91204', role: 'duplicate', finding: 'F1', seenDigest: digestBody('') }]);
-    expect(updatesOf(confirmed, 'F1').at(-1)).toBe(`${stamp(2)} — review text cleared`);
+    const confirmed = changes(cleared, (current) => linkDuplicate(current, 'AB1', 'v91204', at(2), 'review text cleared'));
+    expect(confirmed.links).toStrictEqual([{ ref: 'v91204', role: 'duplicate', finding: 'AB1', seenDigest: digestBody('') }]);
+    expect(updatesOf(confirmed, 'AB1').at(-1)).toBe(`${stamp(2)} — review text cleared`);
   });
 
   it('preserves seenDigest and refuses re-confirmation when currentDigest is undefined on unsynced comments', () => {
@@ -1191,21 +1191,21 @@ describe('seenDigest and re-confirming edited links', () => {
       ...withDigests({ r2: 'Duplicate body' }),
       known: new Set(['r2', 'r2001', 'r2002', 'r2003', 'r2004']),
     };
-    state = recordPosted(state, 'F1', 'r2001', 'created', 'pending', at(1), 'Posted own');
-    state = linkDuplicate(state, 'F1', 'r2', at(2));
+    state = recordPosted(state, 'AB1', 'r2001', 'created', 'pending', at(1), 'Posted own');
+    state = linkDuplicate(state, 'AB1', 'r2', at(2));
     state = recordReplied(state, 'r2', 'r2002', 'pending', at(3), 'Duplicate of r2001.');
     state = {
       ...state,
       links: [
         ...state.links,
-        { ref: 'r2003', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Unsynced dup') },
+        { ref: 'r2003', role: 'duplicate', finding: 'AB1', seenDigest: digestBody('Unsynced dup') },
         { ref: 'r2004', role: 'note', note: 'unsynced note', seenDigest: digestBody('Unsynced note') },
       ],
     };
 
     // Unchanged or unsynced links have not been edited locally: re-running refuses instead of wiping seenDigest.
-    refuses(state, (current) => linkOwn(current, 'F1', 'r2001', at(4)), `r2001 is already linked as the own comment of F1; remove that link first with "${REMOVE} r2001"`);
-    refuses(state, (current) => linkDuplicate(current, 'F1', 'r2003', at(4)), `r2003 is already linked as a duplicate of F1; remove that link first with "${REMOVE} r2003"`);
+    refuses(state, (current) => linkOwn(current, 'AB1', 'r2001', at(4)), `r2001 is already linked as the own comment of AB1; remove that link first with "${REMOVE} r2001"`);
+    refuses(state, (current) => linkDuplicate(current, 'AB1', 'r2003', at(4)), `r2003 is already linked as a duplicate of AB1; remove that link first with "${REMOVE} r2003"`);
     refuses(state, (current) => linkNote(current, 'r2002', 'duplicate reply to r2'), `r2002 is already linked as a note (duplicate reply to r2); remove that link first with "${REMOVE} r2002"`);
     refuses(state, (current) => linkNote(current, 'r2004', 'unsynced note'), `r2004 is already linked as a note (unsynced note); remove that link first with "${REMOVE} r2004"`);
 
@@ -1222,13 +1222,13 @@ describe('seenDigest and re-confirming edited links', () => {
   it('preserves seenDigest when an unsynced comment from recordPosted or recordReplied is unlinked and relinked before pr sync', () => {
     const initial = withDigests({ r2: 'Duplicate body' });
     const posted = changes(initial, (current) =>
-      recordPosted(current, 'F1', 'c3', 'created', 'posted', at(1), 'Initial posted body'),
+      recordPosted(current, 'AB1', 'c3', 'created', 'posted', at(1), 'Initial posted body'),
     );
     const unlinked = changes(posted, (current) => unlink(current, 'c3', at(2)));
 
     for (const relinked of [
-      changes(unlinked, (current) => linkOwn(current, 'F1', 'c3', at(3))),
-      changes(unlinked, (current) => linkDuplicate(current, 'F2', 'c3', at(3))),
+      changes(unlinked, (current) => linkOwn(current, 'AB1', 'c3', at(3))),
+      changes(unlinked, (current) => linkDuplicate(current, 'AB2', 'c3', at(3))),
       changes(unlinked, (current) => linkNote(current, 'c3', 'reclassified before sync')),
     ]) {
       expect(relinked.links.find(({ ref }) => ref === 'c3')?.seenDigest).toBe(digestBody('Initial posted body'));
@@ -1243,10 +1243,10 @@ describe('seenDigest and re-confirming edited links', () => {
     }
 
     let state = withDigests({ r2: 'Duplicate body' });
-    state = linkDuplicate(state, 'F1', 'r2', at(1));
+    state = linkDuplicate(state, 'AB1', 'r2', at(1));
     state = recordReplied(state, 'r2', 'r11', 'pending', at(2), 'Duplicate of r1.');
     state = unlink(state, 'r11', at(3));
-    state = linkDuplicate(state, 'F2', 'r11', at(4));
+    state = linkDuplicate(state, 'AB2', 'r11', at(4));
     expect(state.links.find(({ ref }) => ref === 'r11')?.seenDigest).toBe(digestBody('Duplicate of r1.'));
 
     const editedReplySync = snapshotOf(['r2', 'r11'], { owner: 'acme', repo: 'widgets', url: PR });
@@ -1260,12 +1260,12 @@ describe('seenDigest and re-confirming edited links', () => {
     const legacyUnsynced: ReviewState = {
       ...withDigests({ r1: 'Edited on GitHub v2' }),
       links: [
-        { ref: 'r1', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Original v1') },
-        { ref: 'c4', role: 'own', finding: 'F1', seenDigest: digestBody('Legacy unsynced body') },
+        { ref: 'r1', role: 'duplicate', finding: 'AB1', seenDigest: digestBody('Original v1') },
+        { ref: 'c4', role: 'own', finding: 'AB1', seenDigest: digestBody('Legacy unsynced body') },
       ],
     };
     const afterUnlink = unlink(unlink(legacyUnsynced, 'c4', at(5)), 'r1', at(6));
-    const relinkedLegacy = linkOwn(linkDuplicate(afterUnlink, 'F2', 'r1', at(7)), 'F1', 'c4', at(8));
+    const relinkedLegacy = linkOwn(linkDuplicate(afterUnlink, 'AB2', 'r1', at(7)), 'AB1', 'c4', at(8));
     expect(relinkedLegacy.links.find(({ ref }) => ref === 'c4')?.seenDigest).toBe(digestBody('Legacy unsynced body'));
     expect(relinkedLegacy.links.find(({ ref }) => ref === 'r1')?.seenDigest).toBe(digestBody('Edited on GitHub v2'));
   });
@@ -1274,26 +1274,26 @@ describe('seenDigest and re-confirming edited links', () => {
     const unsynced = (ref: string) =>
       `${ref} is not in the synced pull request yet; run "pr-comments pr sync --db <file.sqlite>" first`;
     let state = withDigests({ r2: 'Duplicate body' });
-    state = linkDuplicate(state, 'F1', 'r2', at(1));
+    state = linkDuplicate(state, 'AB1', 'r2', at(1));
 
-    refuses(state, (current) => linkOwn(current, 'F1', 'c3', at(2)), unsynced('c3'));
-    refuses(state, (current) => linkDuplicate(current, 'F1', 'c3', at(2)), unsynced('c3'));
+    refuses(state, (current) => linkOwn(current, 'AB1', 'c3', at(2)), unsynced('c3'));
+    refuses(state, (current) => linkDuplicate(current, 'AB1', 'c3', at(2)), unsynced('c3'));
     refuses(state, (current) => linkNote(current, 'c3', 'why'), unsynced('c3'));
-    refuses(state, (current) => recordPosted(current, 'F1', 'c3', 'created', 'posted', at(2)), unsynced('c3'));
+    refuses(state, (current) => recordPosted(current, 'AB1', 'c3', 'created', 'posted', at(2)), unsynced('c3'));
     refuses(state, (current) => recordReplied(current, 'r2', 'r11', 'pending', at(2)), unsynced('r11'));
   });
 
   it('sets seenDigest in recordPosted and recordReplied without overwriting an existing manual reply link', () => {
     let state = withDigests({ r1: 'Old body', r2: 'Duplicate body', r10: 'Manual reply' });
-    state = changes(state, (current) => recordPosted(current, 'F1', 'r1', 'created', 'pending', at(1), 'Posted v1'));
-    expect(state.links).toStrictEqual([{ ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody('Posted v1') }]);
+    state = changes(state, (current) => recordPosted(current, 'AB1', 'r1', 'created', 'pending', at(1), 'Posted v1'));
+    expect(state.links).toStrictEqual([{ ref: 'r1', role: 'own', finding: 'AB1', seenDigest: digestBody('Posted v1') }]);
 
-    state = changes(state, (current) => recordPosted(current, 'F1', 'r1', 'updated', 'pending', at(2), 'Posted v2'));
-    expect(state.links).toStrictEqual([{ ref: 'r1', role: 'own', finding: 'F1', seenDigest: digestBody('Posted v2') }]);
-    stays(state, (current) => recordPosted(current, 'F1', 'r1', 'unchanged', 'pending', at(3), 'Posted v2'));
+    state = changes(state, (current) => recordPosted(current, 'AB1', 'r1', 'updated', 'pending', at(2), 'Posted v2'));
+    expect(state.links).toStrictEqual([{ ref: 'r1', role: 'own', finding: 'AB1', seenDigest: digestBody('Posted v2') }]);
+    stays(state, (current) => recordPosted(current, 'AB1', 'r1', 'unchanged', 'pending', at(3), 'Posted v2'));
 
     // Auto-created reply link gets seenDigest from replyBody.
-    state = linkDuplicate(state, 'F1', 'r2', at(4));
+    state = linkDuplicate(state, 'AB1', 'r2', at(4));
     const autoReplied = changes(state, (current) => recordReplied(current, 'r2', 'r11', 'pending', at(5), 'Duplicate of r1.'));
     expect(autoReplied.links.at(-1)).toStrictEqual({
       ref: 'r11',
@@ -1328,7 +1328,7 @@ describe('random walks over the link operations', () => {
 
   function step(state: ReviewState, random: Random, minute: number): { operation: number; run: (input: ReviewState) => ReviewState } {
     const now = at(minute);
-    const finding = random() < 0.1 ? 'F9' : pick(random, state.data.findings).id;
+    const finding = random() < 0.1 ? 'AB9' : pick(random, state.data.findings).id;
     const id = random() < 0.3 ? finding.toLowerCase() : finding;
     const linked = state.links.length === 0 || random() < 0.25 ? undefined : pick(random, state.links).ref;
     const ref = linked ?? pick(random, REFS);

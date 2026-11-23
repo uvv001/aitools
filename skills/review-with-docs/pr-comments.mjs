@@ -5,7 +5,7 @@ import { access, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/prom
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep, toNamespacedPath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual, parseArgs, promisify } from "node:util";
-import { createHash } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
@@ -601,7 +601,7 @@ const postOptions = [
 ];
 const DB_OPTION = reqOpt("db", "<file.sqlite>", "the review database");
 const REVISIONS = "A revision is anything git names a commit by (HEAD, a branch, a tag, an abbreviation); the review stores the short hash (at least 8 characters) of the commit.";
-const FINDING = arg("<finding>", "the finding, such as F7 (any case)");
+const FINDING = arg("<finding>", "the finding, such as AB7 (any case)");
 const COMMENT_ONLY_REF = arg("<ref>", "the comment: r544830 or c623843");
 const COMMENT_OR_REVIEW_REF = arg("<ref>", "the comment or review body: r544830, c623843 or v91204");
 const COMMENT_REF = arg("<ref>", "the comment, review body or check annotation: r544830, c623843, v91204 or a3f9c2d1e");
@@ -699,7 +699,7 @@ const COMMAND_SPECS = [
 	spec("finding show", "shows one finding with its updates", "Prints the finding, the comments linked to it (such as \"Linked: own r544861, duplicate r544900\"), the description and its Updates.", {
 		args: [FINDING],
 		database: "readonly",
-		example: "F7"
+		example: "AB7"
 	}),
 	spec("finding set-state", "moves a finding to another state", `Moves the finding to another state (any state except the one it is already in). ${LOGGED}\nThe state fixed needs the revision that fixes it.\n${REVISIONS}`, {
 		args: [FINDING, arg("<state>", "awaiting, unverified, approved, fixed, discarded, deferred or improvement")],
@@ -708,17 +708,17 @@ const COMMAND_SPECS = [
 			noteOption(),
 			roundOption
 		],
-		example: "F7 fixed --revision HEAD"
+		example: "AB7 fixed --revision HEAD"
 	}),
 	spec("finding set-severity", "changes the severity of a finding", `Changes the severity of the finding. ${LOGGED}`, {
 		args: [FINDING, arg("<severity>", "high, medium or low")],
 		options: [noteOption(), roundOption],
-		example: "F7 medium"
+		example: "AB7 medium"
 	}),
 	spec("finding set-title", "changes the title of a finding", `Changes the title of the finding. ${LOGGED}`, {
 		args: [FINDING, arg("<title>", "the new title, one line")],
 		options: [noteOption(), roundOption],
-		example: "F7 \"Missing retry timeout\""
+		example: "AB7 \"Missing retry timeout\""
 	}),
 	spec("finding set-description", "replaces the description of a finding", `Replaces the description of the finding with the new text (the description always holds the latest version). ${LOGGED}`, {
 		args: [FINDING],
@@ -727,12 +727,12 @@ const COMMAND_SPECS = [
 			noteOption(),
 			roundOption
 		],
-		example: "F7 --description-file -"
+		example: "AB7 --description-file -"
 	}),
 	spec("finding update", "adds an update to a finding", "Adds a free-form entry to the Updates of the finding: a question, a verdict, a note.", {
 		args: [FINDING, arg("<text>", "the update")],
 		options: [roundOption],
-		example: "F7 \"Asked the author\" --round 1"
+		example: "AB7 \"Asked the author\" --round 1"
 	}),
 	spec("finding post", "publishes the comment of a finding", "Publishes the comment of one finding, in any state, to the connected pull request (to your pending review unless --now) and\nlinks it to the finding as its own comment. Run again, it updates that comment. Without --dry-run the returned comment ref\nand link are recorded in the database; run \"pr-comments pr sync --db <file.sqlite>\" to refresh the full pull request snapshot. Needs a token with write permission.", {
 		args: [FINDING],
@@ -742,23 +742,23 @@ const COMMAND_SPECS = [
 			...postOptions
 		],
 		notes: [
-			"The comment is `<severity> **<id> — <title>**` and the description (e.g. `🔴 **F7 — Missing timeout**`). Only the description goes to GitHub, never the Updates; relative links pointing into the review are replaced by their text.",
+			"The comment is `<severity> **<id> — <title>**` and the description (e.g. `🔴 **AB7 — Missing timeout**`). Only the description goes to GitHub, never the Updates; relative links pointing into the review are replaced by their text.",
 			"The place is the first `` `path:lines` `` anchor of the description (`--anchor <n>` picks another; a whole-file finding uses `path:1` when line 1 is in the diff).",
 			"`--now` publishes at once (not possible while you have a pending review); `--commit <sha>` pins the comment when no pending review exists yet.",
 			"The exit code is 1 when the result is an error."
 		],
-		example: "F7 --dry-run"
+		example: "AB7 --dry-run"
 	}),
 	spec("link pending", "lists unlinked or edited comments, review bodies and check annotations", "Prints one line per comment (thread roots and replies), nonempty submitted review body or check annotation of the synced\npull request that no link names yet, plus any already-linked comment or review body whose text was edited since it was\nlinked (marked \"edited\"): ref, author or app, place, state or level, and an excerpt. Re-run the matching link command to\nconfirm an edited item (or \"link remove <ref>\" first if its classification changed). Nothing is printed when everything\nis processed. It exits with 0 whenever it ran: pending work is not a failure. Before the first \"pr sync\" it exits with 1.", { database: "readonly" }),
 	spec("link own", "links a comment as the own comment of a finding", "Links an existing comment of the pull request as the own comment of the finding (a finding has one), as if it had posted it.\nRe-run it on an edited own comment to update the seen version (with --note to log a reconciliation note on the finding), or\nrun \"link remove <ref>\" first to change its role or finding.", {
 		args: [FINDING, COMMENT_ONLY_REF],
 		options: [noteOption()],
-		example: "F7 r544861"
+		example: "AB7 r544861"
 	}),
 	spec("link duplicate", "links a comment, review body or check annotation about the same issue", "Links a comment, a nonempty submitted review body or a check annotation as a duplicate of the finding (a finding may have\nseveral). Re-run it on an edited comment or review body to update the seen version (with --note to log a reconciliation note\non the finding), or run \"link remove <ref>\" first to change its role or finding.", {
 		args: [FINDING, COMMENT_REF],
 		options: [noteOption()],
-		example: "F7 c623843"
+		example: "AB7 c623843"
 	}),
 	spec("link note", "records that a comment or review body is not a finding, and why", "Records that the comment or submitted review body is no finding, with the reason. A check annotation cannot be a note.\nRe-run it to update the reason or confirm an edited comment or review body, or run \"link remove <ref>\" first to link it to a finding.", {
 		args: [COMMENT_OR_REVIEW_REF, arg("<text>", "the reason, one line")],
@@ -2014,12 +2014,18 @@ function latestRound$1(data) {
 	const rounds = data.intro.reviewed.items.map(({ round }) => round);
 	return rounds.length === 0 ? void 0 : Math.max(...rounds);
 }
-function newReview(target) {
+function randomFindingPrefix() {
+	const letter = () => String.fromCharCode("A".charCodeAt(0) + randomInt(26));
+	return `${letter()}${letter()}`;
+}
+function newReview(target, findingPrefix = randomFindingPrefix()) {
 	const name = trimmed("target", target);
 	if (name === "") throw new Error("target is empty — name what is under review");
 	if (LINE_SEPARATORS.test(name)) throw new Error("target must be one line, it contains a line break");
+	if (!/^[A-Z]{2}$/u.test(findingPrefix)) throw new Error(`finding prefix "${findingPrefix}" must be two uppercase ASCII letters`);
 	return {
 		target: name,
+		findingPrefix,
 		intro: { reviewed: { items: [] } },
 		findings: []
 	};
@@ -2063,8 +2069,14 @@ function updateEntry(data, now, input, event) {
 	};
 }
 function nextId(data) {
-	const numbers = data.findings.map(({ id }) => Number(/^F(\d+)$/u.exec(id)?.[1] ?? 0));
-	return `F${Math.max(0, ...numbers) + 1}`;
+	const pattern = new RegExp(`^${data.findingPrefix}(\\d+)$`, "u");
+	const maximum = data.findings.reduce((largest, { id }) => {
+		const suffix = pattern.exec(id)?.[1];
+		if (suffix === void 0) return largest;
+		const number = BigInt(suffix);
+		return number > largest ? number : largest;
+	}, 0n);
+	return `${data.findingPrefix}${maximum + 1n}`;
 }
 function addFinding(data, input, now) {
 	const round = latestRound$1(data);
@@ -2804,7 +2816,8 @@ function updateStoredCommentBody(db, ref, body) {
 const SCHEMA = `
 CREATE TABLE review (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  target TEXT NOT NULL
+  target TEXT NOT NULL,
+  finding_prefix TEXT NOT NULL CHECK (length(finding_prefix) = 2 AND finding_prefix GLOB '[A-Z][A-Z]')
 ) STRICT;
 
 CREATE TABLE intro_items (
@@ -2817,7 +2830,11 @@ CREATE TABLE intro_items (
 
 CREATE TABLE findings (
   position INTEGER PRIMARY KEY CHECK (position >= 0),
-  id TEXT NOT NULL UNIQUE CHECK (id GLOB 'F[0-9]*' AND substr(id, 2) NOT GLOB '*[^0-9]*'),
+  id TEXT NOT NULL UNIQUE CHECK (
+    length(id) >= 3
+    AND id GLOB '[A-Z][A-Z][1-9]*'
+    AND substr(id, 3) NOT GLOB '*[^0-9]*'
+  ),
   state TEXT NOT NULL,
   severity TEXT NOT NULL,
   title TEXT NOT NULL,
@@ -2909,13 +2926,13 @@ function hasReviewTables(db) {
 }
 function configure(db, path, mode) {
 	const version = userVersion(db, path);
-	if (version > 8) throw new Error(`${path} was written by a newer pr-comments (schema ${version}); update the tool`);
+	if (version > 9) throw new Error(`${path} was written by a newer pr-comments (schema ${version}); update the tool`);
 	if (mode !== "create") {
 		if (version === 0 || !hasReviewTables(db)) throw new Error(`${path} is not a review database`);
-		if (version < 8) throw new Error(`${path} was written by an older pr-comments (schema ${version}); start again with "pr-comments init"`);
+		if (version < 9) throw new Error(`${path} was written by an older pr-comments (schema ${version}); start again with "pr-comments init"`);
 	}
 	if (mode !== "readonly") {
-		if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}${PULL_REQUEST_SCHEMA}PRAGMA user_version = 8`));
+		if (version === 0) inTransaction(db, () => db.exec(`${SCHEMA}${PULL_REQUEST_SCHEMA}PRAGMA user_version = 9`));
 		db.exec("PRAGMA journal_mode = DELETE");
 	}
 	db.exec("PRAGMA foreign_keys = ON");
@@ -2984,8 +3001,9 @@ function inTransaction(db, work, options = {}) {
 }
 function saveReview(db, data) {
 	inTransaction(db, () => {
+		for (const { id } of data.findings) if (!id.startsWith(data.findingPrefix)) throw new Error(`finding id "${id}" does not start with finding prefix "${data.findingPrefix}"`);
 		db.exec("DELETE FROM findings; DELETE FROM intro_items; DELETE FROM review");
-		db.prepare("INSERT INTO review (id, target) VALUES (1, ?)").run(data.target);
+		db.prepare("INSERT INTO review (id, target, finding_prefix) VALUES (1, ?, ?)").run(data.target, data.findingPrefix);
 		insertIntro(db, data.intro.reviewed);
 		data.findings.forEach((finding, position) => insertFinding(db, finding, position));
 	});
@@ -3095,10 +3113,11 @@ function loadFindings(db) {
 }
 function loadReview(db) {
 	return inTransaction(db, () => {
-		const row = db.prepare("SELECT target FROM review").get();
+		const row = db.prepare("SELECT target, finding_prefix FROM review").get();
 		if (!row) throw new Error("the database holds no review yet");
 		return {
 			target: row.target,
+			findingPrefix: row.finding_prefix,
 			intro: loadIntro(db),
 			findings: loadFindings(db)
 		};
@@ -4095,7 +4114,7 @@ async function replyToDuplicate(dbPath, ref, options, deps) {
 //#region src/version.ts
 const VERSION = "0.1.0";
 function versionText() {
-	return `pr-comments ${VERSION}+1f3e747`;
+	return `pr-comments ${VERSION}+bd7df99`;
 }
 //#endregion
 //#region src/cli.ts

@@ -230,7 +230,7 @@ describe('store', () => {
       const db = openNew();
       saveReview(db, sampleReview());
       savePullRequest(db, samplePullRequest());
-      saveLinks(db, [{ ref: 'r1001', role: 'duplicate', finding: 'F1' }]);
+      saveLinks(db, [{ ref: 'r1001', role: 'duplicate', finding: 'AB1' }]);
 
       savePullRequest(db, odd());
 
@@ -369,7 +369,7 @@ describe('store check runs', () => {
 describe('linkable', () => {
   const review = () => sampleReview();
 
-  // The review has the findings F1, F2, F3 and F10; the links are saved the way a change of the review does.
+  // The review has the findings AB1, AB2, AB3 and AB10; the links are saved the way a change of the review does.
   function openLinked(...links: { ref: string; finding: string }[]): DatabaseSync {
     const db = openNew();
     saveReview(db, review());
@@ -453,7 +453,7 @@ describe('linkable', () => {
     expect(linkable(db)).toEqual([{ ref: 'v91204', kind: 'review', gone: 0 }]);
     expect([...loadKnownRefs(db)]).toEqual(['v91204']);
 
-    saveLinks(db, [{ ref: 'v91204', role: 'duplicate', finding: 'F1' }]);
+    saveLinks(db, [{ ref: 'v91204', role: 'duplicate', finding: 'AB1' }]);
     const clearedBody: PullRequestData = {
       ...reviewsOnly,
       reviews: reviewsOnly.reviews.map((r) => (r.id === 'rev-1' ? { ...r, body: '' } : r)),
@@ -482,7 +482,7 @@ describe('linkable', () => {
   });
 
   it('leaves the rows as they are when the same pull request is saved again', () => {
-    const db = openLinked({ ref: 'r1001', finding: 'F1' });
+    const db = openLinked({ ref: 'r1001', finding: 'AB1' });
     const before = linkable(db);
     savePullRequest(db, withChecks([sonarRun()]));
     expect(linkable(db)).toEqual(before);
@@ -490,13 +490,13 @@ describe('linkable', () => {
   });
 
   it('deletes a row that is not in the data any more when no link points at it', () => {
-    const db = openLinked({ ref: 'r1001', finding: 'F1' });
+    const db = openLinked({ ref: 'r1001', finding: 'AB1' });
     savePullRequest(db, { ...without('rc-2', 'ic-1'), checkRuns: [sonarRun()] });
     expect(linkable(db).map((row) => row.ref)).toEqual(['a1b2c3d4e', 'a3f9c2d1e', 'a5e6f7081', 'r1001', 'r1003', 'r1004', 'v1']);
   });
 
   it('keeps a row that is not in the data any more as gone when a link points at it, and not the others', () => {
-    const db = openLinked({ ref: 'r1001', finding: 'F1' }, { ref: 'a1b2c3d4e', finding: 'F2' });
+    const db = openLinked({ ref: 'r1001', finding: 'AB1' }, { ref: 'a1b2c3d4e', finding: 'AB2' });
     const data = without('rc-1', 'rc-2');
     data.checkRuns = [{ ...sonarRun(), annotations: sonarRun().annotations.filter((a) => a.ref === 'a5e6f7081') }];
     savePullRequest(db, data);
@@ -515,7 +515,7 @@ describe('linkable', () => {
   });
 
   it('sets a gone row back to present when the comment or annotation is in the data again', () => {
-    const db = openLinked({ ref: 'r1001', finding: 'F1' }, { ref: 'a1b2c3d4e', finding: 'F2' });
+    const db = openLinked({ ref: 'r1001', finding: 'AB1' }, { ref: 'a1b2c3d4e', finding: 'AB2' });
     savePullRequest(db, { ...without('rc-1'), checkRuns: [] });
     expect(linkable(db).filter((row) => row.gone === 1).map((row) => row.ref)).toEqual(['a1b2c3d4e', 'r1001']);
 
@@ -527,7 +527,7 @@ describe('linkable', () => {
   });
 
   it('keeps a gone row through any number of saves while its link stands, and drops it once the link is removed', () => {
-    const db = openLinked({ ref: 'r1001', finding: 'F1' });
+    const db = openLinked({ ref: 'r1001', finding: 'AB1' });
     savePullRequest(db, without('rc-1'));
     savePullRequest(db, without('rc-1'));
     expect(linkable(db).find((row) => row.ref === 'r1001')).toEqual({ ref: 'r1001', kind: 'review_comment', gone: 1 });
@@ -538,17 +538,17 @@ describe('linkable', () => {
   });
 
   it('lets the links be saved again while a row they point at is gone', () => {
-    const db = openLinked({ ref: 'r1001', finding: 'F1' });
+    const db = openLinked({ ref: 'r1001', finding: 'AB1' });
     savePullRequest(db, without('rc-1'));
     saveLinks(db, [
-      { ref: 'r1001', role: 'own', finding: 'F1' },
+      { ref: 'r1001', role: 'own', finding: 'AB1' },
       { ref: 'c2001', role: 'note', note: 'why' },
     ]);
     expect(loadLinks(db).map((link) => link.ref)).toEqual(['r1001', 'c2001']);
   });
 
   it('is brought up to date with the links of the same transaction', () => {
-    const db = openLinked({ ref: 'r1001', finding: 'F1' });
+    const db = openLinked({ ref: 'r1001', finding: 'AB1' });
     inTransaction(db, () => {
       saveLinks(db, []);
       savePullRequest(db, without('rc-1'));
@@ -557,7 +557,7 @@ describe('linkable', () => {
   });
 
   it('is reconciled by the save that fails: nothing of it stays', () => {
-    const db = openLinked({ ref: 'r1001', finding: 'F1' });
+    const db = openLinked({ ref: 'r1001', finding: 'AB1' });
     const before = linkable(db);
     const broken = without('rc-1');
     broken.comments.push({ ...broken.comments[0]! });
@@ -571,7 +571,7 @@ describe('clearPullRequest', () => {
     const db = openNew();
     saveReview(db, sampleReview());
     savePullRequest(db, withChecks([sonarRun()]));
-    saveLinks(db, [{ ref: 'r1002', role: 'duplicate', finding: 'F1' }]);
+    saveLinks(db, [{ ref: 'r1002', role: 'duplicate', finding: 'AB1' }]);
 
     clearPullRequest(db);
 
@@ -604,7 +604,7 @@ describe('recordKnownCommentRef', () => {
       { ref: 'r9001', kind: 'review_comment', gone: 0 },
     ]);
 
-    saveLinks(db, [{ ref: 'r9001', role: 'own', finding: 'F1' }]);
+    saveLinks(db, [{ ref: 'r9001', role: 'own', finding: 'AB1' }]);
     savePullRequest(db, samplePullRequest());
     expect(linkable(db).find((row) => row.ref === 'r9001')).toEqual({ ref: 'r9001', kind: 'review_comment', gone: 1 });
     expect(linkable(db).find((row) => row.ref === 'c9002')).toBeUndefined();
@@ -683,7 +683,7 @@ describe('loadCurrentDigests and updateStoredCommentBody', () => {
     expect(loadCurrentDigests(db).get('c9001')).toBe(digestBody('Revised posted body.'));
 
     // r9002 is linked while c9001 is unlinked; simulate a sync where c9001 arrives (edited) and r9002 is delayed on GitHub.
-    saveLinks(db, [{ ref: 'r9002', role: 'own', finding: 'F1', seenDigest: digestBody('Pending inline body.') }]);
+    saveLinks(db, [{ ref: 'r9002', role: 'own', finding: 'AB1', seenDigest: digestBody('Pending inline body.') }]);
     const synced = samplePullRequest();
     synced.comments.push({
       ...synced.comments[0]!,
@@ -725,17 +725,17 @@ describe('loadCurrentDigests and updateStoredCommentBody', () => {
     prData.comments.push({ ...prData.comments[0]!, id: 'ic-noref', url: `${prData.pullRequest.url}/files` });
     savePullRequest(db, prData);
 
-    // Simulate a pre-F39 schema-v8 database: c9010 is in linkable (gone = 0) and comment_links has seen_digest,
+    // Simulate a pre-AB39 schema-v8 database: c9010 is in linkable (gone = 0) and comment_links has seen_digest,
     // while meta has no posted_digest:c9010 yet; r1001 is already synced in pr_comments.
     recordKnownCommentRef(db, 'c9010');
     saveLinks(db, [
-      { ref: 'c9010', role: 'own', finding: 'F1', seenDigest: digestBody('Legacy posted body.') },
-      { ref: 'r1001', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Should this be configurable?') },
+      { ref: 'c9010', role: 'own', finding: 'AB1', seenDigest: digestBody('Legacy posted body.') },
+      { ref: 'r1001', role: 'duplicate', finding: 'AB1', seenDigest: digestBody('Should this be configurable?') },
     ]);
     expect(getMeta(db, 'posted_digest:c9010')).toBeUndefined();
 
     // Unlinking r1001 alone keeps c9010 linked and does not write posted_digest:r1001 (since r1001 is in pr_comments).
-    saveLinks(db, [{ ref: 'c9010', role: 'own', finding: 'F1', seenDigest: digestBody('Legacy posted body.') }]);
+    saveLinks(db, [{ ref: 'c9010', role: 'own', finding: 'AB1', seenDigest: digestBody('Legacy posted body.') }]);
     expect(getMeta(db, 'posted_digest:r1001')).toBeUndefined();
     expect(getMeta(db, 'posted_digest:c9010')).toBeUndefined();
 

@@ -35,7 +35,7 @@ The architecture separates pure domain logic from I/O:
 - Only `init` creates a database. When `--db` is omitted, `init` places `<yyyy-mm-dd>_<slug>_review.sqlite` and its companion `.md` report in `.ai/review-with-docs/` at the git root. Whenever the target path is inside `.ai/review-with-docs/` (including subdirectories), `init` checks git ignore rules with `git check-ignore`, adds `/.ai/review-with-docs/` to `.git/info/exclude` if needed (so `.ai/` itself can remain tracked), and aborts if a `.gitignore` rule still exposes the directory.
 - `init` refuses existing database or report paths (including symbolic links), opens the database file exclusively (`wx`), and writes the initial state in one transaction. If initialization fails, `init` removes the file.
 - Connections use `journal_mode = DELETE` and `foreign_keys = ON`. No `-wal` or `-shm` files are created; a `-journal` file exists only during an active write.
-- `PRAGMA user_version` stores the schema version (currently `8`). The tool does not migrate across schema versions; it rejects databases from older or newer schema versions and rejects SQLite files that lack the review tables.
+- `PRAGMA user_version` stores the schema version (currently `9`). The tool does not migrate across schema versions. It rejects databases from older or newer schema versions and SQLite files that lack the review tables.
 
 ### 2.2 Logical data model
 
@@ -45,9 +45,9 @@ The architecture separates pure domain logic from I/O:
 
 | Table | Purpose |
 | --- | --- |
-| `review` | Single-row header (`id = 1`) holding the review title (`target`) |
+| `review` | Single-row header (`id = 1`) holding the review title (`target`) and finding prefix (`finding_prefix`) |
 | `intro_items` | Ordered review rounds (`round`, `revision`, nullable `base`, and a JSON array of `notes`) |
-| `findings` | Ordered findings (`id` as `F<n>`, `state`, `severity`, `title`, `description`) |
+| `findings` | Ordered findings (`id` as `<PREFIX><n>`, `state`, `severity`, `title`, `description`) |
 | `updates` | Ordered, structured finding history (`kind`, timestamp `at`, optional `round`, state/severity/title transitions, `revision`, comment `ref`/`reply_ref`, `role`, `action`, `pending`, `pull_request`, `note`) |
 | `meta` | Key-value metadata (such as the canonical `pull_request` URL) |
 
@@ -125,11 +125,13 @@ When `finding post` or `link reply` creates a comment on GitHub, the new comment
 
 | Prefix | Entity | Source |
 | --- | --- | --- |
-| `F7` | Finding | Next unused integer in the review (never reused; matched case-insensitively) |
+| `AB7` | Finding | Review prefix plus the next unused integer (never reused; matched case-insensitively) |
 | `r544830` | Review comment (inline or file, root or reply) | GitHub database ID from `#discussion_r544830` |
 | `c623843` | Conversation (issue) comment | GitHub database ID from `#issuecomment-623843` |
 | `v91204` | Nonempty submitted pull request review body | GitHub database ID from `#pullrequestreview-91204` |
 | `a3f9c2d1e` | Check annotation | Deterministic hash (see below) |
+
+`init` generates a random prefix of two uppercase ASCII letters for each review. The review stores this prefix. Findings use this prefix and a suffix of one or more digits. The allocator reads the stored findings and chooses one more than the highest numeric suffix for this prefix. Finding lookup accepts any letter case.
 
 `r…` and `c…` IDs are stable when a pending review is submitted, and `v…` IDs identify submitted reviews with non-empty bodies. Because the GitHub web UI cannot search comments or reviews by numeric ID, rendered reports format `r…`, `c…`, and `v…` IDs as direct links (Section 8).
 

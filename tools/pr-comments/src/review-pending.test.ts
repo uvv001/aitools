@@ -228,16 +228,16 @@ describe('pendingItems: comments', () => {
   });
 
   it('still lists unlinked replies when the thread root is already linked, and becomes empty once all replies are linked too', () => {
-    expect(pending(RETRY_COMMENTS, threads, [duplicate('r101', 'F1')]).map(({ ref, reply }) => [ref, reply])).toEqual([
+    expect(pending(RETRY_COMMENTS, threads, [duplicate('r101', 'AB1')]).map(({ ref, reply }) => [ref, reply])).toEqual([
       ['r102', true],
       ['r103', true],
     ]);
-    expect(pending(RETRY_COMMENTS, threads, [own('r101', 'F1'), note('r102', 'ack')]).map(({ ref }) => ref)).toEqual(['r103']);
+    expect(pending(RETRY_COMMENTS, threads, [own('r101', 'AB1'), note('r102', 'ack')]).map(({ ref }) => ref)).toEqual(['r103']);
     expect(pending(RETRY_COMMENTS, threads, [note('r101', 'praise'), note('r102', 'ack'), note('r103', 'fix note')])).toEqual([]);
   });
 
   it('lists the root of a thread whose reply is linked, counting the linked reply on the root while omitting the linked reply item', () => {
-    const items = pending(RETRY_COMMENTS, threads, [own('r102', 'F1'), note('r103', 'ack')]);
+    const items = pending(RETRY_COMMENTS, threads, [own('r102', 'AB1'), note('r103', 'ack')]);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ ref: 'r101', replies: 2 });
   });
@@ -252,12 +252,12 @@ describe('pendingItems: comments', () => {
   });
 
   it('is not changed by a link to a comment that is not in the data', () => {
-    expect(pending(RETRY_COMMENTS, threads, [own('r999', 'F1'), duplicate('c999', 'F9')])).toHaveLength(3);
+    expect(pending(RETRY_COMMENTS, threads, [own('r999', 'AB1'), duplicate('c999', 'AB9')])).toHaveLength(3);
   });
 
   it('lists a conversation comment that is not linked, without a place', () => {
     const comments = [conversation(300, 'carol', 'Thanks!', '2026-10-09T09:00:00Z'), conversation(301, 'dave', 'LGTM')];
-    expect(pending(comments, [], [own('c301', 'F1')])).toStrictEqual([
+    expect(pending(comments, [], [own('c301', 'AB1')])).toStrictEqual([
       { ref: 'c300', author: 'carol', kind: 'issue', replies: 0, createdAt: '2026-10-09T09:00:00Z', excerpt: 'Thanks!' },
     ]);
   });
@@ -429,7 +429,7 @@ describe('pendingItems: pull request review bodies', () => {
       pullReview(16, 'heidi', 'CHANGES_REQUESTED', 'Already linked.', '2026-10-09T15:00:00Z'),
       pullReview(17, 'ivan', 'CHANGES_REQUESTED', 'No numeric id.', '2026-10-09T16:00:00Z', { url: PR_URL }),
     ];
-    expect(pending([], [], [duplicate('v16', 'F1')], undefined, reviews)).toStrictEqual([
+    expect(pending([], [], [duplicate('v16', 'AB1')], undefined, reviews)).toStrictEqual([
       {
         ref: 'v10',
         author: 'carol',
@@ -543,7 +543,7 @@ describe('pendingItems: check annotations', () => {
 
   it('is no longer listed once it is linked, with any role', () => {
     const run = checkRun([annotation('a000000a'), annotation('a000000b'), annotation('a000000c'), annotation('a000000d', { startLine: 1, endLine: 1 })]);
-    const links = [duplicate('a000000a', 'F1'), own('a000000b', 'F1'), note('a000000c', 'why')];
+    const links = [duplicate('a000000a', 'AB1'), own('a000000b', 'AB1'), note('a000000c', 'why')];
     expect(pending([], [], links, [run]).map(({ ref }) => ref)).toEqual(['a000000d']);
   });
 
@@ -610,14 +610,14 @@ describe('pendingLines', () => {
     pullReview(91204, 'carol', 'CHANGES_REQUESTED', 'Please cap the retries in Retry.cs.', '2026-10-09T09:00:00Z'),
   ];
   const links = [
-    own('r544830', 'F4'),
+    own('r544830', 'AB4'),
     note('r544831', 'ack'),
-    own('r544861', 'F7'),
-    duplicate('r544900', 'F7'),
+    own('r544861', 'AB7'),
+    duplicate('r544900', 'AB7'),
     note('r545002', 'praise'),
     note('r545004', 'ack'),
     note('r545005', 'ack'),
-    duplicate('a0000000', 'F4'),
+    duplicate('a0000000', 'AB4'),
   ];
 
   it('prints one line per item: comments (roots, replies) and review bodies, then the annotations in a table of their own', () => {
@@ -637,7 +637,7 @@ describe('pendingLines', () => {
 
   it('is an empty array when there is nothing', () => {
     expect(pendingLines([])).toEqual([]);
-    expect(pendingLines(pending([conversation(1, 'carol', 'Thanks!')], [], [own('c1', 'F1')]))).toEqual([]);
+    expect(pendingLines(pending([conversation(1, 'carol', 'Thanks!')], [], [own('c1', 'AB1')]))).toEqual([]);
   });
 
   it('says 1 reply, 0 replies for roots, reply for non-roots, and adds outdated to the thread state', () => {
@@ -650,7 +650,7 @@ describe('pendingLines', () => {
         reviewComment(4, 'dave', 'Late reply', 't-b', 1, '2026-10-09T11:00:00Z'),
       ],
     );
-    expect(pendingLines(pendingItems({ links: [duplicate('r2', 'F1'), own('r3', 'F2')], data }))).toEqual([
+    expect(pendingLines(pendingItems({ links: [duplicate('r2', 'AB1'), own('r3', 'AB2')], data }))).toEqual([
       `  r1  bob   ${PATH}:9   thread open, outdated, 1 reply — "Root"`,
       `  r4  dave  ${PATH}:22  reply, thread resolved, outdated — "Late reply"`,
     ]);
@@ -703,9 +703,9 @@ describe('pendingItems and pendingLines: edited linked items', () => {
     ];
     const links: CommentLink[] = [
       { ref: 'c1', role: 'note', note: 'ack', seenDigest: digestBody('Thanks!') },
-      { ref: 'r2', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Original root concern') },
+      { ref: 'r2', role: 'duplicate', finding: 'AB1', seenDigest: digestBody('Original root concern') },
       { ref: 'r3', role: 'note', note: 'ack', seenDigest: digestBody('Original reply') },
-      { ref: 'v10', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Original review summary.') },
+      { ref: 'v10', role: 'duplicate', finding: 'AB1', seenDigest: digestBody('Original review summary.') },
       { ref: 'v11', role: 'note', note: 'summary', seenDigest: digestBody('Original review before clearing.') },
     ];
     const items = pending(comments, [t], links, undefined, reviews);
@@ -739,7 +739,7 @@ describe('pendingItems and pendingLines: edited linked items', () => {
     ];
     const links: CommentLink[] = [
       { ref: 'c1', role: 'note', note: 'ack', seenDigest: digestBody('Same text\nsecond line') },
-      { ref: 'v10', role: 'duplicate', finding: 'F1', seenDigest: digestBody('Same summary') },
+      { ref: 'v10', role: 'duplicate', finding: 'AB1', seenDigest: digestBody('Same summary') },
     ];
     expect(pending(comments, [], links, undefined, reviews)).toEqual([]);
 

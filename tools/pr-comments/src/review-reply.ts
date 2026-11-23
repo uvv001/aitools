@@ -20,7 +20,7 @@ export interface ReplyDuplicateDeps {
 }
 
 export interface RepliedDuplicate {
-  // The finding the answered comment duplicates ("F7") and its own comment (the one the reply points to).
+  // The finding the answered comment duplicates ("AB7") and its own comment (the one the reply points to).
   finding: string;
   own: string;
   // The link in the reply, and the whole text of it (the disclaimer included).

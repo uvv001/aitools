@@ -21,6 +21,12 @@ import { renderReport } from './review-render.ts';
 import { removeScratch, scratchDir } from './review-test-support.ts';
 import { VERSION } from './version.ts';
 
+const cryptoCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return { ...actual, randomInt: () => cryptoCalls.count++ % 2 };
+});
+
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
@@ -97,7 +103,7 @@ const command = (words: string) => COMMANDS.find((candidate) => candidate.words 
 const mistake = (words: string, problem: string) =>
   new Error(`${problem}\nUsage: ${synopsis(command(words))}\nRun "pr-comments ${words} --help" for details.`);
 
-const F1_DESCRIPTION = [
+const AB1_DESCRIPTION = [
   'Crash when the list is empty; see [the helper](src/util.ts).',
   '',
   '`src/app.ts:10-12`',
@@ -150,7 +156,7 @@ describe('cli', () => {
   }
 
   // A review with the sample pull request connected and synced (with check annotations), one round and three findings:
-  // F1 and F2 approved (F1 has two anchors, F2 none), F3 awaiting triage. Built once, copied for every test.
+  // AB1 and AB2 approved (AB1 has two anchors, AB2 none), AB3 awaiting triage. Built once, copied for every test.
   let templateDir: string;
   let template: string;
 
@@ -167,11 +173,11 @@ describe('cli', () => {
     await run(['init', 'Demo', '--db', template, '--pr', prUrl], setup);
     await go('pr', 'sync');
     await go('round', 'open', '--no-base');
-    await add('high', 'Missing timeout', F1_DESCRIPTION);
+    await add('high', 'Missing timeout', AB1_DESCRIPTION);
     await add('medium', 'Remark', 'A remark that belongs to no line.');
     await add('low', 'Waiting', 'Not yet.');
-    await go('finding', 'set-state', 'F1', 'approved');
-    await go('finding', 'set-state', 'F2', 'approved');
+    await go('finding', 'set-state', 'AB1', 'approved');
+    await go('finding', 'set-state', 'AB2', 'approved');
     downloads = [];
     revisions = [];
   }, 60_000);
@@ -238,16 +244,16 @@ describe('cli', () => {
       'round update': ['round', 'update', 'no findings'],
       'finding add': ['finding', 'add', '--severity', 'low', '--title', 'Four', '--description-file', '-'],
       'finding list': ['finding', 'list'],
-      'finding show': ['finding', 'show', 'F1'],
-      'finding set-state': ['finding', 'set-state', 'F3', 'approved'],
-      'finding set-severity': ['finding', 'set-severity', 'F3', 'high'],
-      'finding set-title': ['finding', 'set-title', 'F3', 'Other'],
-      'finding set-description': ['finding', 'set-description', 'F3', '--description-file', '-'],
-      'finding update': ['finding', 'update', 'F3', 'a note'],
-      'finding post': ['finding', 'post', 'F1', '--dry-run'],
+      'finding show': ['finding', 'show', 'AB1'],
+      'finding set-state': ['finding', 'set-state', 'AB3', 'approved'],
+      'finding set-severity': ['finding', 'set-severity', 'AB3', 'high'],
+      'finding set-title': ['finding', 'set-title', 'AB3', 'Other'],
+      'finding set-description': ['finding', 'set-description', 'AB3', '--description-file', '-'],
+      'finding update': ['finding', 'update', 'AB3', 'a note'],
+      'finding post': ['finding', 'post', 'AB1', '--dry-run'],
       'link pending': ['link', 'pending'],
-      'link own': ['link', 'own', 'F3', 'r1001'],
-      'link duplicate': ['link', 'duplicate', 'F3', 'r1002'],
+      'link own': ['link', 'own', 'AB3', 'r1001'],
+      'link duplicate': ['link', 'duplicate', 'AB3', 'r1002'],
       'link note': ['link', 'note', 'r1004', 'a bot'],
       'link remove': ['link', 'remove', 'r1001'],
       'link reply': ['link', 'reply', 'r1002', '--dry-run'],
@@ -455,7 +461,7 @@ describe('cli', () => {
         ['finding', 'list', '--bogus', '--help'],
         ['finding', 'list', '--unposted=yes', '-h'],
         ['finding', 'show', '--help'],
-        ['finding', 'show', 'F1', 'F2', '--help'],
+        ['finding', 'show', 'AB1', 'AB2', '--help'],
         ['init', '--db', 'report.md', '--help'],
         ['round', 'open', '--base', 'x', '--no-base', '--help'],
         ['link', 'pending', '--db', join(work, 'missing.sqlite'), '--help'],
@@ -576,14 +582,14 @@ describe('cli', () => {
       ['an unknown short option on a command with a non-text argument', ['finding', 'show', '-x'], 'finding show', 'unknown option -x'],
       ['an unknown option of a command that creates', ['init', 'Demo', '--bogus'], 'init', 'unknown option --bogus'],
       ['an unknown option given a value', ['finding', 'list', '--bogus=1'], 'finding list', 'unknown option --bogus'],
-      ['a text that starts with a dash and has several words', ['finding', 'update', 'F1', '-5 is wrong'], 'finding update', 'unknown option -5 is wrong'],
-      ['a text that starts with -h and has words', ['finding', 'update', 'F1', '-h is wrong'], 'finding update', 'unknown option -h is wrong'],
-      ['a text that starts with two dashes', ['finding', 'update', 'F1', '--force'], 'finding update', 'unknown option --force'],
+      ['a text that starts with a dash and has several words', ['finding', 'update', 'AB1', '-5 is wrong'], 'finding update', 'unknown option -5 is wrong'],
+      ['a text that starts with -h and has words', ['finding', 'update', 'AB1', '-h is wrong'], 'finding update', 'unknown option -h is wrong'],
+      ['a text that starts with two dashes', ['finding', 'update', 'AB1', '--force'], 'finding update', 'unknown option --force'],
       ['--note on a list', ['finding', 'list', '--note', 'x'], 'finding list', '--note does not apply to finding list'],
-      ['--state on show', ['finding', 'show', 'F1', '--state', 'approved'], 'finding show', '--state does not apply to finding show'],
-      ['--unposted on a change', ['finding', 'set-state', 'F1', 'approved', '--unposted'], 'finding set-state', '--unposted does not apply to finding set-state'],
-      ['--revision on update', ['finding', 'update', 'F1', 'x', '--revision', 'HEAD'], 'finding update', '--revision does not apply to finding update'],
-      ['--dry-run on a link', ['link', 'own', 'F1', 'r1001', '--dry-run'], 'link own', '--dry-run does not apply to link own'],
+      ['--state on show', ['finding', 'show', 'AB1', '--state', 'approved'], 'finding show', '--state does not apply to finding show'],
+      ['--unposted on a change', ['finding', 'set-state', 'AB1', 'approved', '--unposted'], 'finding set-state', '--unposted does not apply to finding set-state'],
+      ['--revision on update', ['finding', 'update', 'AB1', 'x', '--revision', 'HEAD'], 'finding update', '--revision does not apply to finding update'],
+      ['--dry-run on a link', ['link', 'own', 'AB1', 'r1001', '--dry-run'], 'link own', '--dry-run does not apply to link own'],
       ['--ref on report render', ['report', 'render', '--ref', 'r1001'], 'report render', '--ref does not apply to report render'],
       ['--out on pending', ['link', 'pending', '--out', 'x.md'], 'link pending', '--out does not apply to link pending'],
       ['--force, which no command has any more', ['report', 'render', '--force'], 'report render', 'unknown option --force'],
@@ -596,19 +602,19 @@ describe('cli', () => {
       ['a missing --severity', ['finding', 'add', '--title', 'T', '--description-file', '-'], 'finding add', '--severity is required'],
       ['a missing --title', ['finding', 'add', '--severity', 'low', '--description-file', '-'], 'finding add', '--title is required'],
       ['a missing --description-file', ['finding', 'add', '--severity', 'low', '--title', 'T'], 'finding add', '--description-file is required'],
-      ['a missing --description-file on set-description', ['finding', 'set-description', 'F1'], 'finding set-description', '--description-file is required'],
+      ['a missing --description-file on set-description', ['finding', 'set-description', 'AB1'], 'finding set-description', '--description-file is required'],
       ['neither --base nor --no-base', ['round', 'open'], 'round open', '--base <rev> or --no-base is required'],
       ['both --base and --no-base', ['round', 'open', '--base', 'x', '--no-base'], 'round open', '--base and --no-base exclude each other'],
       ['a missing name', ['init'], 'init', 'missing <name>'],
       ['a missing url', ['pr', 'connect'], 'pr connect', 'missing <url>'],
       ['a missing finding', ['finding', 'show'], 'finding show', 'missing <finding>'],
-      ['a missing state', ['finding', 'set-state', 'F1'], 'finding set-state', 'missing <state>'],
-      ['a missing severity', ['finding', 'set-severity', 'F1'], 'finding set-severity', 'missing <severity>'],
-      ['a missing title', ['finding', 'set-title', 'F1'], 'finding set-title', 'missing <title>'],
+      ['a missing state', ['finding', 'set-state', 'AB1'], 'finding set-state', 'missing <state>'],
+      ['a missing severity', ['finding', 'set-severity', 'AB1'], 'finding set-severity', 'missing <severity>'],
+      ['a missing title', ['finding', 'set-title', 'AB1'], 'finding set-title', 'missing <title>'],
       ['a missing finding of set-description', ['finding', 'set-description', '--description-file', '-'], 'finding set-description', 'missing <finding>'],
-      ['a missing update text', ['finding', 'update', 'F1'], 'finding update', 'missing <text>'],
+      ['a missing update text', ['finding', 'update', 'AB1'], 'finding update', 'missing <text>'],
       ['a missing finding to post', ['finding', 'post'], 'finding post', 'missing <finding>'],
-      ['a missing ref', ['link', 'own', 'F1'], 'link own', 'missing <ref>'],
+      ['a missing ref', ['link', 'own', 'AB1'], 'link own', 'missing <ref>'],
       ['a missing note text', ['link', 'note', 'r1004'], 'link note', 'missing <text>'],
       ['a missing ref to remove', ['link', 'remove'], 'link remove', 'missing <ref>'],
       ['a missing ref to reply to', ['link', 'reply'], 'link reply', 'missing <ref>'],
@@ -616,13 +622,13 @@ describe('cli', () => {
       ['an extra argument to pr show', ['pr', 'show', 'x'], 'pr show', 'unexpected argument "x"'],
       ['an extra argument to pr sync', ['pr', 'sync', prUrl], 'pr sync', `unexpected argument "${prUrl}"`],
       ['an extra argument to round open', ['round', 'open', '--no-base', 'x'], 'round open', 'unexpected argument "x"'],
-      ['an extra argument to finding list', ['finding', 'list', 'F1'], 'finding list', 'unexpected argument "F1"'],
-      ['an extra argument to finding show', ['finding', 'show', 'F1', 'F2'], 'finding show', 'unexpected argument "F2"'],
+      ['an extra argument to finding list', ['finding', 'list', 'AB1'], 'finding list', 'unexpected argument "AB1"'],
+      ['an extra argument to finding show', ['finding', 'show', 'AB1', 'AB2'], 'finding show', 'unexpected argument "AB2"'],
       ['an extra argument to link pending', ['link', 'pending', 'r1001'], 'link pending', 'unexpected argument "r1001"'],
       ['an extra argument to link remove', ['link', 'remove', 'r1001', 'r1002'], 'link remove', 'unexpected argument "r1002"'],
       ['an extra argument to report render', ['report', 'render', 'x.md'], 'report render', 'unexpected argument "x.md"'],
       ['an option without its value', ['finding', 'list', '--state'], 'finding list', '--state needs a value'],
-      ['a round without its value', ['finding', 'update', 'F1', 'x', '--round'], 'finding update', '--round needs a value'],
+      ['a round without its value', ['finding', 'update', 'AB1', 'x', '--round'], 'finding update', '--round needs a value'],
       [
         'a value that starts with a dash',
         ['pr', 'sync', '--db', '--now'],
@@ -659,12 +665,12 @@ describe('cli', () => {
     });
 
     it('takes a text that starts with a dash after --, and a value that starts with a dash after =', async () => {
-      await step('finding', 'update', 'F3', '--', '-5 is wrong');
-      expect(printed).toBe('F3: note added\n');
-      expect((await findingOf('F3'))?.updates.at(-1)).toMatchObject({ kind: 'note', note: '-5 is wrong' });
+      await step('finding', 'update', 'AB3', '--', '-5 is wrong');
+      expect(printed).toBe('AB3: note added\n');
+      expect((await findingOf('AB3'))?.updates.at(-1)).toMatchObject({ kind: 'note', note: '-5 is wrong' });
 
-      await step('finding', 'set-severity', 'F3', 'high', '--note=-ish');
-      expect((await findingOf('F3'))?.updates.at(-1)).toMatchObject({ kind: 'severity', note: '-ish' });
+      await step('finding', 'set-severity', 'AB3', 'high', '--note=-ish');
+      expect((await findingOf('AB3'))?.updates.at(-1)).toMatchObject({ kind: 'severity', note: '-ish' });
     });
 
     it('allows --ref to be repeated, and nothing else', async () => {
@@ -715,9 +721,9 @@ describe('cli', () => {
 
     it('takes the options before, between and after the words of the command', async () => {
       await step('--db', review, 'finding', 'list', '--severity', 'low');
-      expect(printed).toBe('F3  ⏳ ⚪  Waiting\n1 of 3 findings\n');
+      expect(printed).toBe('AB3  ⏳ ⚪  Waiting\n1 of 3 findings\n');
       await step('finding', '--unposted', 'list', '--db', review, '--state', 'awaiting');
-      expect(printed).toBe('F3  ⏳ ⚪  Waiting\n1 of 3 findings\n');
+      expect(printed).toBe('AB3  ⏳ ⚪  Waiting\n1 of 3 findings\n');
     });
 
     it('answers an unknown command with its name and the way to the commands', async () => {
@@ -737,7 +743,7 @@ describe('cli', () => {
     it.each([
       [['sync', prUrl], 'sync', undefined],
       [['render', prUrl], 'render', undefined],
-      [['post', prUrl, 'F1.md'], 'post', undefined],
+      [['post', prUrl, 'AB1.md'], 'post', undefined],
       [['threads'], 'threads', undefined],
       [['verify'], 'verify', undefined],
       [['status', 'close', '--revision', 'HEAD'], 'status', undefined],
@@ -745,8 +751,8 @@ describe('cli', () => {
       [['report', 'check'], 'report check', 'report'],
       [['report', 'verify'], 'report verify', 'report'],
       [['report', 'list'], 'report list', 'report'],
-      [['report', 'show', 'F1'], 'report show', 'report'],
-      [['report', 'post', 'F1'], 'report post', 'report'],
+      [['report', 'show', 'AB1'], 'report show', 'report'],
+      [['report', 'post', 'AB1'], 'report post', 'report'],
       [['report', 'reply', 'r1001'], 'report reply', 'report'],
       [['report', 'link', 'own'], 'report link', 'report'],
       [['report', 'threads'], 'report threads', 'report'],
@@ -755,8 +761,8 @@ describe('cli', () => {
       [['report', 'import', 'a.md'], 'report import', 'report'],
       [['report', 'dump'], 'report dump', 'report'],
       [['import', 'a.md'], 'import', undefined],
-      [['finding', 'retitle', 'F1', 'x'], 'finding retitle', 'finding'],
-      [['finding', 'note', 'F1', 'x'], 'finding note', 'finding'],
+      [['finding', 'retitle', 'AB1', 'x'], 'finding retitle', 'finding'],
+      [['finding', 'note', 'AB1', 'x'], 'finding note', 'finding'],
       [['commit', 'record', 'abc1234'], 'commit', undefined],
       [['rule', 'add', 'a rule'], 'rule', undefined],
       [['commit', 'add', 'HEAD', '--note', 'the Round 1 report'], 'commit', undefined],
@@ -910,14 +916,14 @@ describe('cli', () => {
         [['pr', 'sync'], 'Synced acme/widgets#157: 2 reviews, 2 threads, 5 comments, 4 annotations\n'],
         [['round', 'open', '--revision', 'HEAD', '--base', 'origin/main'], 'Round 2 opened\n'],
         [['round', 'update', 'no findings'], 'Round 2 updated\n'],
-        [['finding', 'add', '--severity', 'low', '--title', 'Four', '--description-file', '-'], 'Added F4\n'],
-        [['finding', 'set-state', 'F3', 'approved'], 'F3: ⏳ → ✅\n'],
-        [['finding', 'set-severity', 'F3', 'high'], 'F3: ⚪ → 🔴\n'],
-        [['finding', 'set-title', 'F3', 'Other'], 'F3: retitled\n'],
-        [['finding', 'set-description', 'F3', '--description-file', '-'], 'F3: description replaced\n'],
-        [['finding', 'update', 'F3', 'a note'], 'F3: note added\n'],
-        [['link', 'own', 'F3', 'r1001'], 'F3: own comment r1001 linked\n'],
-        [['link', 'duplicate', 'F3', 'r1002'], 'F3: duplicate r1002 linked\n'],
+        [['finding', 'add', '--severity', 'low', '--title', 'Four', '--description-file', '-'], 'Added AB4\n'],
+        [['finding', 'set-state', 'AB3', 'approved'], 'AB3: ⏳ → ✅\n'],
+        [['finding', 'set-severity', 'AB3', 'high'], 'AB3: ⚪ → 🔴\n'],
+        [['finding', 'set-title', 'AB3', 'Other'], 'AB3: retitled\n'],
+        [['finding', 'set-description', 'AB3', '--description-file', '-'], 'AB3: description replaced\n'],
+        [['finding', 'update', 'AB3', 'a note'], 'AB3: note added\n'],
+        [['link', 'own', 'AB3', 'r1001'], 'AB3: own comment r1001 linked\n'],
+        [['link', 'duplicate', 'AB3', 'r1002'], 'AB3: duplicate r1002 linked\n'],
         [['link', 'note', 'r1004', 'a bot'], 'r1004: noted\n'],
         [['link', 'remove', 'r1004'], 'r1004 unlinked\n'],
       ];
@@ -951,13 +957,13 @@ describe('cli', () => {
           expect(warned, words).toBe('');
         }
         for (const argv of [
-          ['finding', 'update', 'F3', ' '],
-          ['finding', 'set-state', 'F9', 'approved'],
-          ['finding', 'set-state', 'F3', 'nonsense'],
+          ['finding', 'update', 'AB3', ' '],
+          ['finding', 'set-state', 'AB9', 'approved'],
+          ['finding', 'set-state', 'AB3', 'nonsense'],
           ['round', 'open', '--revision', 'nope', '--no-base'],
           ['pr', 'connect', 'nonsense'],
           ['link', 'remove', 'r1001'],
-          ['link', 'own', 'F1', 'r999'],
+          ['link', 'own', 'AB1', 'r999'],
           ['pr', 'sync', 'extra'],
         ]) {
           await expect(step(...argv, '--db', review), argv.join(' ')).rejects.toThrow();
@@ -967,24 +973,24 @@ describe('cli', () => {
       });
 
       it('shows the path as given when it was typed relative, relative to the working directory when it is below it, and absolute otherwise', async () => {
-        await step('finding', 'update', '--db', review, 'F3', 'one');
+        await step('finding', 'update', '--db', review, 'AB3', 'one');
         expect(warned).toBe(`Review database: ${join('docs', 'demo_review.sqlite')}\n`);
 
         const typed = relative(process.cwd(), review);
-        await step('finding', 'update', '--db', typed, 'F3', 'two');
+        await step('finding', 'update', '--db', typed, 'AB3', 'two');
         expect(warned).toBe(`Review database: ${typed}\n`);
 
         env.cwd = () => join(docs, 'deeper');
-        await step('finding', 'update', '--db', review, 'F3', 'three');
+        await step('finding', 'update', '--db', review, 'AB3', 'three');
         expect(warned).toBe(`Review database: ${review}\n`);
       });
 
       it.each([
-        ['finding update', ['finding', 'update', 'F3', 'saved'], async () => undefined],
-        ['link duplicate', ['link', 'duplicate', 'F1', 'r1002'], async () => undefined],
+        ['finding update', ['finding', 'update', 'AB3', 'saved'], async () => undefined],
+        ['link duplicate', ['link', 'duplicate', 'AB1', 'r1002'], async () => undefined],
         [
           'finding post',
-          ['finding', 'post', 'F1'],
+          ['finding', 'post', 'AB1'],
           async () => {
             env.publish = async () => ({
               action: 'created',
@@ -1001,8 +1007,8 @@ describe('cli', () => {
           'link reply',
           ['link', 'reply', 'r1002'],
           async () => {
-            await step('link', 'own', '--db', review, 'F1', 'r1001');
-            await step('link', 'duplicate', '--db', review, 'F1', 'r1002');
+            await step('link', 'own', '--db', review, 'AB1', 'r1001');
+            await step('link', 'duplicate', '--db', review, 'AB1', 'r1002');
             env.reply = async () => ({
               action: 'created',
               dryRun: false,
@@ -1309,22 +1315,22 @@ describe('cli', () => {
     it('takes the description from a file or from standard input, without BOM, CRLF and surrounding blank lines', async () => {
       const file = await textFile('d.md', '\uFEFF\r\n\r\n  indented first line\r\nsecond\r\n\r\n');
       await step(...add('--description-file', file));
-      expect(printed).toBe('Added F4\n');
+      expect(printed).toBe('Added AB4\n');
       expect(warned).toBe(line());
       stdin = '\n\nFrom stdin.\n\n';
       await step('finding', 'add', '--db', review, '--severity', 'Medium', '--title', 'From stdin', '--description-file', '-');
 
-      expect((await findingOf('F4'))?.description).toBe('  indented first line\nsecond');
-      expect((await findingOf('F5'))?.description).toBe('From stdin.');
-      expect((await findingOf('F5'))?.severity).toBe('🟡');
+      expect((await findingOf('AB4'))?.description).toBe('  indented first line\nsecond');
+      expect((await findingOf('AB5'))?.description).toBe('From stdin.');
+      expect((await findingOf('AB5'))?.severity).toBe('🟡');
     });
 
     it('opens at ⏳ awaiting triage, or at ❓ with --unverified, and passes --note', async () => {
       await step(...add('--description-file', '-'));
       await step(...add('--description-file', '-', '--unverified', '--note', 'seen in a log'));
 
-      expect((await findingOf('F4'))?.state).toBe('⏳');
-      expect(await findingOf('F5')).toMatchObject({
+      expect((await findingOf('AB4'))?.state).toBe('⏳');
+      expect(await findingOf('AB5')).toMatchObject({
         state: '❓',
         updates: [{ kind: 'raised', round: 1, state: '❓', note: 'seen in a log' }],
       });
@@ -1345,11 +1351,11 @@ describe('cli', () => {
       it('names the file as typed, for finding add and for set-description, and changes nothing', async () => {
         await fails(add('--description-file', 'no-such-description.md'), new Error('cannot read no-such-description.md: no such file'));
         await fails(
-          ['finding', 'set-description', 'F3', '--description-file', 'no-such-description.md', '--db', review],
+          ['finding', 'set-description', 'AB3', '--description-file', 'no-such-description.md', '--db', review],
           new Error('cannot read no-such-description.md: no such file'),
         );
         const typed = join(docs, 'nope.md');
-        await fails(['finding', 'set-description', 'F3', '--description-file', typed, '--db', review], new Error(`cannot read ${typed}: no such file`));
+        await fails(['finding', 'set-description', 'AB3', '--description-file', typed, '--db', review], new Error(`cannot read ${typed}: no such file`));
       });
 
       it('says that the file is a directory', async () => {
@@ -1392,7 +1398,7 @@ describe('cli', () => {
       it('still takes UTF-8 text that is not ASCII', async () => {
         const file = await textFile('d.md', '\uFEFFnaïve — 🔴 日本語');
         await step(...add('--description-file', file));
-        expect((await findingOf('F4'))?.description).toBe('naïve — 🔴 日本語');
+        expect((await findingOf('AB4'))?.description).toBe('naïve — 🔴 日本語');
       });
 
       it('exits with 1 and the message on standard error from a real process', async () => {
@@ -1409,7 +1415,7 @@ describe('cli', () => {
   });
 
   describe('finding list and show', () => {
-    const ALL = ['F1  ✅ 🔴  Missing timeout', 'F2  ✅ 🟡  Remark', 'F3  ⏳ ⚪  Waiting'];
+    const ALL = ['AB1  ✅ 🔴  Missing timeout', 'AB2  ✅ 🟡  Remark', 'AB3  ⏳ ⚪  Waiting'];
 
     it('lists the findings and filters by --state, --severity, and --unposted', async () => {
       expect(await step('finding', 'list')).toBe(0);
@@ -1418,8 +1424,8 @@ describe('cli', () => {
       await step('finding', 'list', '--state', 'approved', '--severity', 'medium');
       expect(printed).toBe(`${ALL[1]}\n1 of 3 findings\n`);
 
-      await step('link', 'own', 'F1', 'r1001');
-      await step('link', 'duplicate', 'F2', 'r1002');
+      await step('link', 'own', 'AB1', 'r1001');
+      await step('link', 'duplicate', 'AB2', 'r1002');
       await step('finding', 'list', '--unposted', '--state', 'approved');
       expect(printed).toBe(`${ALL[1]}\n1 of 3 findings\n`);
     });
@@ -1430,78 +1436,78 @@ describe('cli', () => {
     });
 
     it('shows a finding in text, and refuses an unknown finding', async () => {
-      await step('link', 'own', 'F1', 'r1001');
-      await step('link', 'duplicate', 'F1', COMPLEXITY_REF);
+      await step('link', 'own', 'AB1', 'r1001');
+      await step('link', 'duplicate', 'AB1', COMPLEXITY_REF);
 
-      expect(await step('finding', 'show', 'f1')).toBe(0);
-      expect(printed).toContain(`### ✅ 🔴 F1 — Missing timeout\nLinked: own r1001, duplicate ${COMPLEXITY_REF}\n\n`);
+      expect(await step('finding', 'show', 'ab1')).toBe(0);
+      expect(printed).toContain(`### ✅ 🔴 AB1 — Missing timeout\nLinked: own r1001, duplicate ${COMPLEXITY_REF}\n\n`);
       expect(warned).toBe('');
 
-      await expect(step('finding', 'show', 'F9')).rejects.toThrow('unknown finding "F9"; the report has F1, F2, F3');
+      await expect(step('finding', 'show', 'AB9')).rejects.toThrow('unknown finding "AB9"; the report has AB1, AB2, AB3');
     });
   });
 
   describe('finding changes', () => {
     it('moves a finding to another state, with --note, --round, and --revision', async () => {
-      expect(await step('finding', 'set-state', 'f3', 'approved', '--note', 'agreed')).toBe(0);
-      expect(printed).toBe('F3: ⏳ → ✅\n');
+      expect(await step('finding', 'set-state', 'ab3', 'approved', '--note', 'agreed')).toBe(0);
+      expect(printed).toBe('AB3: ⏳ → ✅\n');
       expect(warned).toBe(line());
 
-      await step('finding', 'set-state', 'F3', 'discarded', '--round', '1');
-      expect(printed).toBe('F3: ✅ → ❌\n');
+      await step('finding', 'set-state', 'AB3', 'discarded', '--round', '1');
+      expect(printed).toBe('AB3: ✅ → ❌\n');
       expect(revisions).toEqual([]);
-      expect((await findingOf('F3'))?.updates.slice(1)).toMatchObject([
+      expect((await findingOf('AB3'))?.updates.slice(1)).toMatchObject([
         { kind: 'state', from: '⏳', to: '✅', note: 'agreed' },
         { kind: 'state', round: 1, from: '✅', to: '❌' },
       ]);
 
-      await step('finding', 'set-state', 'F1', 'fixed', '--revision', 'abc1234');
-      expect(printed).toBe('F1: ✅ → 🔧\n');
+      await step('finding', 'set-state', 'AB1', 'fixed', '--revision', 'abc1234');
+      expect(printed).toBe('AB1: ✅ → 🔧\n');
       expect(revisions).toEqual(['abc1234']);
-      expect((await findingOf('F1'))?.updates.at(-1)).toMatchObject({ kind: 'state', from: '✅', to: '🔧', revision: 'abc12345' });
+      expect((await findingOf('AB1'))?.updates.at(-1)).toMatchObject({ kind: 'state', from: '✅', to: '🔧', revision: 'abc12345' });
     });
 
     it('changes the severity, the title, the description, and adds an update', async () => {
-      await step('finding', 'set-severity', 'F1', 'medium');
-      expect(printed).toBe('F1: 🔴 → 🟡\n');
-      await step('finding', 'set-title', 'F1', 'Missing retry timeout', '--note', 'clearer');
-      expect(printed).toBe('F1: retitled\n');
+      await step('finding', 'set-severity', 'AB1', 'medium');
+      expect(printed).toBe('AB1: 🔴 → 🟡\n');
+      await step('finding', 'set-title', 'AB1', 'Missing retry timeout', '--note', 'clearer');
+      expect(printed).toBe('AB1: retitled\n');
       stdin = 'The retry loop never gives up.\n\n`src/a.ts:3-5`\n\nMore detail.\n';
-      await step('finding', 'set-description', 'F1', '--description-file', '-', '--round', '1');
-      expect(printed).toBe('F1: description replaced\n');
-      expect(await step('finding', 'update', 'F1', 'Asked the author', '--round', '1')).toBe(0);
-      expect(printed).toBe('F1: note added\n');
+      await step('finding', 'set-description', 'AB1', '--description-file', '-', '--round', '1');
+      expect(printed).toBe('AB1: description replaced\n');
+      expect(await step('finding', 'update', 'AB1', 'Asked the author', '--round', '1')).toBe(0);
+      expect(printed).toBe('AB1: note added\n');
 
-      expect(await findingOf('F1')).toMatchObject({
+      expect(await findingOf('AB1')).toMatchObject({
         severity: '🟡',
         title: 'Missing retry timeout',
         description: 'The retry loop never gives up.\n\n`src/a.ts:3-5`\n\nMore detail.',
       });
-      expect((await findingOf('F1'))?.updates.at(-1)).toMatchObject({ kind: 'note', round: 1, note: 'Asked the author' });
+      expect((await findingOf('AB1'))?.updates.at(-1)).toMatchObject({ kind: 'note', round: 1, note: 'Asked the author' });
     });
 
     it('refuses invalid CLI inputs or unknown findings, and leaves the database as it was', async () => {
-      await fails(['finding', 'set-state', 'F9', 'approved', '--db', review], 'unknown finding "F9"');
-      await fails(['finding', 'set-state', 'F3', ' ', '--db', review], 'the state must not be empty');
-      await fails(['finding', 'set-state', 'F2', 'fixed', '--revision', 'nope', '--db', review], 'revision "nope" does not exist in this repository');
-      await fails(['finding', 'set-state', 'F2', 'fixed', '--revision', ' ', '--db', review], '--revision must not be empty');
-      await fails(['finding', 'set-severity', 'F1', 'critical', '--db', review], '"critical" is not a severity; use one of: high, medium, low');
-      await fails(['finding', 'set-title', 'F1', ' ', '--db', review], 'the title must not be empty');
-      await fails(['finding', 'update', 'F1', ' ', '--db', review], 'the text must not be empty');
+      await fails(['finding', 'set-state', 'AB9', 'approved', '--db', review], 'unknown finding "AB9"');
+      await fails(['finding', 'set-state', 'AB3', ' ', '--db', review], 'the state must not be empty');
+      await fails(['finding', 'set-state', 'AB2', 'fixed', '--revision', 'nope', '--db', review], 'revision "nope" does not exist in this repository');
+      await fails(['finding', 'set-state', 'AB2', 'fixed', '--revision', ' ', '--db', review], '--revision must not be empty');
+      await fails(['finding', 'set-severity', 'AB1', 'critical', '--db', review], '"critical" is not a severity; use one of: high, medium, low');
+      await fails(['finding', 'set-title', 'AB1', ' ', '--db', review], 'the title must not be empty');
+      await fails(['finding', 'update', 'AB1', ' ', '--db', review], 'the text must not be empty');
       for (const round of ['0', '-1', '1.5', 'abc', '']) {
-        await fails(['finding', 'update', 'F1', 'x', `--round=${round}`, '--db', review], '--round must be a positive whole number');
+        await fails(['finding', 'update', 'AB1', 'x', `--round=${round}`, '--db', review], '--round must be a positive whole number');
       }
     });
   });
 
   describe('link', () => {
     it('routes link own, duplicate, note, and remove, normalizes upper-case refs, and prints one line each', async () => {
-      expect(await step('link', 'own', 'f3', 'R1001', '--note', 'written by hand')).toBe(0);
-      expect(printed).toBe('F3: own comment r1001 linked\n');
+      expect(await step('link', 'own', 'ab3', 'R1001', '--note', 'written by hand')).toBe(0);
+      expect(printed).toBe('AB3: own comment r1001 linked\n');
       expect(warned).toBe(line());
 
-      expect(await step('link', 'duplicate', 'F1', ELSE_IF_REF.toUpperCase())).toBe(0);
-      expect(printed).toBe(`F1: duplicate ${ELSE_IF_REF} linked\n`);
+      expect(await step('link', 'duplicate', 'AB1', ELSE_IF_REF.toUpperCase())).toBe(0);
+      expect(printed).toBe(`AB1: duplicate ${ELSE_IF_REF} linked\n`);
 
       expect(await step('link', 'note', 'C2001', 'a bot summary')).toBe(0);
       expect(printed).toBe('c2001: noted\n');
@@ -1510,15 +1516,15 @@ describe('cli', () => {
       expect(printed).toBe('c2001 unlinked\n');
 
       expect((await loaded()).links).toEqual([
-        { ref: 'r1001', role: 'own', finding: 'F3', seenDigest: digestBody('Should this be configurable?') },
-        { ref: ELSE_IF_REF, role: 'duplicate', finding: 'F1' },
+        { ref: 'r1001', role: 'own', finding: 'AB3', seenDigest: digestBody('Should this be configurable?') },
+        { ref: ELSE_IF_REF, role: 'duplicate', finding: 'AB1' },
       ]);
     });
 
     it('surfaces link refusals with the database path in hints and leaves the database as it was', async () => {
-      await fails(['link', 'own', 'F1', 'r999', '--db', review], `r999 is not in the database; run "pr-comments pr sync --db ${review}" first, or check the id`);
-      await fails(['link', 'own', 'F9', 'r1001', '--db', review], 'unknown finding "F9"; the report has F1, F2, F3');
-      await fails(['link', 'own', 'F1', 'r1001', '--note', ' ', '--db', review], '--note must not be empty');
+      await fails(['link', 'own', 'AB1', 'r999', '--db', review], `r999 is not in the database; run "pr-comments pr sync --db ${review}" first, or check the id`);
+      await fails(['link', 'own', 'AB9', 'r1001', '--db', review], 'unknown finding "AB9"; the report has AB1, AB2, AB3');
+      await fails(['link', 'own', 'AB1', 'r1001', '--note', ' ', '--db', review], '--note must not be empty');
       await fails(['link', 'remove', 'r1001', '--db', review], 'r1001 is not linked in this review; the review has no links');
     });
   });
@@ -1539,19 +1545,19 @@ describe('cli', () => {
     });
 
     it('lists what is not linked yet, and prints nothing at all when everything is processed, with exit 0', async () => {
-      await step('link', 'own', 'F1', 'r1001');
+      await step('link', 'own', 'AB1', 'r1001');
       await step('link', 'note', 'r1002', 'author ack');
       await step('link', 'note', 'r1003', 'reviewer follow-up');
       await step('link', 'note', 'r1004', 'a bot');
-      await step('link', 'duplicate', 'F1', 'v1');
-      await step('link', 'duplicate', 'F1', COMPLEXITY_REF);
+      await step('link', 'duplicate', 'AB1', 'v1');
+      await step('link', 'duplicate', 'AB1', COMPLEXITY_REF);
 
       expect(await step('link', 'pending')).toBe(0);
       for (const done of ['r1001', 'r1002', 'r1003', 'r1004', 'v1', COMPLEXITY_REF]) expect(printed).not.toContain(done);
       for (const ref of ['c2001', ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) expect(printed, ref).toContain(ref);
 
       await step('link', 'note', 'c2001', 'a thank you');
-      for (const ref of [ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'F2', ref);
+      for (const ref of [ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'AB2', ref);
       expect(await step('link', 'pending')).toBe(0);
       expect(printed).toBe('');
       expect(warned).toBe('');
@@ -1579,8 +1585,8 @@ describe('cli', () => {
         await step('report', 'render');
         expect(printed).toBe(`unchanged ${report()}\n`);
 
-        await step('finding', 'set-state', 'F3', 'approved');
-        expect(await readFile(report(), 'utf8')).toContain('### ✅ ⚪ F3 — Waiting');
+        await step('finding', 'set-state', 'AB3', 'approved');
+        expect(await readFile(report(), 'utf8')).toContain('### ✅ ⚪ AB3 — Waiting');
         await step('report', 'render');
         expect(printed).toBe(`unchanged ${report()}\n`);
       });
@@ -1662,7 +1668,7 @@ describe('cli', () => {
       });
 
       it('surfaces a newly synced reply on an already-linked thread in link pending and report comments --pending with _(context)_ on linked comments', async () => {
-        await step('link', 'duplicate', 'F1', 'r1001');
+        await step('link', 'duplicate', 'AB1', 'r1001');
         await step('link', 'note', 'r1002', 'author ack');
         await step('link', 'note', 'r1003', 'reviewer ack');
         const current = withChecks();
@@ -1744,29 +1750,29 @@ describe('cli', () => {
         expect(printed).toContain('**@carol** requested changes · `v91204`');
         expect(warned).toBe('');
 
-        await expect(step('link', 'own', 'F1', 'v91204', '--db', db)).rejects.toThrow(
+        await expect(step('link', 'own', 'AB1', 'v91204', '--db', db)).rejects.toThrow(
           'pull request review v91204 cannot be the own comment of a finding; link it with "link duplicate" or "link note"',
         );
         await expect(step('link', 'reply', 'v91204', '--db', db)).rejects.toThrow(
           'v91204 is a pull request review, not a comment; only a comment (r… or c…) can be answered',
         );
 
-        await step('link', 'duplicate', 'F1', 'V91204', '--db', db);
-        expect(printed).toBe('F1: duplicate v91204 linked\n');
+        await step('link', 'duplicate', 'AB1', 'V91204', '--db', db);
+        expect(printed).toBe('AB1: duplicate v91204 linked\n');
 
         await step('link', 'pending', '--db', db);
         expect(printed).toBe('');
       });
 
       it('surfaces edited linked comments and review bodies in link pending and report comments --pending, ignores updatedAt-only changes, and clears edits on re-link or remove+link', async () => {
-        await step('link', 'duplicate', 'F1', 'r1001');
+        await step('link', 'duplicate', 'AB1', 'r1001');
         await step('link', 'note', 'r1002', 'author ack');
         await step('link', 'note', 'r1003', 'reviewer ack');
         await step('link', 'note', 'r1004', 'typo');
         await step('link', 'note', 'c2001', 'just thanks');
-        await step('link', 'duplicate', 'F1', 'v1');
+        await step('link', 'duplicate', 'AB1', 'v1');
         for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) {
-          await step('link', 'duplicate', 'F2', ref);
+          await step('link', 'duplicate', 'AB2', ref);
         }
         await step('link', 'pending');
         expect(printed).toBe('');
@@ -1818,15 +1824,15 @@ describe('cli', () => {
         expect(printed).toContain('- **@bob** · `r1001`');
         expect(printed).toContain('  - ↳ **@alice** _(context)_ · `r1002`');
 
-        // Re-confirming r1001 as duplicate of F1 with --note clears r1001 and logs the note without duplicating linked.
-        await step('link', 'duplicate', 'F1', 'r1001', '--note', 'edited to suggest cap of 5');
-        expect((await findingOf('F1'))?.updates.filter((u) => u.kind === 'linked' && u.ref === 'r1001')).toHaveLength(1);
-        expect((await findingOf('F1'))?.updates.at(-1)).toMatchObject({ kind: 'note', note: 'edited to suggest cap of 5' });
+        // Re-confirming r1001 as duplicate of AB1 with --note clears r1001 and logs the note without duplicating linked.
+        await step('link', 'duplicate', 'AB1', 'r1001', '--note', 'edited to suggest cap of 5');
+        expect((await findingOf('AB1'))?.updates.filter((u) => u.kind === 'linked' && u.ref === 'r1001')).toHaveLength(1);
+        expect((await findingOf('AB1'))?.updates.at(-1)).toMatchObject({ kind: 'note', note: 'edited to suggest cap of 5' });
 
         // Changing c2001 from note to duplicate requires link remove + link duplicate.
-        await fails(['link', 'duplicate', 'F2', 'c2001', '--db', review], 'c2001 is already linked as a note (just thanks)');
+        await fails(['link', 'duplicate', 'AB2', 'c2001', '--db', review], 'c2001 is already linked as a note (just thanks)');
         await step('link', 'remove', 'c2001');
-        await step('link', 'duplicate', 'F2', 'c2001');
+        await step('link', 'duplicate', 'AB2', 'c2001');
 
         // Removing the cleared review v1 link leaves link pending empty.
         await step('link', 'remove', 'v1');
@@ -1836,8 +1842,8 @@ describe('cli', () => {
 
       it('does not falsely flag an own comment updated by finding post (with or without --by-agent), while surfacing external edits on pr sync', async () => {
         for (const ref of ['r1002', 'r1003', 'r1004', 'c2001', 'v1']) await step('link', 'note', ref, 'handled');
-        for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'F2', ref);
-        await step('link', 'own', 'F1', 'r1001');
+        for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'AB2', ref);
+        await step('link', 'own', 'AB1', 'r1001');
 
         let publishedBody = '';
         env.publish = async (_ref, comment, options) => {
@@ -1854,7 +1860,7 @@ describe('cli', () => {
         };
 
         // Post without --by-agent: neither before nor after pr sync is r1001 marked edited.
-        expect(await step('finding', 'post', 'F1')).toBe(0);
+        expect(await step('finding', 'post', 'AB1')).toBe(0);
         await step('link', 'pending');
         expect(printed).toBe('');
 
@@ -1869,7 +1875,7 @@ describe('cli', () => {
         expect(printed).toBe('');
 
         // Post with --by-agent: neither before nor after pr sync is r1001 marked edited.
-        expect(await step('finding', 'post', 'F1', '--by-agent')).toBe(0);
+        expect(await step('finding', 'post', 'AB1', '--by-agent')).toBe(0);
         await step('link', 'pending');
         expect(printed).toBe('');
 
@@ -1882,7 +1888,7 @@ describe('cli', () => {
         await step('link', 'pending');
         expect(printed).toBe('');
 
-        // External edit to r1001 in GitHub UI surfaces r1001 as edited on pr sync, and link own F1 r1001 confirms it.
+        // External edit to r1001 in GitHub UI surfaces r1001 as edited on pr sync, and link own AB1 r1001 confirms it.
         snapshot = {
           ...base,
           pullRequest: { ...base.pullRequest, fetchedAt: '2026-01-06T12:25:00Z' },
@@ -1893,7 +1899,7 @@ describe('cli', () => {
         expect(printed).toContain('r1001');
         expect(printed).toContain('edited, thread resolved, 2 replies');
 
-        await step('link', 'own', 'F1', 'r1001', '--note', 'accepted user wording tweak');
+        await step('link', 'own', 'AB1', 'r1001', '--note', 'accepted user wording tweak');
         await step('link', 'pending');
         expect(printed).toBe('');
       });
@@ -1921,8 +1927,8 @@ describe('cli', () => {
   });
 
   describe('finding post', () => {
-    const F1_BODY = [
-      '🔴 **F1 — Missing timeout**',
+    const AB1_BODY = [
+      '🔴 **AB1 — Missing timeout**',
       '',
       'Crash when the list is empty; see the helper.',
       '',
@@ -1932,7 +1938,7 @@ describe('cli', () => {
       '',
       '`src/other.ts:7`',
     ].join('\n');
-    const GENERAL_WARNING = 'Warning: F2 has no path:lines anchor; it becomes a general comment (posting it needs --now)\n';
+    const GENERAL_WARNING = 'Warning: AB2 has no path:lines anchor; it becomes a general comment (posting it needs --now)\n';
     let calls: { ref: unknown; comment: PublishComment; options: PublishOptions }[];
 
     // What GitHub would answer for the one comment: a dry run has no comment for what it would create.
@@ -1966,32 +1972,32 @@ describe('cli', () => {
     it('posts the finding to the pull request of the review and prints the result and the anchors', async () => {
       creates();
 
-      expect(await post('f1')).toBe(0);
+      expect(await post('ab1')).toBe(0);
 
       expect(printed).toBe(`created    pending  r2001  src/app.ts:10-12  ${url('r2001')}\nanchor 1 of 2: src/app.ts:10-12\n  2. src/other.ts:7\nlinks removed: 1\n`);
       expect(warned).toBe(line());
       expect(calls).toHaveLength(1);
       expect(calls[0]!.ref).toEqual(PR_REF);
       expect(calls[0]!.options).toEqual({ byAgent: false, now: false, dryRun: false });
-      expect(calls[0]!.comment).toMatchObject({ path: 'src/app.ts', lines: { start: 10, end: 12 }, body: F1_BODY });
+      expect(calls[0]!.comment).toMatchObject({ path: 'src/app.ts', lines: { start: 10, end: 12 }, body: AB1_BODY });
       expect(downloads).toEqual([]);
     });
 
     it('publishes at once with --now, starts with the agent line with --by-agent, and takes --anchor and --commit', async () => {
       creates();
 
-      expect(await post('F1', '--now', '--by-agent', '--anchor', '2', '--commit', 'abcdef1')).toBe(0);
+      expect(await post('AB1', '--now', '--by-agent', '--anchor', '2', '--commit', 'abcdef1')).toBe(0);
 
       expect(printed).toBe(`created    posted   r2001  src/other.ts:7  ${url('r2001')}\nanchor 2 of 2: src/other.ts:7\n  1. src/app.ts:10-12\nlinks removed: 1\n`);
       expect(calls[0]!.options).toEqual({ byAgent: true, now: true, dryRun: false });
-      expect(calls[0]!.comment).toMatchObject({ path: 'src/other.ts', lines: { start: 7, end: 7 }, commit: 'abcdef1', body: F1_BODY });
+      expect(calls[0]!.comment).toMatchObject({ path: 'src/other.ts', lines: { start: 7, end: 7 }, commit: 'abcdef1', body: AB1_BODY });
     });
 
     it('with --dry-run prints what would happen and the exact text, writes nothing, downloads nothing and names no database', async () => {
       creates();
       const before = await bytes();
 
-      expect(await post('F1', '--dry-run', '--by-agent')).toBe(0);
+      expect(await post('AB1', '--dry-run', '--by-agent')).toBe(0);
 
       const label = 'would create'.padEnd('would leave unchanged'.length);
       expect(printed).toBe(
@@ -2001,7 +2007,7 @@ describe('cli', () => {
           '  2. src/other.ts:7',
           'links removed: 1',
           '----- comment text -----',
-          `${AGENT_DISCLAIMER}\n\n${F1_BODY}`,
+          `${AGENT_DISCLAIMER}\n\n${AB1_BODY}`,
           '-----',
           '',
         ].join('\n'),
@@ -2014,14 +2020,14 @@ describe('cli', () => {
 
     it('prints unchanged and updated outcomes when run again', async () => {
       creates();
-      await post('F1');
+      await post('AB1');
 
       engine((comment, options) => answer(comment, options, 'unchanged', 'r2001'));
-      expect(await post('F1')).toBe(0);
+      expect(await post('AB1')).toBe(0);
       expect(printed.startsWith(`unchanged  pending  r2001  src/app.ts:10-12  ${url('r2001')}\n`)).toBe(true);
 
       engine((comment, options) => answer(comment, options, 'updated', 'r2001'));
-      expect(await post('F1')).toBe(0);
+      expect(await post('AB1')).toBe(0);
       expect(printed.startsWith(`updated    pending  r2001  src/app.ts:10-12  ${url('r2001')}\n`)).toBe(true);
     });
 
@@ -2029,7 +2035,7 @@ describe('cli', () => {
       engine((_comment, options) => ({ action: 'error', dryRun: options.dryRun, message: 'rejected by GitHub' }));
       const before = await bytes();
 
-      expect(await post('F1')).toBe(1);
+      expect(await post('AB1')).toBe(1);
 
       expect(printed).toBe(
         `${'error'.padEnd(9)}  ${''.padEnd('pending'.length)}  -  rejected by GitHub\nanchor 1 of 2: src/app.ts:10-12\n  2. src/other.ts:7\nlinks removed: 1\n`,
@@ -2042,7 +2048,7 @@ describe('cli', () => {
     it('prints a finding with no anchor as a general comment, and the warnings on stderr', async () => {
       creates('c2002');
 
-      expect(await post('F2', '--now')).toBe(0);
+      expect(await post('AB2', '--now')).toBe(0);
 
       expect(printed).toBe(`created    posted   c2002  (general)  ${url('c2002')}\nno anchor: general comment\n`);
       expect(warned).toBe(`${GENERAL_WARNING}${line()}`);
@@ -2051,9 +2057,9 @@ describe('cli', () => {
     it('refuses a bad --anchor or an unknown finding before it publishes anything', async () => {
       creates();
 
-      await fails(['finding', 'post', 'F9', '--db', review], 'unknown finding "F9"; the report has F1, F2, F3');
+      await fails(['finding', 'post', 'AB9', '--db', review], 'unknown finding "AB9"; the report has AB1, AB2, AB3');
       for (const value of ['0', '-1', '1.5', 'abc', '', '+1']) {
-        await fails(['finding', 'post', 'F1', `--anchor=${value}`, '--db', review], new Error('--anchor must be a positive whole number'));
+        await fails(['finding', 'post', 'AB1', `--anchor=${value}`, '--db', review], new Error('--anchor must be a positive whole number'));
       }
       expect(calls).toEqual([]);
     });
@@ -2104,9 +2110,9 @@ describe('cli', () => {
 
     beforeEach(async () => {
       calls = [];
-      await step('link', 'own', 'F1', 'r1001');
-      await step('link', 'duplicate', 'F1', 'r1004');
-      await step('link', 'duplicate', 'F1', 'c2001');
+      await step('link', 'own', 'AB1', 'r1001');
+      await step('link', 'duplicate', 'AB1', 'r1004');
+      await step('link', 'duplicate', 'AB1', 'c2001');
     });
 
     it('answers the duplicate for the pull request of the review and prints the result and what it answers', async () => {
@@ -2188,7 +2194,7 @@ describe('cli', () => {
 
     it('auto-links the posted reply as a note so link pending stays empty after pr sync', async () => {
       for (const ref of ['r1002', 'r1003', 'v1']) await step('link', 'note', ref, 'handled');
-      for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'F2', ref);
+      for (const ref of [COMPLEXITY_REF, ELSE_IF_REF, COMMENTED_OUT_REF, UNUSED_REF]) await step('link', 'duplicate', 'AB2', ref);
       await step('link', 'pending');
       expect(printed).toBe('');
 

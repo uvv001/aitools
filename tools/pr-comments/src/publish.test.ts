@@ -54,7 +54,7 @@ function commentOf(name: string, extra: Partial<PublishComment> = {}): PublishCo
 const at = (start: number, end = start) => ({ path: 'src/a.ts', lines: { start, end } });
 
 // The comment of the existing comment 4 (r4, or c4 for an issue comment), written at src/a.ts:22.
-const tied = (extra: Partial<PublishComment> = {}) => commentOf('F4', { ...at(22), commentRef: 'r4', ...extra });
+const tied = (extra: Partial<PublishComment> = {}) => commentOf('AB4', { ...at(22), commentRef: 'r4', ...extra });
 
 const pendingReview: Review = {
   id: 'REV_PENDING',
@@ -77,7 +77,7 @@ function pullRequestData(extra: Partial<PullRequestData> = {}): PullRequestData 
   };
 }
 
-// Existing comments are numbered; unless overridden their text is the one of the input F<n>.
+// Existing comments are numbered; unless overridden their text is the one of the input <PREFIX><n>.
 function reviewComment(n: number, overrides: Partial<Comment> = {}): Comment {
   return {
     id: `RC_${n}`,
@@ -87,7 +87,7 @@ function reviewComment(n: number, overrides: Partial<Comment> = {}): Comment {
     reviewId: pendingReview.id,
     replyToId: null,
     author: 'Viewer',
-    body: body(`F${n}`),
+    body: body(`AB${n}`),
     createdAt: '2026-01-02T10:00:00Z',
     updatedAt: '2026-01-02T10:00:00Z',
     editedAt: null,
@@ -226,7 +226,7 @@ async function publish(comment: PublishComment, setup: Setup = {}) {
 
 describe('creating a pending comment', () => {
   it('adds a line comment through the PR when there is no pending review', async () => {
-    const { result, mutations } = await publish(commentOf('F1', at(22)));
+    const { result, mutations } = await publish(commentOf('AB1', at(22)));
 
     expect(result).toEqual({
       action: 'created',
@@ -241,13 +241,13 @@ describe('creating a pending comment', () => {
     expect(mutations).toEqual([
       {
         op: 'addPullRequestReviewThread',
-        input: { pullRequestId: 'PR_1', path: 'src/a.ts', line: 22, side: 'RIGHT', subjectType: 'LINE', body: body('F1') },
+        input: { pullRequestId: 'PR_1', path: 'src/a.ts', line: 22, side: 'RIGHT', subjectType: 'LINE', body: body('AB1') },
       },
     ]);
   });
 
   it('adds a multi-line comment with its start line', async () => {
-    const { result, mutations } = await publish(commentOf('F1', at(21, 28)));
+    const { result, mutations } = await publish(commentOf('AB1', at(21, 28)));
 
     expect(result.lines).toBe('21-28');
     expect(mutations[0]!.input).toEqual({
@@ -258,12 +258,12 @@ describe('creating a pending comment', () => {
       startLine: 21,
       startSide: 'RIGHT',
       subjectType: 'LINE',
-      body: body('F1'),
+      body: body('AB1'),
     });
   });
 
   it('adds a file-level comment', async () => {
-    const { result, mutations } = await publish(commentOf('F1', { path: 'assets/logo.png' }));
+    const { result, mutations } = await publish(commentOf('AB1', { path: 'assets/logo.png' }));
 
     expect(result).toMatchObject({ action: 'created', state: 'pending', path: 'assets/logo.png' });
     expect(result).not.toHaveProperty('lines');
@@ -271,12 +271,12 @@ describe('creating a pending comment', () => {
       pullRequestId: 'PR_1',
       path: 'assets/logo.png',
       subjectType: 'FILE',
-      body: body('F1'),
+      body: body('AB1'),
     });
   });
 
   it("adds to the viewer's existing pending review", async () => {
-    const { mutations } = await publish(commentOf('F1', at(22)), { data: pullRequestData({ reviews: [pendingReview] }) });
+    const { mutations } = await publish(commentOf('AB1', at(22)), { data: pullRequestData({ reviews: [pendingReview] }) });
 
     expect(mutations[0]!.input).toMatchObject({ pullRequestReviewId: 'REV_PENDING' });
     expect(mutations[0]!.input).not.toHaveProperty('pullRequestId');
@@ -284,22 +284,22 @@ describe('creating a pending comment', () => {
 
   it("ignores someone else's pending review", async () => {
     const data = pullRequestData({ reviews: [{ ...pendingReview, author: 'mallory' }] });
-    const { mutations } = await publish(commentOf('F1', at(22)), { data });
+    const { mutations } = await publish(commentOf('AB1', at(22)), { data });
 
     expect(mutations[0]!.input).toMatchObject({ pullRequestId: 'PR_1' });
   });
 
   it('puts the disclaimer in front when byAgent is set', async () => {
-    const { mutations } = await publish(commentOf('F1', at(22)), { options: { byAgent: true } });
+    const { mutations } = await publish(commentOf('AB1', at(22)), { options: { byAgent: true } });
 
     const posted = mutations[0]!.input.body as string;
-    expect(posted).toBe(body('F1', true));
+    expect(posted).toBe(body('AB1', true));
     expect(posted.startsWith(AGENT_DISCLAIMER)).toBe(true);
   });
 
   it('reports a silently rejected thread as an error', async () => {
     const handlers = { addPullRequestReviewThread: () => ({ addPullRequestReviewThread: { thread: null } }) };
-    const { result } = await publish(commentOf('F1', at(22)), { handlers });
+    const { result } = await publish(commentOf('AB1', at(22)), { handlers });
 
     expect(result).toMatchObject({ action: 'error', message: REJECTED, path: 'src/a.ts', lines: '22' });
     expect(result).not.toHaveProperty('url');
@@ -313,7 +313,7 @@ describe('creating a pending comment', () => {
         return answer;
       },
     };
-    const { result } = await publish(commentOf('F1', at(22)), { handlers });
+    const { result } = await publish(commentOf('AB1', at(22)), { handlers });
 
     expect(result).toMatchObject({ action: 'created', url: `${PR_URL}/files`, commentId: 'RC_new1', message: ID_NOT_READ });
     expect(result).not.toHaveProperty('comment');
@@ -351,7 +351,7 @@ describe('validating the anchor against the diff', () => {
   ];
 
   it.each(cases)('rejects %s without writing anything', async (_name, path, lines, message) => {
-    const { result, mutations, restCalls } = await publish(commentOf('F1', { path, lines }));
+    const { result, mutations, restCalls } = await publish(commentOf('AB1', { path, lines }));
 
     expect(result).toMatchObject({ action: 'error', message });
     expect(result).not.toHaveProperty('reason');
@@ -360,7 +360,7 @@ describe('validating the anchor against the diff', () => {
   });
 
   it('accepts a file-level comment on a file that has no diff text', async () => {
-    const { result } = await publish(commentOf('F1', { path: 'assets/logo.png' }));
+    const { result } = await publish(commentOf('AB1', { path: 'assets/logo.png' }));
 
     expect(result.action).toBe('created');
   });
@@ -370,14 +370,14 @@ describe('validating the anchor against the diff', () => {
     [45, 45],
     [60, 60],
   ])('accepts lines %i-%i at the very edges of a hunk', async (start, end) => {
-    const { result } = await publish(commentOf('F1', at(start, end)));
+    const { result } = await publish(commentOf('AB1', at(start, end)));
 
     expect(result.action).toBe('created');
   });
 
   it('lists at most 8 commentable ranges', async () => {
     const patch = Array.from({ length: 10 }, (_, i) => `@@ -1 +${i * 10 + 1},3 @@`).join('\n');
-    const { result } = await publish(commentOf('F1', at(9)), { files: [{ filename: 'src/a.ts', status: 'modified', patch }] });
+    const { result } = await publish(commentOf('AB1', at(9)), { files: [{ filename: 'src/a.ts', status: 'modified', patch }] });
 
     expect(result.message).toContain('commentable ranges: 1-3, 11-13, 21-23, 31-33, 41-43, 51-53, 61-63, 71-73, …');
   });
@@ -386,14 +386,14 @@ describe('validating the anchor against the diff', () => {
     const general = await publish(commentOf('G1'), { options: { now: true } });
     expect(general.fetchFiles).not.toHaveBeenCalled();
 
-    const inline = await publish(commentOf('F1', at(22)));
+    const inline = await publish(commentOf('AB1', at(22)));
     expect(inline.fetchFiles).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('pinning a comment to a commit', () => {
   it('creates the pending review with the thread inline, at the full commit id', async () => {
-    const { result, mutations } = await publish(commentOf('F1', { ...at(35, 38), commit: SHORT }));
+    const { result, mutations } = await publish(commentOf('AB1', { ...at(35, 38), commit: SHORT }));
 
     expect(result).toEqual({
       action: 'created',
@@ -411,7 +411,7 @@ describe('pinning a comment to a commit', () => {
         input: {
           pullRequestId: 'PR_1',
           commitOID: FULL,
-          threads: [{ path: 'src/a.ts', line: 38, side: 'RIGHT', startLine: 35, startSide: 'RIGHT', body: body('F1') }],
+          threads: [{ path: 'src/a.ts', line: 38, side: 'RIGHT', startLine: 35, startSide: 'RIGHT', body: body('AB1') }],
         },
       },
     ]);
@@ -425,14 +425,14 @@ describe('pinning a comment to a commit', () => {
         },
       }),
     };
-    const { result } = await publish(commentOf('F1', { ...at(35), commit: SHORT }), { handlers });
+    const { result } = await publish(commentOf('AB1', { ...at(35), commit: SHORT }), { handlers });
 
     expect(result).toMatchObject({ action: 'created', commentId: 'RC_pinned', message: ID_NOT_READ });
     expect(result).not.toHaveProperty('comment');
   });
 
   it('checks the path in the PR but not the head hunks, because the lines belong to the commit', async () => {
-    const { result, fetchFiles } = await publish(commentOf('F1', { ...at(5), commit: SHORT }));
+    const { result, fetchFiles } = await publish(commentOf('AB1', { ...at(5), commit: SHORT }));
 
     expect(result.action).toBe('created');
     expect(fetchFiles).toHaveBeenCalledTimes(1);
@@ -442,7 +442,7 @@ describe('pinning a comment to a commit', () => {
     ['src/other.ts', 'src/other.ts is not changed by this pull request'],
     ['src/old.ts', 'cannot comment on src/old.ts: this pull request removes it'],
   ])('refuses the pinned path %s without writing anything', async (path, message) => {
-    const { result, mutations, restCalls } = await publish(commentOf('F1', { path, lines: { start: 5, end: 5 }, commit: SHORT }));
+    const { result, mutations, restCalls } = await publish(commentOf('AB1', { path, lines: { start: 5, end: 5 }, commit: SHORT }));
 
     expect(result).toMatchObject({ action: 'error', message });
     expect(mutations).toEqual([]);
@@ -451,21 +451,21 @@ describe('pinning a comment to a commit', () => {
 
   it('refuses when a pending review exists', async () => {
     const data = pullRequestData({ reviews: [pendingReview] });
-    const { result, mutations } = await publish(commentOf('F1', { ...at(35), commit: SHORT }), { data });
+    const { result, mutations } = await publish(commentOf('AB1', { ...at(35), commit: SHORT }), { data });
 
     expect(result).toMatchObject({ action: 'error', message: PENDING_BLOCKS_COMMIT });
     expect(mutations).toEqual([]);
   });
 
   it('refuses a file-level comment', async () => {
-    const { result, mutations } = await publish(commentOf('F1', { path: 'src/a.ts', commit: SHORT }));
+    const { result, mutations } = await publish(commentOf('AB1', { path: 'src/a.ts', commit: SHORT }));
 
     expect(result).toMatchObject({ action: 'error', message: 'file-level comments cannot be pinned to a commit' });
     expect(mutations).toEqual([]);
   });
 
   it('treats a commit that is a prefix of the head as no commit, without looking it up', async () => {
-    const { result, mutations, lookups, fetchFiles } = await publish(commentOf('F1', { ...at(22), commit: HEAD.slice(0, 9) }));
+    const { result, mutations, lookups, fetchFiles } = await publish(commentOf('AB1', { ...at(22), commit: HEAD.slice(0, 9) }));
 
     expect(result.action).toBe('created');
     expect(fetchFiles).toHaveBeenCalledTimes(1);
@@ -480,21 +480,21 @@ describe('pinning a comment to a commit', () => {
     ] as const;
 
     it('asks for the abbreviation in the repository of the PR', async () => {
-      const { lookups } = await publish(commentOf('F1', { ...at(35), commit: SHORT }));
+      const { lookups } = await publish(commentOf('AB1', { ...at(35), commit: SHORT }));
 
       expect(lookups).toEqual([{ owner: 'acme', repo: 'widgets', expression: SHORT }]);
     });
 
     it('does not look up a full commit id', async () => {
       const full = 'd'.repeat(40);
-      const { lookups, mutations } = await publish(commentOf('F1', { ...at(35), commit: full }));
+      const { lookups, mutations } = await publish(commentOf('AB1', { ...at(35), commit: full }));
 
       expect(lookups).toEqual([]);
       expect(mutations[0]!.input).toMatchObject({ commitOID: full });
     });
 
     it.each(missing)('reports %s as an error without writing anything', async (_name, answer) => {
-      const { result, mutations, restCalls } = await publish(commentOf('F1', { ...at(35), commit: SHORT }), {
+      const { result, mutations, restCalls } = await publish(commentOf('AB1', { ...at(35), commit: SHORT }), {
         handlers: { repository: () => answer },
       });
 
@@ -514,7 +514,7 @@ describe('pinning a comment to a commit', () => {
       ['a null comment', [null]],
     ])('deletes the review and reports an error for %s', async (_name, nodes) => {
       const handlers = { addPullRequestReview: () => emptyReview(nodes) };
-      const { result, mutations } = await publish(commentOf('F1', { ...at(35), commit: SHORT }), { handlers });
+      const { result, mutations } = await publish(commentOf('AB1', { ...at(35), commit: SHORT }), { handlers });
 
       expect(result).toMatchObject({ action: 'error', message: REJECTED, path: 'src/a.ts', lines: '35' });
       expect(result).not.toHaveProperty('url');
@@ -532,7 +532,7 @@ describe('pinning a comment to a commit', () => {
           throw fail();
         },
       };
-      const { result } = await publish(commentOf('F1', { ...at(35), commit: SHORT }), { handlers });
+      const { result } = await publish(commentOf('AB1', { ...at(35), commit: SHORT }), { handlers });
 
       expect(result.action).toBe('error');
       expect(result.message).toContain(REJECTED);
@@ -585,14 +585,14 @@ describe('posting immediately with now', () => {
 
   it('refuses an inline comment while a pending review exists', async () => {
     const data = pullRequestData({ reviews: [pendingReview] });
-    const { result, restCalls } = await publish(commentOf('F1', at(22)), { options: now, data });
+    const { result, restCalls } = await publish(commentOf('AB1', at(22)), { options: now, data });
 
     expect(result).toMatchObject({ action: 'error', message: PENDING_BLOCKS_NOW });
     expect(restCalls).toEqual([]);
   });
 
   it('posts a line comment through REST at the head commit', async () => {
-    const { result, mutations, restCalls } = await publish(commentOf('F1', at(22)), { options: now });
+    const { result, mutations, restCalls } = await publish(commentOf('AB1', at(22)), { options: now });
 
     expect(result).toEqual({
       action: 'created',
@@ -609,24 +609,24 @@ describe('posting immediately with now', () => {
       {
         method: 'POST',
         path: '/repos/acme/widgets/pulls/5/comments',
-        body: { body: body('F1'), commit_id: HEAD, path: 'src/a.ts', line: 22, side: 'RIGHT' },
+        body: { body: body('AB1'), commit_id: HEAD, path: 'src/a.ts', line: 22, side: 'RIGHT' },
       },
     ]);
     expect(restCalls[0]!.body).not.toHaveProperty('subject_type');
   });
 
   it('leaves the ref of a REST comment out when its html_url has no recognisable anchor', async () => {
-    const { result } = await publish(commentOf('F1', at(22)), { options: now, restUrl: `${PR_URL}/files` });
+    const { result } = await publish(commentOf('AB1', at(22)), { options: now, restUrl: `${PR_URL}/files` });
 
     expect(result).toMatchObject({ action: 'created', commentId: 'PRRC_77', message: ID_NOT_READ });
     expect(result).not.toHaveProperty('comment');
   });
 
   it('posts a multi-line comment with start_line', async () => {
-    const { restCalls } = await publish(commentOf('F1', at(25, 30)), { options: now });
+    const { restCalls } = await publish(commentOf('AB1', at(25, 30)), { options: now });
 
     expect(restCalls[0]!.body).toEqual({
-      body: body('F1'),
+      body: body('AB1'),
       commit_id: HEAD,
       path: 'src/a.ts',
       line: 30,
@@ -637,10 +637,10 @@ describe('posting immediately with now', () => {
   });
 
   it('posts a file-level comment with subject_type and no line', async () => {
-    const { restCalls } = await publish(commentOf('F1', { path: 'assets/logo.png' }), { options: now });
+    const { restCalls } = await publish(commentOf('AB1', { path: 'assets/logo.png' }), { options: now });
 
     expect(restCalls[0]!.body).toEqual({
-      body: body('F1'),
+      body: body('AB1'),
       commit_id: HEAD,
       path: 'assets/logo.png',
       subject_type: 'file',
@@ -648,14 +648,14 @@ describe('posting immediately with now', () => {
   });
 
   it('uses the full id of an explicit commit as commit_id, checking the path but not the head hunks', async () => {
-    const { restCalls, fetchFiles } = await publish(commentOf('F1', { ...at(5), commit: SHORT }), { options: now });
+    const { restCalls, fetchFiles } = await publish(commentOf('AB1', { ...at(5), commit: SHORT }), { options: now });
 
     expect(restCalls[0]!.body).toMatchObject({ commit_id: FULL, line: 5 });
     expect(fetchFiles).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a pinned path that is not in the PR without posting', async () => {
-    const pinned = commentOf('F1', { path: 'src/other.ts', lines: { start: 5, end: 5 }, commit: SHORT });
+    const pinned = commentOf('AB1', { path: 'src/other.ts', lines: { start: 5, end: 5 }, commit: SHORT });
     const { result, restCalls } = await publish(pinned, { options: now });
 
     expect(result).toMatchObject({ action: 'error', message: 'src/other.ts is not changed by this pull request' });
@@ -663,7 +663,7 @@ describe('posting immediately with now', () => {
   });
 
   it('still validates the anchor before posting', async () => {
-    const { result, restCalls } = await publish(commentOf('F1', at(40)), { options: now });
+    const { result, restCalls } = await publish(commentOf('AB1', at(40)), { options: now });
 
     expect(result.message).toContain('lines 40 of src/a.ts are not inside the pull request diff');
     expect(restCalls).toEqual([]);
@@ -693,21 +693,21 @@ describe('comments that already exist', () => {
 
     expect(result).toMatchObject({ action: 'updated', comment: 'r4', state: 'pending', commentId: 'RC_4' });
     expect(mutations).toEqual([
-      { op: 'updatePullRequestReviewComment', input: { pullRequestReviewCommentId: 'RC_4', body: body('F4') } },
+      { op: 'updatePullRequestReviewComment', input: { pullRequestReviewCommentId: 'RC_4', body: body('AB4') } },
     ]);
   });
 
   it('updates an issue comment', async () => {
     const data = pullRequestData({ comments: [issueComment(4, { body: 'old text' })] });
-    const { result, mutations } = await publish(commentOf('F4', { commentRef: 'c4' }), { data });
+    const { result, mutations } = await publish(commentOf('AB4', { commentRef: 'c4' }), { data });
 
     expect(result).toMatchObject({ action: 'updated', comment: 'c4', state: 'posted', commentId: 'IC_4' });
-    expect(mutations).toEqual([{ op: 'updateIssueComment', input: { id: 'IC_4', body: body('F4') } }]);
+    expect(mutations).toEqual([{ op: 'updateIssueComment', input: { id: 'IC_4', body: body('AB4') } }]);
   });
 
   it('leaves an identical issue comment alone', async () => {
     const data = pullRequestData({ comments: [issueComment(4)] });
-    const { result, mutations } = await publish(commentOf('F4', { commentRef: 'c4' }), { data });
+    const { result, mutations } = await publish(commentOf('AB4', { commentRef: 'c4' }), { data });
 
     expect(result).toMatchObject({ action: 'unchanged', comment: 'c4' });
     expect(mutations).toEqual([]);
@@ -717,7 +717,7 @@ describe('comments that already exist', () => {
     const { result, mutations } = await publish(tied(), { data: withExisting(4), options: { byAgent: true } });
 
     expect(result.action).toBe('updated');
-    expect(mutations[0]!.input.body).toBe(body('F4', true));
+    expect(mutations[0]!.input.body).toBe(body('AB4', true));
   });
 
   it('compares the texts without line-ending and surrounding whitespace differences', async () => {
@@ -834,7 +834,7 @@ describe('a comment ref the comment names', () => {
 
 describe('adopting an identical comment', () => {
   it('ties a comment without a ref to the identical comment of the viewer, writing nothing', async () => {
-    const { result, mutations, restCalls } = await publish(commentOf('F4', at(22)), { data: withExisting(4) });
+    const { result, mutations, restCalls } = await publish(commentOf('AB4', at(22)), { data: withExisting(4) });
 
     expect(result).toEqual({
       action: 'unchanged',
@@ -853,7 +853,7 @@ describe('adopting an identical comment', () => {
 
   it('adopts a general comment and reports it as posted', async () => {
     const data = pullRequestData({ comments: [issueComment(4)] });
-    const { result, mutations } = await publish(commentOf('F4'), { data });
+    const { result, mutations } = await publish(commentOf('AB4'), { data });
 
     expect(result).toMatchObject({ action: 'unchanged', comment: 'c4', state: 'posted', message: ADOPTED });
     expect(mutations).toEqual([]);
@@ -862,21 +862,21 @@ describe('adopting an identical comment', () => {
   it('adopts a comment of a submitted review as posted', async () => {
     const submitted = { ...pendingReview, id: 'REV_DONE', state: 'COMMENTED' };
     const data = withExisting(4, { comment: { reviewId: 'REV_DONE' }, reviews: [submitted] });
-    const { result } = await publish(commentOf('F4', at(22)), { data });
+    const { result } = await publish(commentOf('AB4', at(22)), { data });
 
     expect(result).toMatchObject({ action: 'unchanged', comment: 'r4', state: 'posted' });
   });
 
   it('adopts despite line-ending and surrounding whitespace differences', async () => {
     const data = withExisting(4, { comment: { body: 'one\r\ntwo\r\n' } });
-    const { result } = await publish(commentOf('F4', { ...at(22), body: 'one\ntwo' }), { data });
+    const { result } = await publish(commentOf('AB4', { ...at(22), body: 'one\ntwo' }), { data });
 
     expect(result).toMatchObject({ action: 'unchanged', comment: 'r4', message: ADOPTED });
   });
 
   it('does not adopt a comment indented with 4 leading spaces on line 1, while adopting one with leading blank lines', async () => {
     const indented = withExisting(4, { comment: { body: '    **Issue**' } });
-    const created = await publish(commentOf('F4', { ...at(22), body: '**Issue**' }), { data: indented });
+    const created = await publish(commentOf('AB4', { ...at(22), body: '**Issue**' }), { data: indented });
 
     expect(created.result).toMatchObject({ action: 'created', comment: 'r501' });
     expect(created.mutations.map((m) => m.op)).toEqual(['addPullRequestReviewThread']);
@@ -884,24 +884,24 @@ describe('adopting an identical comment', () => {
     const withLeadingBlanks = '\n  \n**Issue**\n';
     expect(digestBody(withLeadingBlanks)).toBe(digestBody('**Issue**'));
     const blankPadded = withExisting(4, { comment: { body: withLeadingBlanks } });
-    const adopted = await publish(commentOf('F4', { ...at(22), body: '**Issue**' }), { data: blankPadded });
+    const adopted = await publish(commentOf('AB4', { ...at(22), body: '**Issue**' }), { data: blankPadded });
 
     expect(adopted.result).toMatchObject({ action: 'unchanged', comment: 'r4', message: ADOPTED });
     expect(adopted.mutations).toEqual([]);
   });
 
   it('compares the body with the disclaimer when byAgent is set', async () => {
-    const withDisclaimer = withExisting(4, { comment: { body: body('F4', true) } });
-    const adopted = await publish(commentOf('F4', at(22)), { data: withDisclaimer, options: { byAgent: true } });
+    const withDisclaimer = withExisting(4, { comment: { body: body('AB4', true) } });
+    const adopted = await publish(commentOf('AB4', at(22)), { data: withDisclaimer, options: { byAgent: true } });
     expect(adopted.result).toMatchObject({ action: 'unchanged', comment: 'r4' });
 
-    const plain = await publish(commentOf('F4', at(22)), { data: withDisclaimer });
+    const plain = await publish(commentOf('AB4', at(22)), { data: withDisclaimer });
     expect(plain.result.action).toBe('created');
   });
 
   it('does not adopt a comment with another text', async () => {
     const data = withExisting(4, { comment: { body: 'something else' } });
-    const { result, mutations } = await publish(commentOf('F4', at(22)), { data });
+    const { result, mutations } = await publish(commentOf('AB4', at(22)), { data });
 
     expect(result).toMatchObject({ action: 'created', comment: 'r501' });
     expect(result).not.toHaveProperty('message');
@@ -918,7 +918,7 @@ describe('adopting an identical comment', () => {
   ];
 
   it.each(anchors)('does not adopt an identical comment on %s', async (_name, anchor) => {
-    const { result, mutations } = await publish(commentOf('F4', anchor), {
+    const { result, mutations } = await publish(commentOf('AB4', anchor), {
       data: withExisting(4, { reviews: [] }),
       options: { now: true, dryRun: true },
     });
@@ -929,17 +929,17 @@ describe('adopting an identical comment', () => {
   });
 
   it('does not adopt an identical review comment for a general comment, or the other way round', async () => {
-    const general = await publish(commentOf('F4'), { data: withExisting(4), options: { now: true } });
+    const general = await publish(commentOf('AB4'), { data: withExisting(4), options: { now: true } });
     expect(general.result).toMatchObject({ action: 'created', comment: 'c8' });
 
     const data = pullRequestData({ comments: [issueComment(4)] });
-    const inline = await publish(commentOf('F4', at(22)), { data });
+    const inline = await publish(commentOf('AB4', at(22)), { data });
     expect(inline.result).toMatchObject({ action: 'created', comment: 'r501' });
   });
 
   it("never adopts somebody else's comment", async () => {
     const data = withExisting(4, { comment: { author: 'mallory' } });
-    const { result, mutations } = await publish(commentOf('F4', at(22)), { data });
+    const { result, mutations } = await publish(commentOf('AB4', at(22)), { data });
 
     expect(result).toMatchObject({ action: 'created', comment: 'r501' });
     expect(mutations.map((m) => m.op)).toEqual(['addPullRequestReviewThread']);
@@ -947,7 +947,7 @@ describe('adopting an identical comment', () => {
 
   it('does not adopt a comment whose url carries no ref', async () => {
     const data = withExisting(4, { comment: { url: `${PR_URL}/files` } });
-    const { result } = await publish(commentOf('F4', at(22)), { data });
+    const { result } = await publish(commentOf('AB4', at(22)), { data });
 
     expect(result.action).toBe('created');
   });
@@ -956,22 +956,22 @@ describe('adopting an identical comment', () => {
     const data = pullRequestData({
       reviews: [pendingReview],
       threads: [thread(4), thread(5)],
-      comments: [reviewComment(4), reviewComment(5, { body: body('F4') })],
+      comments: [reviewComment(4), reviewComment(5, { body: body('AB4') })],
     });
-    const { result } = await publish(commentOf('F4', at(22)), { data });
+    const { result } = await publish(commentOf('AB4', at(22)), { data });
 
     expect(result).toMatchObject({ action: 'unchanged', comment: 'r4' });
   });
 
   it('adopts a pending comment even with now, since nothing is written', async () => {
-    const { result, mutations } = await publish(commentOf('F4', at(22)), { data: withExisting(4), options: { now: true } });
+    const { result, mutations } = await publish(commentOf('AB4', at(22)), { data: withExisting(4), options: { now: true } });
 
     expect(result).toMatchObject({ action: 'unchanged', comment: 'r4', state: 'pending', message: ADOPTED });
     expect(mutations).toEqual([]);
   });
 
   it('adopts the same way in a dry run', async () => {
-    const { result } = await publish(commentOf('F4', at(22)), { data: withExisting(4), options: { dryRun: true } });
+    const { result } = await publish(commentOf('AB4', at(22)), { data: withExisting(4), options: { dryRun: true } });
 
     expect(result).toMatchObject({ action: 'unchanged', dryRun: true, comment: 'r4', message: ADOPTED });
   });
@@ -1091,7 +1091,7 @@ describe('dry run', () => {
   const dryRun = { dryRun: true };
 
   it('reports a pending comment without writing or inventing a url or a ref', async () => {
-    const { result, mutations, restCalls } = await publish(commentOf('F1', at(22)), { options: dryRun });
+    const { result, mutations, restCalls } = await publish(commentOf('AB1', at(22)), { options: dryRun });
 
     expect(result).toEqual({ action: 'created', dryRun: true, state: 'pending', path: 'src/a.ts', lines: '22' });
     expect(mutations).toEqual([]);
@@ -1099,8 +1099,8 @@ describe('dry run', () => {
   });
 
   it.each([
-    ['lines outside the diff', commentOf('F1', at(40))],
-    ['a path outside the PR', commentOf('F2', { path: 'nope.ts' })],
+    ['lines outside the diff', commentOf('AB1', at(40))],
+    ['a path outside the PR', commentOf('AB2', { path: 'nope.ts' })],
     ['a general comment without now', commentOf('G1')],
   ])('reports the same error as a real run for %s', async (_name, comment) => {
     const real = await publish(comment);
@@ -1118,7 +1118,7 @@ describe('dry run', () => {
       comments: [reviewComment(4, { body: 'old' }), reviewComment(5)],
     });
     const update = await publish(tied(), { data, options: dryRun });
-    const same = await publish(commentOf('F5', { ...at(22), commentRef: 'r5' }), { data, options: dryRun });
+    const same = await publish(commentOf('AB5', { ...at(22), commentRef: 'r5' }), { data, options: dryRun });
 
     expect([update.result, same.result].map((r) => [r.action, r.dryRun, r.comment, r.url])).toEqual([
       ['updated', true, 'r4', `${PR_URL}#discussion_r4`],
@@ -1129,7 +1129,7 @@ describe('dry run', () => {
   });
 
   it('reports now comments as posted, without a ref, without calling REST or addComment', async () => {
-    for (const comment of [commentOf('F1', at(22)), commentOf('G1')]) {
+    for (const comment of [commentOf('AB1', at(22)), commentOf('G1')]) {
       const { result, mutations, restCalls } = await publish(comment, { options: { dryRun: true, now: true } });
 
       expect([result.action, result.state, result.dryRun, result.comment]).toEqual(['created', 'posted', true, undefined]);
@@ -1139,7 +1139,7 @@ describe('dry run', () => {
   });
 
   it('resolves an abbreviated commit, which is only a read', async () => {
-    const { result, lookups, mutations, restCalls } = await publish(commentOf('F1', { ...at(35), commit: SHORT }), {
+    const { result, lookups, mutations, restCalls } = await publish(commentOf('AB1', { ...at(35), commit: SHORT }), {
       options: { dryRun: true, now: true },
     });
 
@@ -1150,8 +1150,8 @@ describe('dry run', () => {
   });
 
   it.each([
-    ['a path outside the PR', commentOf('F1', { path: 'src/other.ts', lines: { start: 5, end: 5 }, commit: SHORT })],
-    ['an unknown commit', commentOf('F2', { ...at(35), commit: SHORT })],
+    ['a path outside the PR', commentOf('AB1', { path: 'src/other.ts', lines: { start: 5, end: 5 }, commit: SHORT })],
+    ['an unknown commit', commentOf('AB2', { ...at(35), commit: SHORT })],
   ])('reports the same error as a real run for a pinned comment with %s', async (_name, comment) => {
     const handlers = { repository: () => ({ repository: { object: null } }) };
     const real = await publish(comment, { handlers });
@@ -1189,8 +1189,8 @@ const denied = () => {
 };
 
 describe('access errors', () => {
-  const inline = commentOf('F1', at(22));
-  const pinned = commentOf('F1', { ...at(22), commit: SHORT });
+  const inline = commentOf('AB1', at(22));
+  const pinned = commentOf('AB1', { ...at(22), commit: SHORT });
   const stale = withExisting(4, { comment: { body: 'old text' } });
   const staleIssue = pullRequestData({ comments: [issueComment(4, { body: 'old text' })] });
 
@@ -1203,9 +1203,9 @@ describe('access errors', () => {
     ['addPullRequestReviewThread', inline, { handlers: { addPullRequestReviewThread: denied } }],
     ['addPullRequestReview', pinned, { handlers: { addPullRequestReview: denied } }],
     ['the REST POST', inline, { options: { now: true }, refuse: { rest: denied } }],
-    ['addComment', commentOf('F1'), { options: { now: true }, handlers: { addComment: denied } }],
+    ['addComment', commentOf('AB1'), { options: { now: true }, handlers: { addComment: denied } }],
     ['updatePullRequestReviewComment', tied(), { data: stale, handlers: { updatePullRequestReviewComment: denied } }],
-    ['updateIssueComment', commentOf('F4', { commentRef: 'c4' }), { data: staleIssue, handlers: { updateIssueComment: denied } }],
+    ['updateIssueComment', commentOf('AB4', { commentRef: 'c4' }), { data: staleIssue, handlers: { updateIssueComment: denied } }],
   ])('rethrows a refusal of %s', async (_name, comment, setup) => {
     await expect(publish(comment, setup)).rejects.toBeInstanceOf(AccessDeniedError);
   });
@@ -1216,7 +1216,7 @@ describe('access errors', () => {
         throw new Error('GitHub GraphQL errors: Body can\'t be blank');
       },
     };
-    const { result } = await publish(commentOf('F1', at(22)), { handlers });
+    const { result } = await publish(commentOf('AB1', at(22)), { handlers });
 
     expect(result).toMatchObject({ action: 'error', message: "GitHub GraphQL errors: Body can't be blank" });
   });
