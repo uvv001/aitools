@@ -43,7 +43,7 @@ compaction, `/model` change, or `/resume` (or when the user re-invokes
 
 ## 3. Role and model selection
 
-Select an available **role** first, then the **complexity tier** from
+Select an available **role** first, then match **complexity tier and work type** in
 [models.md](models.md):
 
 - **Pinned specialist agents:** For specialist roles configured in `/subagents`,

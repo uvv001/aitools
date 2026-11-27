@@ -22,8 +22,9 @@ alone.
 
 | Tier / Work | Preferred model |
 | --- | --- |
-| **Simple:** mechanical change with an obvious check | `mai-code-2-flash` |
-| **Tier 2:** medium-to-high complexity with a known approach | `mai-code-2` (default for coding). Alternatives: `gpt-6.1-terra` (low-step refactors), `gemini-4-hydrogen` (rapid tool loops). |
+| **Simple:** mechanical code or text change with an obvious check (format conversions, targeted single-line patches) | `mai-code-2-flash` |
+| **Tier 2 (code):** medium-to-high complexity code change with a known approach | `mai-code-2` (default for code). Alternatives: `gpt-6.1-terra` (low-step refactors), `gemini-4-hydrogen` (rapid tool loops). |
+| **Tier 2 (prose & documents):** specifications, reports, reviews, Jira/PR descriptions, skills, and documentation | `gemini-4-hydrogen` (default for prose; reserve `mai-code-2` for code). |
 | **Tier 1 (default):** uncertain approach, interacting constraints, costly failure, or independent review | `gpt-6.2-sol` or `gemini-4-neon` (flat 1M context, no 272K price cliff). |
 | **Tier 1 (heavy escalation):** only when default Tier 1 fails, or for deep security and architecture audits | `claude-opus-5.5` or `gemini-4-carbon`. |
 
@@ -31,5 +32,7 @@ alone.
 
 For `code-review` or Tier 1 review, choose a default Tier 1 model
 (`gpt-6.2-sol` or `gemini-4-neon`) different from the model that authored the
-change. Reserve heavy-escalation models (`claude-opus-5.5`, `gemini-4-carbon`)
-for deep security/architecture audits or when default Tier 1 is insufficient.
+change. When `gemini-4-hydrogen` authors a document, prefer `gpt-6.2-sol` for
+independent review so the reviewer comes from a different model family. Reserve
+heavy-escalation models (`claude-opus-5.5`, `gemini-4-carbon`) for deep
+security/architecture audits or when default Tier 1 is insufficient.
